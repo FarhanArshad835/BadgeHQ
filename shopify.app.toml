@@ -1,0 +1,45 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = ""
+name = "BadgeHQ"
+handle = "badgehq"
+application_url = ""
+embedded = true
+
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = "write_products"
+
+[auth]
+redirect_urls = [
+  "https://example.com/auth/callback",
+  "https://example.com/auth/shopify/callback",
+  "https://example.com/api/auth/callback"
+]
+
+[webhooks]
+api_version = "2025-01"
+
+  [webhooks.privacy_compliance]
+  customer_data_request_url = "https://example.com/webhooks/customers/data_request"
+  customer_deletion_url = "https://example.com/webhooks/customers/redact"
+  shop_deletion_url = "https://example.com/webhooks/shop/redact"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/uninstalled" ]
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/scopes_update" ]
+
+[app_proxy]
+# Uncomment and configure if your app uses an app proxy
+# url = "https://example.com"
+# subpath = "apps"
+# prefix = "apps"
+
+[pos]
+embedded = false
+
+[build]
+automatically_update_urls_on_dev = true
+dev_store_url = ""

@@ -1,0 +1,17 @@
+node_modules
+
+/.cache
+/build
+/dist
+/public/build
+*.tsbuildinfo
+
+/.mf
+.env
+.env.*
+!.env.example
+
+prisma/dev.sqlite
+prisma/dev.sqlite-journal
+
+extensions/*/dist
