@@ -1,0 +1,102 @@
+import type { LoaderFunctionArgs } from "@remix-run/node";
+import { json } from "@remix-run/node";
+import prisma from "../db.server";
+
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  const url = new URL(request.url);
+  const shop = url.searchParams.get("shop");
+
+  if (!shop) {
+    return json({ error: "Missing shop parameter" }, { status: 400 });
+  }
+
+  const appSettings = await prisma.appSettings.findUnique({
+    where: { shop },
+  });
+
+  if (appSettings && !appSettings.isEnabled) {
+    return json({ enabled: false, widgets: {} }, {
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Cache-Control": "public, max-age=60",
+      },
+    });
+  }
+
+  const [trustBadges, productBadges, announcementBars, freeShippingBars, stickyCarts, countdownTimers] =
+    await Promise.all([
+      prisma.trustBadge.findMany({ where: { shop, isActive: true } }),
+      prisma.productBadge.findMany({ where: { shop, isActive: true } }),
+      prisma.announcementBar.findMany({ where: { shop, isActive: true } }),
+      prisma.freeShippingBar.findMany({ where: { shop, isActive: true } }),
+      prisma.stickyCart.findMany({ where: { shop, isActive: true } }),
+      prisma.countdownTimer.findMany({ where: { shop, isActive: true } }),
+    ]);
+
+  const globalSettings = appSettings
+    ? JSON.parse(appSettings.settings)
+    : { fontFamily: "inherit", colorScheme: "light" };
+
+  const widgets = {
+    trustBadges: trustBadges.map((b) => ({
+      id: b.id,
+      title: b.title,
+      badges: JSON.parse(b.badges),
+      settings: JSON.parse(b.settings),
+      position: b.position,
+      pages: JSON.parse(b.pages),
+    })),
+    productBadges: productBadges.map((b) => ({
+      id: b.id,
+      text: b.text,
+      shape: b.shape,
+      badgeColor: b.badgeColor,
+      textColor: b.textColor,
+      position: b.position,
+      targeting: JSON.parse(b.targeting),
+    })),
+    announcementBars: announcementBars.map((b) => ({
+      id: b.id,
+      messages: JSON.parse(b.messages),
+      bgColor: b.bgColor,
+      textColor: b.textColor,
+      showClose: b.showClose,
+      pages: JSON.parse(b.pages),
+      schedule: JSON.parse(b.schedule),
+    })),
+    freeShippingBars: freeShippingBars.map((b) => ({
+      id: b.id,
+      threshold: b.threshold,
+      messages: JSON.parse(b.messages),
+      colors: JSON.parse(b.colors),
+      pages: JSON.parse(b.pages),
+    })),
+    stickyCarts: stickyCarts.map((b) => ({
+      id: b.id,
+      buttonText: b.buttonText,
+      buttonColor: b.buttonColor,
+      bgColor: b.bgColor,
+      showMobile: b.showMobile,
+      showDesktop: b.showDesktop,
+      position: b.position,
+    })),
+    countdownTimers: countdownTimers.map((b) => ({
+      id: b.id,
+      endDate: b.endDate.toISOString(),
+      style: b.style,
+      messages: JSON.parse(b.messages),
+      colors: JSON.parse(b.colors),
+      pages: JSON.parse(b.pages),
+    })),
+  };
+
+  return json(
+    { enabled: true, globalSettings, widgets },
+    {
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Cache-Control": "public, max-age=60",
+      },
+    }
+  );
+};

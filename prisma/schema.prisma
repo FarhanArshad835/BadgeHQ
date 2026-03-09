@@ -8,19 +8,120 @@ datasource db {
 }
 
 model Session {
-  id                    String    @id
-  shop                  String
-  state                 String
-  isOnline              Boolean   @default(false)
-  scope                 String?
-  expires               DateTime?
-  accessToken           String?
-  userId                BigInt?
-  firstName             String?
-  lastName              String?
-  email                 String?
-  accountOwner          Boolean   @default(false)
-  locale                String?
-  collaborator          Boolean?  @default(false)
-  emailVerified         Boolean?  @default(false)
+  id            String    @id
+  shop          String
+  state         String
+  isOnline      Boolean   @default(false)
+  scope         String?
+  expires       DateTime?
+  accessToken   String?
+  userId        BigInt?
+  firstName     String?
+  lastName      String?
+  email         String?
+  accountOwner  Boolean   @default(false)
+  locale        String?
+  collaborator  Boolean?  @default(false)
+  emailVerified Boolean?  @default(false)
+}
+
+model TrustBadge {
+  id        String   @id @default(cuid())
+  shop      String
+  title     String   @default("Trust Badges")
+  badges    String   @default("[]")
+  settings  String   @default("{}")
+  isActive  Boolean  @default(true)
+  position  String   @default("after-add-to-cart")
+  pages     String   @default("[\"product\"]")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([shop])
+}
+
+model ProductBadge {
+  id         String   @id @default(cuid())
+  shop       String
+  text       String   @default("Sale")
+  shape      String   @default("rectangle")
+  badgeColor String   @default("#e74c3c")
+  textColor  String   @default("#ffffff")
+  position   String   @default("top-left")
+  targeting  String   @default("{\"type\":\"all\"}")
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([shop])
+}
+
+model AnnouncementBar {
+  id        String   @id @default(cuid())
+  shop      String
+  messages  String   @default("[{\"text\":\"Welcome to our store!\",\"emoji\":\"\"}]")
+  bgColor   String   @default("#000000")
+  textColor String   @default("#ffffff")
+  isActive  Boolean  @default(true)
+  showClose Boolean  @default(true)
+  pages     String   @default("[\"all\"]")
+  schedule  String   @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([shop])
+}
+
+model FreeShippingBar {
+  id        String   @id @default(cuid())
+  shop      String
+  threshold Float    @default(50.0)
+  messages  String   @default("{\"below\":\"You're {{amount}} away from free shipping!\",\"reached\":\"Congratulations! You've earned free shipping!\"}")
+  colors    String   @default("{\"barBg\":\"#f0f0f0\",\"progressBg\":\"#4caf50\",\"text\":\"#333333\"}")
+  isActive  Boolean  @default(true)
+  pages     String   @default("[\"cart\",\"product\"]")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([shop])
+}
+
+model StickyCart {
+  id          String  @id @default(cuid())
+  shop        String
+  buttonText  String  @default("Add to Cart")
+  buttonColor String  @default("#ffffff")
+  bgColor     String  @default("#000000")
+  showMobile  Boolean @default(true)
+  showDesktop Boolean @default(true)
+  position    String  @default("bottom")
+  isActive    Boolean @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([shop])
+}
+
+model CountdownTimer {
+  id        String   @id @default(cuid())
+  shop      String
+  endDate   DateTime
+  style     String   @default("full")
+  messages  String   @default("{\"above\":\"Hurry! Sale ends in:\",\"below\":\"Don't miss out!\"}")
+  colors    String   @default("{\"bg\":\"#000000\",\"text\":\"#ffffff\",\"accent\":\"#e74c3c\"}")
+  isActive  Boolean  @default(true)
+  pages     String   @default("[\"product\"]")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([shop])
+}
+
+model AppSettings {
+  id        String   @id @default(cuid())
+  shop      String   @unique
+  isEnabled Boolean  @default(true)
+  settings  String   @default("{\"fontFamily\":\"inherit\",\"colorScheme\":\"light\"}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
