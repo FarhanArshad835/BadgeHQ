@@ -21,15 +21,17 @@ redirect_urls = [
 api_version = "2025-01"
 
   [webhooks.privacy_compliance]
-  customer_data_request_url = "https://example.com/webhooks/customers/data_request"
-  customer_deletion_url = "https://example.com/webhooks/customers/redact"
-  shop_deletion_url = "https://example.com/webhooks/shop/redact"
+  customer_data_request_url = "/webhooks/customers/data_request"
+  customer_deletion_url = "/webhooks/customers/redact"
+  shop_deletion_url = "/webhooks/shop/redact"
 
   [[webhooks.subscriptions]]
   topics = [ "app/uninstalled" ]
+  uri = "/webhooks/app/uninstalled"
 
   [[webhooks.subscriptions]]
   topics = [ "app/scopes_update" ]
+  uri = "/webhooks/app/scopes_update"
 
 [app_proxy]
 # Uncomment and configure if your app uses an app proxy
