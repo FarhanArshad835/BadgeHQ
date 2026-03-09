@@ -18,21 +18,18 @@ if (
 const host = new URL(process.env.SHOPIFY_APP_URL || "http://localhost")
   .hostname;
 
-let hmrConfig;
+let hmrConfig: Record<string, unknown> | boolean;
 if (host === "localhost") {
   hmrConfig = {
-    protocol: "ws",
+    protocol: "ws" as const,
     host: "localhost",
     port: 64999,
     clientPort: 64999,
   };
 } else {
-  hmrConfig = {
-    protocol: "wss",
-    host: host,
-    port: parseInt(process.env.SHOPIFY_APP_URL_HMR_PORT || "443"),
-    clientPort: parseInt(process.env.SHOPIFY_APP_URL_HMR_PORT || "443"),
-  };
+  // Disable HMR in non-localhost environments (Codespaces, embedded Shopify iframe)
+  // where WebSocket connections through proxies are unreliable
+  hmrConfig = false;
 }
 
 export default defineConfig({
