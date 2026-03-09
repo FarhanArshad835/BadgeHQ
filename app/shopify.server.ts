@@ -18,11 +18,10 @@ const shopify = shopifyApp({
   authPathPrefix: "/auth",
   sessionStorage: new PrismaSessionStorage(prisma),
   distribution: AppDistribution.AppStore,
-  restResources,
+  restResources: restResources as any,
   future: {
     unstable_newEmbeddedAuthStrategy: true,
-    removeRest: false,
-  },
+  } as any,
   ...(process.env.SHOP_CUSTOM_DOMAIN
     ? { customShopDomains: [process.env.SHOP_CUSTOM_DOMAIN] }
     : {}),
