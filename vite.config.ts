@@ -1,7 +1,7 @@
 import type { UserConfig } from "vite";
 import { defineConfig } from "vite";
-import pkg from "@remix-run/dev";
-const { remix } = pkg;
+import remixDev from "@remix-run/dev";
+const remix = remixDev.vitePlugin;
 import tsconfigPaths from "vite-tsconfig-paths";
 
 // Related: https://github.com/nicedoc/microlink-cards/issues/4#issuecomment-1112203426
