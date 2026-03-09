@@ -1,7 +1,12 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import { json, redirect } from "@remix-run/node";
-import { useActionData, useLoaderData, useNavigate, useSubmit } from "@remix-run/react";
-import { useState, useCallback } from "react";
+import { json } from "@remix-run/node";
+import {
+  useActionData,
+  useLoaderData,
+  useNavigate,
+  useSubmit,
+} from "@remix-run/react";
+import { useState, useCallback, useMemo } from "react";
 import {
   Page,
   Layout,
@@ -10,36 +15,43 @@ import {
   Text,
   TextField,
   Select,
-  ChoiceList,
   Button,
   InlineStack,
   InlineGrid,
   Box,
   Checkbox,
   Banner,
+  Tabs,
+  RangeSlider,
+  ButtonGroup,
+  DropZone,
 } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import {
+  badgeCategories,
+  filterBadges,
+  getBadgesByIds,
+  type BadgeCategory,
+} from "../data/badgeLibrary";
 
-const BADGE_LIBRARY = {
-  payment: [
-    { id: "paypal", label: "PayPal", icon: "PayPal" },
-    { id: "visa", label: "Visa", icon: "Visa" },
-    { id: "mastercard", label: "Mastercard", icon: "Mastercard" },
-    { id: "amex", label: "American Express", icon: "Amex" },
-    { id: "apple-pay", label: "Apple Pay", icon: "Apple Pay" },
-    { id: "google-pay", label: "Google Pay", icon: "Google Pay" },
-    { id: "stripe", label: "Stripe", icon: "Stripe" },
-  ],
-  trust: [
-    { id: "ssl-secure", label: "SSL Secure", icon: "SSL" },
-    { id: "money-back", label: "Money Back Guarantee", icon: "Money Back" },
-    { id: "free-shipping", label: "Free Shipping", icon: "Free Shipping" },
-    { id: "support-24-7", label: "24/7 Support", icon: "24/7 Support" },
-    { id: "easy-returns", label: "Easy Returns", icon: "Easy Returns" },
-  ],
-};
+interface TrustBadgeSettings {
+  showHeader?: boolean;
+  headerText?: string;
+  fontFamily?: string;
+  textColor?: string;
+  fontWeight?: string;
+  fontSize?: number;
+  colorScheme?: "light" | "dark";
+  align?: "left" | "center" | "right";
+  animation?: string;
+  badgeSize?: number;
+  showBorder?: boolean;
+  showSpacing?: boolean;
+  showPadding?: boolean;
+  position?: string;
+}
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -49,10 +61,11 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   if (!badge) throw new Response("Not found", { status: 404 });
   return json({
     badge: {
-      ...badge,
-      badges: JSON.parse(badge.badges) as string[],
-      settings: JSON.parse(badge.settings) as Record<string, unknown>,
-      pages: JSON.parse(badge.pages) as string[],
+      id: badge.id,
+      name: badge.name,
+      isEnabled: badge.isEnabled,
+      badgeIds: JSON.parse(badge.badgeIds) as string[],
+      settings: JSON.parse(badge.settings) as TrustBadgeSettings,
     },
   });
 };
@@ -66,12 +79,10 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     await prisma.trustBadge.updateMany({
       where: { id: params.id, shop: session.shop },
       data: {
-        title: data.title,
-        badges: JSON.stringify(data.badges),
+        name: data.name,
+        isEnabled: data.isEnabled,
+        badgeIds: JSON.stringify(data.badgeIds),
         settings: JSON.stringify(data.settings),
-        isActive: data.isActive,
-        position: data.position,
-        pages: JSON.stringify(data.pages),
       },
     });
     return json({ success: true });
@@ -80,183 +91,409 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   }
 };
 
+const FONT_OPTIONS = [
+  { label: "DM Sans", value: "'DM Sans', sans-serif" },
+  { label: "Inter", value: "'Inter', sans-serif" },
+  { label: "Roboto", value: "'Roboto', sans-serif" },
+  { label: "Open Sans", value: "'Open Sans', sans-serif" },
+  { label: "Lato", value: "'Lato', sans-serif" },
+  { label: "Montserrat", value: "'Montserrat', sans-serif" },
+];
+
+const WEIGHT_OPTIONS = [
+  { label: "Regular (400)", value: "400" },
+  { label: "Medium (500)", value: "500" },
+  { label: "Semi Bold (600)", value: "600" },
+  { label: "Bold (700)", value: "700" },
+];
+
+const ANIMATION_OPTIONS = [
+  { label: "None", value: "none" },
+  { label: "Fade In", value: "fadeIn" },
+  { label: "Slide Up", value: "slideUp" },
+  { label: "Bounce", value: "bounce" },
+];
+
+const POSITION_OPTIONS = [
+  { label: "Below The 'Add To Cart' Button (Product Page)", value: "below-atc" },
+  { label: "Above The 'Add To Cart' Button", value: "above-atc" },
+  { label: "Below Product Description", value: "below-description" },
+  { label: "Cart Page", value: "cart-page" },
+];
+
 export default function EditTrustBadge() {
   const { badge } = useLoaderData<typeof loader>();
   const actionData = useActionData<{ success?: boolean; error?: string }>();
   const navigate = useNavigate();
   const submit = useSubmit();
 
-  const [title, setTitle] = useState(badge.title);
-  const [selectedBadges, setSelectedBadges] = useState<string[]>(badge.badges);
-  const [size, setSize] = useState((badge.settings.size as string) || "medium");
-  const [badgeColor, setBadgeColor] = useState((badge.settings.badgeColor as string) || "#333333");
-  const [bgColor, setBgColor] = useState((badge.settings.bgColor as string) || "#ffffff");
-  const [showTitle, setShowTitle] = useState((badge.settings.showTitle as boolean) ?? true);
-  const [position, setPosition] = useState(badge.position);
-  const [pages, setPages] = useState<string[]>(badge.pages);
-  const [isActive, setIsActive] = useState(badge.isActive);
+  const s = badge.settings;
 
-  const handleSave = () => {
-    const data = {
-      title,
-      badges: selectedBadges,
-      settings: { size, badgeColor, bgColor, showTitle },
-      isActive,
-      position,
-      pages,
-    };
-    submit({ data: JSON.stringify(data) }, { method: "POST" });
-  };
+  // Wizard step
+  const [step, setStep] = useState(1); // Start on settings by default for edit
+
+  // Step 1: Choose badges
+  const [selectedTab, setSelectedTab] = useState(0);
+  const [selectedBadgeIds, setSelectedBadgeIds] = useState<string[]>(badge.badgeIds);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState<BadgeCategory | "all">("all");
+
+  // Step 2: Settings
+  const [name, setName] = useState(badge.name);
+  const [isEnabled, setIsEnabled] = useState(badge.isEnabled);
+  const [showHeader, setShowHeader] = useState(s.showHeader ?? true);
+  const [headerText, setHeaderText] = useState(s.headerText || "Guaranteed Safe Checkout");
+  const [fontFamily, setFontFamily] = useState(s.fontFamily || "'DM Sans', sans-serif");
+  const [textColor, setTextColor] = useState(s.textColor || "#242D35");
+  const [fontWeight, setFontWeight] = useState(s.fontWeight || "600");
+  const [fontSize, setFontSize] = useState(String(s.fontSize ?? 16));
+  const [colorScheme, setColorScheme] = useState<"light" | "dark">(s.colorScheme || "light");
+  const [align, setAlign] = useState<"left" | "center" | "right">(s.align || "center");
+  const [animation, setAnimation] = useState(s.animation || "none");
+  const [badgeSize, setBadgeSize] = useState(s.badgeSize ?? 60);
+  const [badgeSizePreset, setBadgeSizePreset] = useState<"small" | "medium" | "large">(
+    (s.badgeSize ?? 60) <= 45 ? "small" : (s.badgeSize ?? 60) <= 75 ? "medium" : "large"
+  );
+  const [showBorder, setShowBorder] = useState(s.showBorder ?? false);
+  const [showSpacing, setShowSpacing] = useState(s.showSpacing ?? true);
+  const [showPadding, setShowPadding] = useState(s.showPadding ?? true);
+  const [position, setPosition] = useState(s.position || "below-atc");
 
   const toggleBadge = useCallback((badgeId: string) => {
-    setSelectedBadges((prev) =>
+    setSelectedBadgeIds((prev) =>
       prev.includes(badgeId)
         ? prev.filter((id) => id !== badgeId)
         : [...prev, badgeId]
     );
   }, []);
 
-  const allBadges = [...BADGE_LIBRARY.payment, ...BADGE_LIBRARY.trust];
+  const filteredBadges = useMemo(
+    () => filterBadges(categoryFilter, searchQuery),
+    [categoryFilter, searchQuery]
+  );
+
+  const selectedBadgeItems = useMemo(
+    () => getBadgesByIds(selectedBadgeIds),
+    [selectedBadgeIds]
+  );
+
+  const handleSizePreset = useCallback((preset: "small" | "medium" | "large") => {
+    setBadgeSizePreset(preset);
+    setBadgeSize(preset === "small" ? 40 : preset === "medium" ? 60 : 90);
+  }, []);
+
+  const handleSave = () => {
+    const data = {
+      name,
+      isEnabled,
+      badgeIds: selectedBadgeIds,
+      settings: {
+        showHeader,
+        headerText,
+        fontFamily,
+        textColor,
+        fontWeight,
+        fontSize: parseInt(fontSize, 10),
+        colorScheme,
+        align,
+        animation,
+        badgeSize,
+        showBorder,
+        showSpacing,
+        showPadding,
+        position,
+      },
+    };
+    submit({ data: JSON.stringify(data) }, { method: "POST" });
+  };
+
+  const previewBgColor = colorScheme === "dark" ? "#1a1a2e" : "#ffffff";
+  const previewBorderColor = colorScheme === "dark" ? "#333" : "#e5e5e5";
+  const previewTextColor = colorScheme === "dark" ? "#ffffff" : textColor;
+
+  const renderPreview = () => (
+    <Card>
+      <BlockStack gap="300">
+        <Text as="h2" variant="headingMd">Live Preview</Text>
+        <Box padding="400" background="bg-surface" borderWidth="025" borderRadius="200" borderColor="border">
+          <div style={{
+            backgroundColor: previewBgColor,
+            border: `1px solid ${previewBorderColor}`,
+            borderRadius: "8px",
+            padding: showPadding ? "20px" : "8px",
+            textAlign: align,
+          }}>
+            {showHeader && (
+              <p style={{
+                margin: "0 0 12px",
+                fontFamily,
+                fontWeight: parseInt(fontWeight, 10),
+                fontSize: `${fontSize}px`,
+                color: previewTextColor,
+              }}>
+                {headerText}
+              </p>
+            )}
+            <div style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: showSpacing ? "10px" : "4px",
+              justifyContent: align === "left" ? "flex-start" : align === "right" ? "flex-end" : "center",
+            }}>
+              {selectedBadgeItems.length === 0 ? (
+                <Text as="p" variant="bodySm" tone="subdued">No badges selected</Text>
+              ) : (
+                selectedBadgeItems.map((b) => (
+                  <img key={b.id} src={b.imageUrl} alt={b.name} style={{
+                    width: badgeSize,
+                    height: "auto",
+                    border: showBorder ? `1px solid ${colorScheme === "dark" ? "#555" : "#ddd"}` : "none",
+                    borderRadius: "4px",
+                  }} />
+                ))
+              )}
+            </div>
+          </div>
+        </Box>
+      </BlockStack>
+    </Card>
+  );
+
+  const renderStep1 = () => (
+    <Layout>
+      <Layout.Section>
+        <Card>
+          <BlockStack gap="400">
+            <Tabs
+              tabs={[
+                { id: "library", content: "Library" },
+                { id: "upload", content: "Upload" },
+              ]}
+              selected={selectedTab}
+              onSelect={setSelectedTab}
+            />
+            {selectedTab === 0 ? (
+              <BlockStack gap="400">
+                <InlineGrid columns={{ xs: 1, sm: "2fr 1fr" }} gap="300">
+                  <TextField
+                    label="Search badges"
+                    labelHidden
+                    placeholder="Search badges..."
+                    value={searchQuery}
+                    onChange={setSearchQuery}
+                    autoComplete="off"
+                    clearButton
+                    onClearButtonClick={() => setSearchQuery("")}
+                  />
+                  <Select
+                    label="Category"
+                    labelHidden
+                    options={badgeCategories.map((c) => ({ label: c.label, value: c.value }))}
+                    value={categoryFilter}
+                    onChange={(v) => setCategoryFilter(v as BadgeCategory | "all")}
+                  />
+                </InlineGrid>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "12px" }}>
+                  {filteredBadges.map((b) => {
+                    const isSelected = selectedBadgeIds.includes(b.id);
+                    return (
+                      <div key={b.id} onClick={() => toggleBadge(b.id)} style={{
+                        border: isSelected ? "2px solid #2c6ecb" : "2px solid #e5e5e5",
+                        borderRadius: "8px",
+                        padding: "12px",
+                        cursor: "pointer",
+                        textAlign: "center",
+                        backgroundColor: isSelected ? "#f0f6ff" : "#ffffff",
+                        transition: "all 0.15s ease",
+                      }}>
+                        <img src={b.imageUrl} alt={b.name} style={{ width: "80px", height: "auto", marginBottom: "6px" }} />
+                        <div style={{ fontSize: "11px", color: "#666", lineHeight: 1.3 }}>{b.name}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+                {filteredBadges.length === 0 && (
+                  <Box padding="800">
+                    <Text as="p" variant="bodyMd" tone="subdued" alignment="center">
+                      No badges found matching your search.
+                    </Text>
+                  </Box>
+                )}
+              </BlockStack>
+            ) : (
+              <BlockStack gap="400">
+                <DropZone accept="image/*" type="image" onDrop={() => {}} label="Upload custom badge images">
+                  <DropZone.FileUpload actionTitle="Add image" actionHint="or drop files to upload" />
+                </DropZone>
+                <Text as="p" variant="bodySm" tone="subdued">
+                  Accepted formats: SVG, PNG, JPG. Recommended size: 120x40px.
+                </Text>
+              </BlockStack>
+            )}
+          </BlockStack>
+        </Card>
+      </Layout.Section>
+      <Layout.Section variant="oneThird">{renderPreview()}</Layout.Section>
+    </Layout>
+  );
+
+  const renderStep2 = () => (
+    <Layout>
+      <Layout.Section>
+        <BlockStack gap="400">
+          <Card>
+            <BlockStack gap="400">
+              <Text as="h2" variant="headingMd">General</Text>
+              <TextField label="Trust Badge Name" value={name} onChange={setName} autoComplete="off" />
+              <Checkbox label="Enabled" checked={isEnabled} onChange={setIsEnabled} />
+            </BlockStack>
+          </Card>
+
+          <Card>
+            <BlockStack gap="400">
+              <Text as="h2" variant="headingMd">Header</Text>
+              <Checkbox label="Show Header" checked={showHeader} onChange={setShowHeader} />
+              {showHeader && (
+                <>
+                  <TextField label="Header Text" value={headerText} onChange={setHeaderText} autoComplete="off" />
+                  <InlineGrid columns={2} gap="400">
+                    <Select label="Font Family" options={FONT_OPTIONS} value={fontFamily} onChange={setFontFamily} />
+                    <Select label="Font Weight" options={WEIGHT_OPTIONS} value={fontWeight} onChange={setFontWeight} />
+                  </InlineGrid>
+                  <InlineGrid columns={2} gap="400">
+                    <TextField label="Text Color" value={textColor} onChange={setTextColor} autoComplete="off"
+                      prefix={<div style={{ width: 20, height: 20, backgroundColor: textColor, borderRadius: 4, border: "1px solid #ccc" }} />} />
+                    <TextField label="Font Size" type="number" value={fontSize} onChange={setFontSize} autoComplete="off" suffix="px" min={10} max={32} />
+                  </InlineGrid>
+                </>
+              )}
+            </BlockStack>
+          </Card>
+
+          <Card>
+            <BlockStack gap="400">
+              <Text as="h2" variant="headingMd">Appearance</Text>
+              <Text as="p" variant="bodyMd">Color Scheme</Text>
+              <InlineStack gap="300">
+                <div onClick={() => setColorScheme("light")} style={{
+                  width: 80, height: 50, backgroundColor: "#ffffff",
+                  border: colorScheme === "light" ? "3px solid #2c6ecb" : "2px solid #ddd",
+                  borderRadius: 8, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 4,
+                }}>
+                  <div style={{ width: 16, height: 12, backgroundColor: "#1a1f71", borderRadius: 2 }} />
+                  <div style={{ width: 16, height: 12, backgroundColor: "#eb001b", borderRadius: 2 }} />
+                  <div style={{ width: 16, height: 12, backgroundColor: "#003087", borderRadius: 2 }} />
+                </div>
+                <div onClick={() => setColorScheme("dark")} style={{
+                  width: 80, height: 50, backgroundColor: "#1a1a2e",
+                  border: colorScheme === "dark" ? "3px solid #2c6ecb" : "2px solid #555",
+                  borderRadius: 8, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 4,
+                }}>
+                  <div style={{ width: 16, height: 12, backgroundColor: "#4a5078", borderRadius: 2 }} />
+                  <div style={{ width: 16, height: 12, backgroundColor: "#6a4050", borderRadius: 2 }} />
+                  <div style={{ width: 16, height: 12, backgroundColor: "#304070", borderRadius: 2 }} />
+                </div>
+              </InlineStack>
+
+              <Text as="p" variant="bodyMd">Alignment</Text>
+              <ButtonGroup>
+                <Button pressed={align === "left"} onClick={() => setAlign("left")} size="slim">Left</Button>
+                <Button pressed={align === "center"} onClick={() => setAlign("center")} size="slim">Center</Button>
+                <Button pressed={align === "right"} onClick={() => setAlign("right")} size="slim">Right</Button>
+              </ButtonGroup>
+
+              <Select label="Animation" options={ANIMATION_OPTIONS} value={animation} onChange={setAnimation} />
+            </BlockStack>
+          </Card>
+
+          <Card>
+            <BlockStack gap="400">
+              <Text as="h2" variant="headingMd">Badge Size</Text>
+              <ButtonGroup>
+                <Button pressed={badgeSizePreset === "small"} onClick={() => handleSizePreset("small")} size="slim">Small</Button>
+                <Button pressed={badgeSizePreset === "medium"} onClick={() => handleSizePreset("medium")} size="slim">Medium</Button>
+                <Button pressed={badgeSizePreset === "large"} onClick={() => handleSizePreset("large")} size="slim">Large</Button>
+              </ButtonGroup>
+              <RangeSlider
+                label={`Custom size: ${badgeSize}px`}
+                value={badgeSize}
+                min={20}
+                max={120}
+                onChange={(v) => {
+                  setBadgeSize(v as number);
+                  setBadgeSizePreset((v as number) <= 45 ? "small" : (v as number) <= 75 ? "medium" : "large");
+                }}
+                output
+              />
+            </BlockStack>
+          </Card>
+
+          <Card>
+            <BlockStack gap="400">
+              <Text as="h2" variant="headingMd">Options</Text>
+              <Checkbox label="Badges Border" helpText="Add a subtle border around each badge" checked={showBorder} onChange={setShowBorder} />
+              <Checkbox label="Badges Spacing" helpText="Add spacing between badges" checked={showSpacing} onChange={setShowSpacing} />
+              <Checkbox label="Box Padding" helpText="Add padding around the badge container" checked={showPadding} onChange={setShowPadding} />
+            </BlockStack>
+          </Card>
+
+          <Card>
+            <BlockStack gap="400">
+              <Text as="h2" variant="headingMd">Placement</Text>
+              <Select label="Badge Position" options={POSITION_OPTIONS} value={position} onChange={setPosition} />
+            </BlockStack>
+          </Card>
+        </BlockStack>
+      </Layout.Section>
+      <Layout.Section variant="oneThird">{renderPreview()}</Layout.Section>
+    </Layout>
+  );
 
   return (
     <Page>
-      <TitleBar title="Edit Trust Badge">
-        <button onClick={() => navigate("/app/trust-badge")}>Back</button>
-        <button variant="primary" onClick={handleSave}>Save</button>
+      <TitleBar title={step === 0 ? "Edit Badges" : "Edit Settings"}>
+        <button onClick={() => navigate("/app/trust-badge")}>Cancel</button>
+        {step === 0 ? (
+          <button variant="primary" onClick={() => setStep(1)}>Next</button>
+        ) : (
+          <>
+            <button onClick={() => setStep(0)}>Edit Badges</button>
+            <button variant="primary" onClick={handleSave}>Save</button>
+          </>
+        )}
       </TitleBar>
-      <Layout>
-        <Layout.Section>
-          <BlockStack gap="400">
-            {actionData?.success && (
-              <Banner tone="success">Trust badge saved successfully.</Banner>
-            )}
-            {actionData?.error && (
-              <Banner tone="critical">{actionData.error}</Banner>
-            )}
+      <BlockStack gap="400">
+        {actionData?.success && <Banner tone="success">Trust badge saved successfully.</Banner>}
+        {actionData?.error && <Banner tone="critical">{actionData.error}</Banner>}
 
-            <Card>
-              <BlockStack gap="400">
-                <Text as="h2" variant="headingMd">General</Text>
-                <TextField label="Widget Title" value={title} onChange={setTitle} autoComplete="off" />
-                <Checkbox label="Show title on storefront" checked={showTitle} onChange={setShowTitle} />
-                <Checkbox label="Active" checked={isActive} onChange={setIsActive} />
-              </BlockStack>
-            </Card>
+        <Card>
+          <InlineStack gap="400" align="center">
+            <div style={{ display: "flex", alignItems: "center", gap: 8, opacity: step === 0 ? 1 : 0.5 }}>
+              <div style={{
+                width: 28, height: 28, borderRadius: "50%",
+                backgroundColor: step === 0 ? "#2c6ecb" : "#e5e5e5",
+                color: step === 0 ? "#fff" : "#666",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 13, fontWeight: 600,
+              }}>1</div>
+              <Text as="span" variant="bodyMd" fontWeight={step === 0 ? "bold" : "regular"}>Choose Badges</Text>
+            </div>
+            <div style={{ width: 40, height: 2, backgroundColor: "#e5e5e5" }} />
+            <div style={{ display: "flex", alignItems: "center", gap: 8, opacity: step === 1 ? 1 : 0.5 }}>
+              <div style={{
+                width: 28, height: 28, borderRadius: "50%",
+                backgroundColor: step === 1 ? "#2c6ecb" : "#e5e5e5",
+                color: step === 1 ? "#fff" : "#666",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 13, fontWeight: 600,
+              }}>2</div>
+              <Text as="span" variant="bodyMd" fontWeight={step === 1 ? "bold" : "regular"}>Settings</Text>
+            </div>
+          </InlineStack>
+        </Card>
 
-            <Card>
-              <BlockStack gap="400">
-                <Text as="h2" variant="headingMd">Badge Library</Text>
-                <Text as="p" variant="bodyMd" tone="subdued">Payment Icons</Text>
-                <InlineStack gap="200" wrap>
-                  {BADGE_LIBRARY.payment.map((b) => (
-                    <Button key={b.id} pressed={selectedBadges.includes(b.id)} onClick={() => toggleBadge(b.id)} size="slim">
-                      {b.label}
-                    </Button>
-                  ))}
-                </InlineStack>
-                <Text as="p" variant="bodyMd" tone="subdued">Trust Icons</Text>
-                <InlineStack gap="200" wrap>
-                  {BADGE_LIBRARY.trust.map((b) => (
-                    <Button key={b.id} pressed={selectedBadges.includes(b.id)} onClick={() => toggleBadge(b.id)} size="slim">
-                      {b.label}
-                    </Button>
-                  ))}
-                </InlineStack>
-              </BlockStack>
-            </Card>
-
-            <Card>
-              <BlockStack gap="400">
-                <Text as="h2" variant="headingMd">Appearance</Text>
-                <Select
-                  label="Badge Size"
-                  options={[
-                    { label: "Small", value: "small" },
-                    { label: "Medium", value: "medium" },
-                    { label: "Large", value: "large" },
-                  ]}
-                  value={size}
-                  onChange={setSize}
-                />
-                <InlineGrid columns={2} gap="400">
-                  <TextField
-                    label="Badge Color"
-                    value={badgeColor}
-                    onChange={setBadgeColor}
-                    autoComplete="off"
-                    prefix={<div style={{ width: 20, height: 20, backgroundColor: badgeColor, borderRadius: 4, border: "1px solid #ccc" }} />}
-                  />
-                  <TextField
-                    label="Background Color"
-                    value={bgColor}
-                    onChange={setBgColor}
-                    autoComplete="off"
-                    prefix={<div style={{ width: 20, height: 20, backgroundColor: bgColor, borderRadius: 4, border: "1px solid #ccc" }} />}
-                  />
-                </InlineGrid>
-              </BlockStack>
-            </Card>
-
-            <Card>
-              <BlockStack gap="400">
-                <Text as="h2" variant="headingMd">Placement</Text>
-                <Select
-                  label="Position"
-                  options={[
-                    { label: "Before Add to Cart", value: "before-add-to-cart" },
-                    { label: "After Add to Cart", value: "after-add-to-cart" },
-                  ]}
-                  value={position}
-                  onChange={setPosition}
-                />
-                <ChoiceList
-                  title="Show on pages"
-                  allowMultiple
-                  choices={[
-                    { label: "Product Page", value: "product" },
-                    { label: "Cart Page", value: "cart" },
-                    { label: "Checkout", value: "checkout" },
-                  ]}
-                  selected={pages}
-                  onChange={setPages}
-                />
-              </BlockStack>
-            </Card>
-          </BlockStack>
-        </Layout.Section>
-
-        <Layout.Section variant="oneThird">
-          <Card>
-            <BlockStack gap="300">
-              <Text as="h2" variant="headingMd">Preview</Text>
-              <Box padding="400" background="bg-surface" borderWidth="025" borderRadius="200" borderColor="border">
-                <div style={{ backgroundColor: bgColor, padding: "16px", borderRadius: "8px", textAlign: "center" }}>
-                  {showTitle && (
-                    <p style={{ margin: "0 0 12px", fontWeight: 600, fontSize: size === "small" ? "12px" : size === "medium" ? "14px" : "16px" }}>{title}</p>
-                  )}
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", justifyContent: "center" }}>
-                    {selectedBadges.map((badgeId) => {
-                      const b = allBadges.find((x) => x.id === badgeId);
-                      if (!b) return null;
-                      const iconSize = size === "small" ? 32 : size === "medium" ? 44 : 56;
-                      return (
-                        <div key={badgeId} style={{
-                          width: iconSize, height: iconSize, display: "flex", alignItems: "center", justifyContent: "center",
-                          backgroundColor: badgeColor, color: "#fff", borderRadius: "6px",
-                          fontSize: size === "small" ? "8px" : size === "medium" ? "10px" : "12px",
-                          fontWeight: 600, textAlign: "center", lineHeight: 1.2, padding: "2px",
-                        }}>
-                          {b.icon}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </Box>
-            </BlockStack>
-          </Card>
-        </Layout.Section>
-      </Layout>
+        {step === 0 ? renderStep1() : renderStep2()}
+      </BlockStack>
     </Page>
   );
 }

@@ -28,12 +28,10 @@ model Session {
 model TrustBadge {
   id        String   @id @default(cuid())
   shop      String
-  title     String   @default("Trust Badges")
-  badges    String   @default("[]")
+  name      String   @default("Trust Badge")
+  isEnabled Boolean  @default(true)
+  badgeIds  String   @default("[]")
   settings  String   @default("{}")
-  isActive  Boolean  @default(true)
-  position  String   @default("after-add-to-cart")
-  pages     String   @default("[\"product\"]")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

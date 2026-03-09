@@ -135,84 +135,210 @@
   }
 
   /* ===================== TRUST BADGES ===================== */
+  // Inject CSS animations once
+  (function injectAnimationCSS() {
+    if (document.getElementById("badgehq-animations")) return;
+    var style = document.createElement("style");
+    style.id = "badgehq-animations";
+    style.textContent =
+      "@keyframes badgehq-fadeIn{from{opacity:0}to{opacity:1}}" +
+      "@keyframes badgehq-slideUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}" +
+      "@keyframes badgehq-bounce{0%,20%,50%,80%,100%{transform:translateY(0)}40%{transform:translateY(-12px)}60%{transform:translateY(-6px)}}";
+    document.head.appendChild(style);
+  })();
+
+  // Badge library image map - generates SVG data URIs on the fly
+  function badgeSvgUrl(text, bg, fg) {
+    fg = fg || "#fff";
+    return (
+      "data:image/svg+xml," +
+      encodeURIComponent(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 40">' +
+          '<rect width="120" height="40" rx="6" fill="' + bg + '"/>' +
+          '<text x="60" y="25" text-anchor="middle" font-family="Arial,sans-serif" font-size="11" font-weight="700" fill="' + fg + '">' + text + "</text>" +
+          "</svg>"
+      )
+    );
+  }
+
+  function shieldSvgUrl(text, bg, fg) {
+    fg = fg || "#fff";
+    return (
+      "data:image/svg+xml," +
+      encodeURIComponent(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 40">' +
+          '<path d="M60 2 L110 12 L110 28 Q110 38 60 38 Q10 38 10 28 L10 12 Z" fill="' + bg + '"/>' +
+          '<text x="60" y="25" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" font-weight="700" fill="' + fg + '">' + text + "</text>" +
+          "</svg>"
+      )
+    );
+  }
+
+  function circleSvgUrl(text, bg, fg) {
+    fg = fg || "#fff";
+    return (
+      "data:image/svg+xml," +
+      encodeURIComponent(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">' +
+          '<circle cx="20" cy="20" r="18" fill="' + bg + '"/>' +
+          '<text x="20" y="24" text-anchor="middle" font-family="Arial,sans-serif" font-size="7" font-weight="700" fill="' + fg + '">' + text + "</text>" +
+          "</svg>"
+      )
+    );
+  }
+
+  var BADGE_IMAGE_MAP = {
+    visa: badgeSvgUrl("VISA", "#1a1f71"),
+    mastercard: badgeSvgUrl("Mastercard", "#eb001b"),
+    amex: badgeSvgUrl("AMEX", "#006fcf"),
+    paypal: badgeSvgUrl("PayPal", "#003087"),
+    "apple-pay": badgeSvgUrl("Apple Pay", "#000"),
+    "google-pay": badgeSvgUrl("Google Pay", "#4285F4"),
+    stripe: badgeSvgUrl("Stripe", "#635bff"),
+    discover: badgeSvgUrl("Discover", "#ff6000"),
+    bitcoin: badgeSvgUrl("Bitcoin", "#f7931a"),
+    "shopify-pay": badgeSvgUrl("Shop Pay", "#5a31f4"),
+    klarna: badgeSvgUrl("Klarna", "#ffb3c7", "#0a0b09"),
+    afterpay: badgeSvgUrl("Afterpay", "#b2fce4", "#000"),
+    venmo: badgeSvgUrl("Venmo", "#008CFF"),
+    "samsung-pay": badgeSvgUrl("Samsung Pay", "#1428a0"),
+    "diners-club": badgeSvgUrl("Diners Club", "#0079be"),
+    "ssl-secure": shieldSvgUrl("SSL Secure", "#27ae60"),
+    "256-bit": shieldSvgUrl("256-Bit SSL", "#2c3e50"),
+    "norton-secured": shieldSvgUrl("Norton", "#ffc629", "#000"),
+    "mcafee-secure": shieldSvgUrl("McAfee", "#c8102e"),
+    "secure-checkout": shieldSvgUrl("Secure", "#3498db"),
+    "dmca-protected": shieldSvgUrl("DMCA", "#1a237e"),
+    "pci-compliant": shieldSvgUrl("PCI DSS", "#00695c"),
+    "bbb-accredited": shieldSvgUrl("BBB A+", "#005a8c"),
+    "trusted-site": shieldSvgUrl("Trusted", "#43a047"),
+    "verified-secure": shieldSvgUrl("Verified", "#1565c0"),
+    "gdpr-compliant": shieldSvgUrl("GDPR", "#0d47a1"),
+    "safe-secure": shieldSvgUrl("100% Safe", "#388e3c"),
+    "free-shipping": badgeSvgUrl("Free Shipping", "#00897b"),
+    "fast-delivery": badgeSvgUrl("Fast Delivery", "#ef6c00"),
+    "easy-returns": badgeSvgUrl("Easy Returns", "#5c6bc0"),
+    "free-returns": badgeSvgUrl("Free Returns", "#7b1fa2"),
+    "worldwide-shipping": badgeSvgUrl("Worldwide", "#0277bd"),
+    "same-day": badgeSvgUrl("Same Day", "#c62828"),
+    "tracked-delivery": badgeSvgUrl("Tracked", "#37474f"),
+    "express-shipping": badgeSvgUrl("Express", "#d84315"),
+    "30-day-returns": badgeSvgUrl("30-Day Returns", "#6a1b9a"),
+    "carbon-neutral": badgeSvgUrl("Carbon Neutral", "#2e7d32"),
+    "money-back": circleSvgUrl("Money Back", "#f57f17"),
+    satisfaction: circleSvgUrl("100%", "#43a047"),
+    authentic: circleSvgUrl("Authentic", "#1565c0"),
+    "quality-assured": circleSvgUrl("Quality", "#6a1b9a"),
+    "award-winner": circleSvgUrl("Award", "#ff8f00"),
+    "top-rated": circleSvgUrl("Top Rated", "#d32f2f"),
+    "best-seller": circleSvgUrl("Best Seller", "#c62828"),
+    "customer-favorite": circleSvgUrl("Favorite", "#e91e63"),
+    "24-7-support": badgeSvgUrl("24/7 Support", "#00838f"),
+    "live-chat": badgeSvgUrl("Live Chat", "#00695c"),
+    "price-match": badgeSvgUrl("Price Match", "#4527a0"),
+    warranty: badgeSvgUrl("Warranty", "#1b5e20"),
+    natural: badgeSvgUrl("100% Natural", "#2e7d32"),
+    cotton: badgeSvgUrl("100% Cotton", "#5d4037"),
+    fresh: badgeSvgUrl("100% Fresh", "#00c853"),
+    "eco-friendly": badgeSvgUrl("Eco Friendly", "#1b5e20"),
+    "easy-to-return": badgeSvgUrl("Easy Return", "#4a148c"),
+    "authorized-dealer": badgeSvgUrl("Authorized", "#283593"),
+    handmade: badgeSvgUrl("Handmade", "#795548"),
+    "limited-edition": badgeSvgUrl("Limited Ed.", "#b71c1c"),
+    "cruelty-free": badgeSvgUrl("Cruelty Free", "#e91e63"),
+    vegan: badgeSvgUrl("Vegan", "#4caf50"),
+  };
+
   function renderTrustBadge(badge, page, gs) {
-    if (!shouldShowOnPage(badge.pages, page)) return;
-    if (page !== "product") return;
-
     var s = badge.settings || {};
-    var sizeMap = { small: 32, medium: 44, large: 56 };
-    var iconSize = sizeMap[s.size] || 44;
-    var fontMap = { small: 8, medium: 10, large: 12 };
-    var fontSize = fontMap[s.size] || 10;
+    var pos = s.position || "below-atc";
 
-    var labels = {
-      paypal: "PayPal",
-      visa: "Visa",
-      mastercard: "MC",
-      amex: "Amex",
-      "apple-pay": "Apple Pay",
-      "google-pay": "G Pay",
-      stripe: "Stripe",
-      "ssl-secure": "SSL",
-      "money-back": "Money Back",
-      "free-shipping": "Free Ship",
-      "support-24-7": "24/7",
-      "easy-returns": "Returns",
-    };
+    // Only render on product pages for ATC positions, or cart page for cart-page position
+    if (pos === "cart-page" && page !== "cart") return;
+    if (pos !== "cart-page" && page !== "product") return;
+
+    var isDark = s.colorScheme === "dark";
+    var bgColor = isDark ? "#1a1a2e" : "#ffffff";
+    var borderColor = isDark ? "#333" : "#e5e5e5";
+    var headerColor = isDark ? "#ffffff" : (s.textColor || "#242D35");
+    var badgeSize = s.badgeSize || 60;
+    var gap = s.showSpacing !== false ? "10px" : "4px";
+    var padding = s.showPadding !== false ? "20px" : "8px";
+    var justifyMap = { left: "flex-start", center: "center", right: "flex-end" };
+    var justify = justifyMap[s.align] || "center";
+
+    // Animation CSS
+    var animStyle = "";
+    if (s.animation === "fadeIn") animStyle = "animation:badgehq-fadeIn 0.6s ease-out;";
+    else if (s.animation === "slideUp") animStyle = "animation:badgehq-slideUp 0.6s ease-out;";
+    else if (s.animation === "bounce") animStyle = "animation:badgehq-bounce 1s ease;";
 
     var container = document.createElement("div");
     container.id = "badgehq-trust-" + badge.id;
     container.style.cssText =
-      "background:" +
-      (s.bgColor || "#fff") +
-      ";padding:16px;border-radius:8px;text-align:center;margin:12px 0;font-family:" +
-      (gs.fontFamily || "inherit") +
-      ";";
+      "background:" + bgColor + ";border:1px solid " + borderColor +
+      ";border-radius:8px;padding:" + padding +
+      ";text-align:" + (s.align || "center") +
+      ";margin:12px 0;font-family:" + (s.fontFamily || gs.fontFamily || "inherit") +
+      ";" + animStyle;
 
-    if (s.showTitle !== false) {
+    // Header
+    if (s.showHeader !== false) {
       var title = document.createElement("p");
-      title.textContent = badge.title;
+      title.textContent = s.headerText || "Guaranteed Safe Checkout";
       title.style.cssText =
-        "margin:0 0 12px;font-weight:600;font-size:" + (fontSize + 4) + "px;";
+        "margin:0 0 12px;font-weight:" + (s.fontWeight || 600) +
+        ";font-size:" + (s.fontSize || 16) + "px;color:" + headerColor +
+        ";font-family:" + (s.fontFamily || "inherit") + ";";
       container.appendChild(title);
     }
 
+    // Badge images
     var wrap = document.createElement("div");
     wrap.style.cssText =
-      "display:flex;flex-wrap:wrap;gap:8px;justify-content:center;";
+      "display:flex;flex-wrap:wrap;gap:" + gap + ";justify-content:" + justify + ";";
 
-    (badge.badges || []).forEach(function (iconId) {
-      var d = document.createElement("div");
-      d.style.cssText =
-        "width:" +
-        iconSize +
-        "px;height:" +
-        iconSize +
-        "px;display:flex;align-items:center;justify-content:center;background:" +
-        (s.badgeColor || "#333") +
-        ";color:#fff;border-radius:6px;font-size:" +
-        fontSize +
-        "px;font-weight:600;text-align:center;line-height:1.2;padding:2px;";
-      d.textContent = labels[iconId] || iconId;
-      wrap.appendChild(d);
+    var badgeIds = badge.badgeIds || [];
+    badgeIds.forEach(function (id) {
+      var imgUrl = BADGE_IMAGE_MAP[id];
+      if (!imgUrl) return;
+      var img = document.createElement("img");
+      img.src = imgUrl;
+      img.alt = id;
+      img.style.cssText =
+        "width:" + badgeSize + "px;height:auto;" +
+        (s.showBorder ? "border:1px solid " + (isDark ? "#555" : "#ddd") + ";" : "") +
+        "border-radius:4px;";
+      wrap.appendChild(img);
     });
 
     container.appendChild(wrap);
 
-    var target =
-      badge.position === "before-add-to-cart"
-        ? document.querySelector(
-            'form[action*="/cart/add"] button[type="submit"], .product-form__submit, [name="add"]'
-          )
-        : document.querySelector(
-            'form[action*="/cart/add"], .product-form'
-          );
-
-    if (target) {
-      if (badge.position === "before-add-to-cart") {
-        target.parentNode.insertBefore(container, target);
-      } else {
-        target.parentNode.insertBefore(container, target.nextSibling);
+    // Insert at the right DOM position
+    var target;
+    if (pos === "above-atc") {
+      target = document.querySelector(
+        'form[action*="/cart/add"] button[type="submit"], .product-form__submit, [name="add"]'
+      );
+      if (target) target.parentNode.insertBefore(container, target);
+    } else if (pos === "below-atc") {
+      target = document.querySelector(
+        'form[action*="/cart/add"], .product-form'
+      );
+      if (target) target.parentNode.insertBefore(container, target.nextSibling);
+    } else if (pos === "below-description") {
+      target = document.querySelector(
+        '.product__description, .product-single__description, [class*="product-description"], .product__meta'
+      );
+      if (target) target.parentNode.insertBefore(container, target.nextSibling);
+    } else if (pos === "cart-page") {
+      target = document.querySelector(
+        '.cart__footer, .cart-footer, form[action="/cart"]'
+      );
+      if (target) target.parentNode.insertBefore(container, target);
+      else {
+        var main = document.querySelector("main, #MainContent, .main-content");
+        if (main) main.appendChild(container);
       }
     }
   }
