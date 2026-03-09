@@ -8,7 +8,7 @@ embedded = true
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "write_products"
+scopes = "write_products,write_script_tags,read_script_tags"
 
 [auth]
 redirect_urls = [
@@ -34,10 +34,9 @@ api_version = "2025-01"
   uri = "/webhooks/app/scopes_update"
 
 [app_proxy]
-# Uncomment and configure if your app uses an app proxy
-# url = "https://example.com"
-# subpath = "apps"
-# prefix = "apps"
+url = "https://laughing-waffle-g4pq9w4555w93w9vg-4040.app.github.dev"
+subpath = "badgehq"
+prefix = "apps"
 
 [pos]
 embedded = false
