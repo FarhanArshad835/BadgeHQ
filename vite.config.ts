@@ -32,6 +32,44 @@ if (host === "localhost") {
   hmrConfig = false;
 }
 
+/**
+ * Vite plugin that normalises the `origin` header on incoming requests
+ * so it matches `x-forwarded-host`. Shopify embedded apps run inside
+ * the admin.shopify.com iframe, so the browser sends origin =
+ * admin.shopify.com while the proxy sets x-forwarded-host to the app's
+ * tunnel URL. Remix's CSRF check rejects the mismatch. This is safe
+ * because Shopify already authenticates every request via session tokens.
+ */
+function shopifyEmbeddedOriginPlugin() {
+  return {
+    name: "shopify-embedded-origin",
+    configureServer(server: { middlewares: { use: Function } }) {
+      server.middlewares.use(
+        (
+          req: { headers: Record<string, string | string[] | undefined> },
+          _res: unknown,
+          next: () => void,
+        ) => {
+          const origin = req.headers["origin"];
+          const forwarded = req.headers["x-forwarded-host"];
+          if (typeof origin === "string" && typeof forwarded === "string") {
+            const fwdHost = forwarded.split(",")[0].trim();
+            try {
+              const originHost = new URL(origin).host;
+              if (originHost !== fwdHost) {
+                req.headers["origin"] = `https://${fwdHost}`;
+              }
+            } catch {
+              // invalid origin URL, leave it alone
+            }
+          }
+          next();
+        },
+      );
+    },
+  };
+}
+
 export default defineConfig({
   server: {
     port: Number(process.env.PORT || 3000),
@@ -41,6 +79,7 @@ export default defineConfig({
     },
   },
   plugins: [
+    shopifyEmbeddedOriginPlugin(),
     remix({
       future: {
         v3_fetcherPersist: true,
