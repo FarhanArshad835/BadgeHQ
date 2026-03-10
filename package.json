@@ -9,10 +9,10 @@
     "deploy": "shopify app deploy",
     "config:use": "shopify app config use",
     "env": "shopify app env",
-    "start": "remix-serve ./build/server/index.js",
-    "vercel-build": "prisma generate && prisma migrate deploy && remix vite:build",
+    "start": "node ./build/server/nodejs-eyJydW50aW1lIjoibm9kZWpzIn0/index.js",
+    "vercel-build": "prisma generate && remix vite:build",
     "docker-start": "npm run setup && npm run start",
-    "postinstall": "prisma generate",
+    "postinstall": "prisma generate || true",
     "setup": "prisma generate && prisma migrate deploy",
     "lint": "eslint --cache --cache-location ./node_modules/.cache/eslint .",
     "shopify": "shopify",
@@ -54,11 +54,6 @@
     "prettier": "^3.2.4",
     "typescript": "^5.2.2",
     "vite": "^6.2.2"
-  },
-  "workspaces": {
-    "packages": [
-      "extensions/*"
-    ]
   },
   "trustedDependencies": [
     "@shopify/plugin-cloudflare"
