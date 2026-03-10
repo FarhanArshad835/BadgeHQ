@@ -27,33 +27,17 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     console.log("BadgeHQ: authenticate.admin succeeded");
     return { apiKey: process.env.SHOPIFY_API_KEY || "" };
   } catch (error: any) {
-    // If this is a Response (redirect/bounce from Shopify lib), check if we
-    // should redirect non-embedded requests to the login page instead of
-    // returning a 410 that no App Bridge can handle.
     if (error instanceof Response) {
-      const status = error.status;
       console.error("BadgeHQ: authenticate.admin threw Response", {
-        status,
+        status: error.status,
         statusText: error.statusText,
       });
-
-      // 410 Gone = session doesn't exist / was revoked.
-      // If not embedded, redirect to login so the merchant can re-install.
-      if (status === 410 && !isEmbedded) {
-        console.log("BadgeHQ: Non-embedded 410 → redirecting to /auth/login");
-        throw redirect("/auth/login");
-      }
-
-      // For other Response errors (302 bounces, etc.), let them through.
-      throw error;
+    } else {
+      console.error("BadgeHQ: authenticate.admin error:", {
+        message: error?.message,
+        type: error?.constructor?.name,
+      });
     }
-
-    console.error("BadgeHQ: authenticate.admin error:", {
-      message: error?.message,
-      status: error?.status,
-      statusText: error?.statusText,
-      type: error?.constructor?.name,
-    });
     throw error;
   }
 };
