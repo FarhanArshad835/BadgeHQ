@@ -34,7 +34,7 @@ api_version = "2025-01"
   uri = "/webhooks/app/scopes_update"
 
 [app_proxy]
-url = "https://laughing-waffle-g4pq9w4555w93w9vg-4040.app.github.dev"
+url = "https://friendly-space-spoon-q7xqrg79976q2xxx4-4040.app.github.dev"
 subpath = "badgehq"
 prefix = "apps"
 

@@ -11,6 +11,14 @@
 
   var API_URL = "/apps/badgehq/api/widgets?shop=" + encodeURIComponent(SHOP);
 
+  function onReady(fn) {
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", fn);
+    } else {
+      fn();
+    }
+  }
+
   fetch(API_URL)
     .then(function (r) {
       return r.json();
@@ -18,7 +26,9 @@
     .then(function (data) {
       if (!data.enabled) return;
       window.__BADGEHQ__ = data;
-      initBadgeHQ(data);
+      onReady(function () {
+        initBadgeHQ(data);
+      });
     })
     .catch(function (e) {
       console.warn("BadgeHQ: Failed to load config", e);
