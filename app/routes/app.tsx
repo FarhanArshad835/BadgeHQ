@@ -9,8 +9,26 @@ import { authenticate } from "../shopify.server";
 export const links = () => [{ rel: "stylesheet", href: polarisStyles }];
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  await authenticate.admin(request);
-  return { apiKey: process.env.SHOPIFY_API_KEY || "" };
+  const url = new URL(request.url);
+  console.log("BadgeHQ: app.tsx loader hit", {
+    path: url.pathname,
+    search: url.search,
+    hasAuth: request.headers.has("authorization"),
+  });
+  try {
+    const result = await authenticate.admin(request);
+    console.log("BadgeHQ: authenticate.admin succeeded");
+    return { apiKey: process.env.SHOPIFY_API_KEY || "" };
+  } catch (error: any) {
+    console.error("BadgeHQ: authenticate.admin error:", {
+      message: error?.message,
+      status: error?.status,
+      statusText: error?.statusText,
+      headers: error?.headers ? Object.fromEntries(error.headers.entries?.() ?? []) : undefined,
+      type: error?.constructor?.name,
+    });
+    throw error;
+  }
 };
 
 export default function App() {
