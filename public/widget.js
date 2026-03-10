@@ -415,7 +415,8 @@
         badge.badgeColor +
         ";color:" +
         badge.textColor +
-        ";font-size:11px;font-weight:700;" +
+        ";font-size:11px;font-weight:700;line-height:1;" +
+        "width:auto;height:auto;max-width:max-content;white-space:nowrap;box-sizing:border-box;pointer-events:none;" +
         (posStyles[badge.position] || posStyles["top-left"]) +
         (shapeStyles[badge.shape] || shapeStyles["rectangle"]);
 
