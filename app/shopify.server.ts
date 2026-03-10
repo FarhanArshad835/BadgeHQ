@@ -8,6 +8,7 @@ import {
 import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prisma";
 import { restResources } from "@shopify/shopify-api/rest/admin/2025-01";
 import prisma from "./db.server";
+import { ensureScriptTag } from "./scripttag.server";
 
 const shopify = shopifyApp({
   apiKey: process.env.SHOPIFY_API_KEY,
@@ -23,29 +24,8 @@ const shopify = shopifyApp({
     unstable_newEmbeddedAuthStrategy: true,
   } as any,
   hooks: {
-    afterAuth: async ({ session, admin }) => {
-      // Register ScriptTag so widget.js loads on the storefront
-      const appUrl = process.env.SHOPIFY_APP_URL || "";
-      const widgetSrc = `${appUrl}/widget.js`;
-
-      try {
-        // Check if ScriptTag already exists
-        const existing = await admin.rest.resources.ScriptTag.all({
-          session,
-          src: widgetSrc,
-        });
-
-        if (!existing.data || existing.data.length === 0) {
-          const scriptTag = new admin.rest.resources.ScriptTag({ session });
-          scriptTag.event = "onload";
-          scriptTag.src = widgetSrc;
-          scriptTag.display_scope = "online_store";
-          await scriptTag.save({ update: true });
-          console.log("BadgeHQ: ScriptTag registered:", widgetSrc);
-        }
-      } catch (e) {
-        console.error("BadgeHQ: Failed to register ScriptTag:", e);
-      }
+    afterAuth: async ({ admin }) => {
+      await ensureScriptTag(admin);
     },
   },
   ...(process.env.SHOP_CUSTOM_DOMAIN

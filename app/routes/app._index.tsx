@@ -15,32 +15,14 @@ import {
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { ensureScriptTag } from "../scripttag.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, admin } = await authenticate.admin(request);
   const shop = session.shop;
 
   // Ensure ScriptTag is registered so widget.js loads on the storefront
-  const appUrl = process.env.SHOPIFY_APP_URL || "";
-  if (appUrl) {
-    const widgetSrc = `${appUrl}/widget.js`;
-    try {
-      const existing = await admin.rest.resources.ScriptTag.all({
-        session,
-        src: widgetSrc,
-      });
-      if (!existing.data || existing.data.length === 0) {
-        const scriptTag = new admin.rest.resources.ScriptTag({ session });
-        scriptTag.event = "onload";
-        scriptTag.src = widgetSrc;
-        scriptTag.display_scope = "online_store";
-        await scriptTag.save({ update: true });
-        console.log("BadgeHQ: ScriptTag registered from dashboard:", widgetSrc);
-      }
-    } catch (e) {
-      console.error("BadgeHQ: ScriptTag registration failed:", e);
-    }
-  }
+  await ensureScriptTag(admin);
 
   const [
     trustBadgeCount,
