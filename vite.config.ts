@@ -3,6 +3,7 @@ import { defineConfig } from "vite";
 import remixDev from "@remix-run/dev";
 const remix = remixDev.vitePlugin;
 import tsconfigPaths from "vite-tsconfig-paths";
+import { vercelPreset } from "@vercel/remix/vite";
 
 // Related: https://github.com/nicedoc/microlink-cards/issues/4#issuecomment-1112203426
 // Also: https://shopify.dev/docs/api/shopify-app-remix#updating-env-or-host
@@ -81,6 +82,7 @@ export default defineConfig({
   plugins: [
     shopifyEmbeddedOriginPlugin(),
     remix({
+      presets: [vercelPreset()],
       future: {
         v3_fetcherPersist: true,
         v3_relativeSplatPath: true,

@@ -1,0 +1,23 @@
+{
+  "buildCommand": "npm run vercel-build",
+  "outputDirectory": "build",
+  "framework": "remix",
+  "regions": ["iad1"],
+  "headers": [
+    {
+      "source": "/widget.js",
+      "headers": [
+        { "key": "Access-Control-Allow-Origin", "value": "*" },
+        { "key": "Cache-Control", "value": "public, max-age=300, s-maxage=600" },
+        { "key": "Content-Type", "value": "application/javascript; charset=utf-8" }
+      ]
+    },
+    {
+      "source": "/api/widgets",
+      "headers": [
+        { "key": "Access-Control-Allow-Origin", "value": "*" },
+        { "key": "Cache-Control", "value": "public, max-age=60, s-maxage=120" }
+      ]
+    }
+  ]
+}
