@@ -8,8 +8,15 @@ const databaseUrl = process.env.DATABASE_URL
   ? new URL(process.env.DATABASE_URL)
   : undefined;
 
-// For Neon serverless: increase pool timeout and reduce connection limit
+// For Neon pooler: pgbouncer=true is required to disable prepared statements
+// which are incompatible with PgBouncer's transaction pooling mode
 if (databaseUrl) {
+  if (
+    databaseUrl.hostname.includes("pooler") &&
+    !databaseUrl.searchParams.has("pgbouncer")
+  ) {
+    databaseUrl.searchParams.set("pgbouncer", "true");
+  }
   if (!databaseUrl.searchParams.has("connect_timeout")) {
     databaseUrl.searchParams.set("connect_timeout", "15");
   }
