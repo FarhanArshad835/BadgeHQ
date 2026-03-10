@@ -12,9 +12,7 @@ scopes = "write_products,write_script_tags,read_script_tags"
 
 [auth]
 redirect_urls = [
-  "https://example.com/auth/callback",
-  "https://example.com/auth/shopify/callback",
-  "https://example.com/api/auth/callback"
+  "https://badge-hq.vercel.app/auth/callback"
 ]
 
 [webhooks]
