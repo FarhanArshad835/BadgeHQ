@@ -17,13 +17,37 @@ import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 
+function conditionLabel(condition: { type: string }): string {
+  const map: Record<string, string> = {
+    none: "Manual",
+    on_sale: "On Sale",
+    new_arrival: "New Arrival",
+    low_stock: "Low Stock",
+    out_of_stock: "Out of Stock",
+    discount_percent: "Discount %",
+    price_range: "Price Range",
+    inventory_count: "Inventory",
+  };
+  return map[condition.type] || "Manual";
+}
+
+function badgeTypeLabel(type: string): string {
+  return type === "dynamic" ? "Dynamic" : type === "image" ? "Image" : "Text";
+}
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const badges = await prisma.productBadge.findMany({
     where: { shop: session.shop },
-    orderBy: { createdAt: "desc" },
+    orderBy: [{ priority: "desc" }, { createdAt: "desc" }],
   });
-  return json({ badges });
+  return json({
+    badges: badges.map((b) => ({
+      ...b,
+      condition: JSON.parse(b.condition) as { type: string },
+      schedule: JSON.parse(b.schedule) as { startDate?: string; endDate?: string },
+    })),
+  });
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -82,7 +106,8 @@ export default function ProductBadgeList() {
               >
                 <p>
                   Overlay badges on product images to highlight sales,
-                  new arrivals, bestsellers, and more.
+                  new arrivals, bestsellers, and more. Supports automated
+                  conditions, dynamic text, image badges, and scheduling.
                 </p>
               </EmptyState>
             </Card>
@@ -91,8 +116,9 @@ export default function ProductBadgeList() {
               <IndexTable
                 itemCount={badges.length}
                 headings={[
-                  { title: "Text" },
-                  { title: "Shape" },
+                  { title: "Badge" },
+                  { title: "Type" },
+                  { title: "Condition" },
                   { title: "Position" },
                   { title: "Status" },
                   { title: "Actions" },
@@ -102,16 +128,42 @@ export default function ProductBadgeList() {
                 {badges.map((badge, index) => (
                   <IndexTable.Row id={badge.id} key={badge.id} position={index}>
                     <IndexTable.Cell>
-                      <Button variant="plain" onClick={() => navigate(`/app/product-badge/${badge.id}`)}>
-                        {badge.text}
-                      </Button>
+                      <InlineStack gap="200" blockAlign="center">
+                        <div style={{
+                          width: 24, height: 24, borderRadius: badge.shape === "circle" ? "50%" : 4,
+                          backgroundColor: badge.badgeColor, display: "inline-flex",
+                          alignItems: "center", justifyContent: "center",
+                          color: badge.textColor, fontSize: "7px", fontWeight: 700,
+                        }}>
+                          {badge.badgeType === "image" ? "IMG" : badge.text.slice(0, 3)}
+                        </div>
+                        <Button variant="plain" onClick={() => navigate(`/app/product-badge/${badge.id}`)}>
+                          {badge.text}
+                        </Button>
+                      </InlineStack>
                     </IndexTable.Cell>
-                    <IndexTable.Cell>{badge.shape}</IndexTable.Cell>
+                    <IndexTable.Cell>
+                      <Badge tone={badge.badgeType === "dynamic" ? "info" : undefined}>
+                        {badgeTypeLabel(badge.badgeType)}
+                      </Badge>
+                    </IndexTable.Cell>
+                    <IndexTable.Cell>
+                      {badge.condition.type !== "none" ? (
+                        <Badge tone="attention">{conditionLabel(badge.condition)}</Badge>
+                      ) : (
+                        <Text as="span" variant="bodyMd" tone="subdued">Manual</Text>
+                      )}
+                    </IndexTable.Cell>
                     <IndexTable.Cell>{badge.position}</IndexTable.Cell>
                     <IndexTable.Cell>
-                      <Badge tone={badge.isActive ? "success" : undefined}>
-                        {badge.isActive ? "Active" : "Inactive"}
-                      </Badge>
+                      <InlineStack gap="100">
+                        <Badge tone={badge.isActive ? "success" : undefined}>
+                          {badge.isActive ? "Active" : "Inactive"}
+                        </Badge>
+                        {badge.schedule.startDate && (
+                          <Badge tone="warning">Scheduled</Badge>
+                        )}
+                      </InlineStack>
                     </IndexTable.Cell>
                     <IndexTable.Cell>
                       <InlineStack gap="200">

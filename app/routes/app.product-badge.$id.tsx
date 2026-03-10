@@ -1,7 +1,7 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useActionData, useLoaderData, useNavigate, useSubmit } from "@remix-run/react";
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import {
   Page,
   Layout,
@@ -15,6 +15,8 @@ import {
   Box,
   Checkbox,
   Banner,
+  RangeSlider,
+  ChoiceList,
 } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
@@ -23,6 +25,13 @@ import prisma from "../db.server";
 const PRESET_BADGES = [
   "Sale %", "New", "Best Seller", "Hot", "Low Stock",
   "Trending", "Limited", "Sold Out", "Free Shipping", "Exclusive",
+];
+
+const DYNAMIC_TEXT_PRESETS = [
+  { label: "{{discount}}% OFF", description: "Shows discount percentage" },
+  { label: "Save {{discount}}%", description: "Shows savings" },
+  { label: "Only {{inventory}} left", description: "Shows stock count" },
+  { label: "{{sold}} sold", description: "Shows units sold" },
 ];
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
@@ -35,6 +44,9 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     badge: {
       ...badge,
       targeting: JSON.parse(badge.targeting) as { type: string; value: string },
+      condition: JSON.parse(badge.condition) as { type: string; value?: string; operator?: string },
+      pages: JSON.parse(badge.pages) as string[],
+      schedule: JSON.parse(badge.schedule) as { startDate?: string; endDate?: string },
     },
   });
 };
@@ -49,12 +61,25 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       where: { id: params.id, shop: session.shop },
       data: {
         text: data.text,
+        badgeType: data.badgeType,
         shape: data.shape,
         badgeColor: data.badgeColor,
         textColor: data.textColor,
         position: data.position,
         targeting: JSON.stringify(data.targeting),
         isActive: data.isActive,
+        condition: JSON.stringify(data.condition),
+        pages: JSON.stringify(data.pages),
+        schedule: JSON.stringify(data.schedule),
+        priority: data.priority,
+        imageUrl: data.imageUrl,
+        fontSize: data.fontSize,
+        opacity: data.opacity,
+        rotation: data.rotation,
+        gradient: data.gradient,
+        borderColor: data.borderColor,
+        borderWidth: data.borderWidth,
+        customCSS: data.customCSS,
       },
     });
     return json({ success: true });
@@ -70,19 +95,42 @@ export default function EditProductBadge() {
   const submit = useSubmit();
 
   const [text, setText] = useState(badge.text);
+  const [badgeType, setBadgeType] = useState(badge.badgeType);
   const [shape, setShape] = useState(badge.shape);
   const [badgeColor, setBadgeColor] = useState(badge.badgeColor);
   const [textColor, setTextColor] = useState(badge.textColor);
   const [position, setPosition] = useState(badge.position);
+  const [isActive, setIsActive] = useState(badge.isActive);
   const [targetType, setTargetType] = useState(badge.targeting.type);
   const [targetValue, setTargetValue] = useState(badge.targeting.value || "");
-  const [isActive, setIsActive] = useState(badge.isActive);
+
+  const [conditionType, setConditionType] = useState(badge.condition.type);
+  const [conditionValue, setConditionValue] = useState(badge.condition.value || "");
+  const [conditionOperator, setConditionOperator] = useState(badge.condition.operator || "less_than");
+
+  const [pages, setPages] = useState<string[]>(badge.pages);
+  const [scheduleEnabled, setScheduleEnabled] = useState(!!badge.schedule.startDate || !!badge.schedule.endDate);
+  const [scheduleStart, setScheduleStart] = useState(badge.schedule.startDate || "");
+  const [scheduleEnd, setScheduleEnd] = useState(badge.schedule.endDate || "");
+  const [priority, setPriority] = useState(badge.priority);
+  const [imageUrl, setImageUrl] = useState(badge.imageUrl);
+  const [fontSize, setFontSize] = useState(badge.fontSize);
+  const [opacity, setOpacity] = useState(badge.opacity);
+  const [rotation, setRotation] = useState(badge.rotation);
+  const [gradient, setGradient] = useState(badge.gradient);
+  const [borderColor, setBorderColor] = useState(badge.borderColor);
+  const [borderWidth, setBorderWidth] = useState(badge.borderWidth);
+  const [customCSS, setCustomCSS] = useState(badge.customCSS);
 
   const handleSave = () => {
     const data = {
-      text, shape, badgeColor, textColor, position,
+      text, badgeType, shape, badgeColor, textColor, position,
       targeting: { type: targetType, value: targetValue },
       isActive,
+      condition: { type: conditionType, value: conditionValue, operator: conditionOperator },
+      pages,
+      schedule: scheduleEnabled ? { startDate: scheduleStart, endDate: scheduleEnd } : {},
+      priority, imageUrl, fontSize, opacity, rotation, gradient, borderColor, borderWidth, customCSS,
     };
     submit({ data: JSON.stringify(data) }, { method: "POST" });
   };
@@ -93,6 +141,19 @@ export default function EditProductBadge() {
     ribbon: { borderRadius: "0 4px 4px 0", padding: "4px 12px 4px 8px" },
     star: { borderRadius: "4px", width: 60, height: 60, clipPath: "polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%)" },
     square: { borderRadius: "2px", width: 60, height: 60 },
+  };
+
+  const previewBg = gradient || badgeColor;
+  const previewStyle: React.CSSProperties = {
+    position: "absolute",
+    ...(position.includes("top") ? { top: 8 } : { bottom: 8 }),
+    ...(position.includes("left") ? { left: 8 } : { right: 8 }),
+    background: previewBg, color: textColor,
+    display: "flex", alignItems: "center", justifyContent: "center",
+    fontSize: `${fontSize}px`, fontWeight: 700, opacity,
+    transform: rotation ? `rotate(${rotation}deg)` : undefined,
+    border: borderWidth ? `${borderWidth}px solid ${borderColor || "#000"}` : undefined,
+    ...shapeStyles[shape],
   };
 
   return (
@@ -107,82 +168,202 @@ export default function EditProductBadge() {
             {actionData?.success && <Banner tone="success">Product badge saved successfully.</Banner>}
             {actionData?.error && <Banner tone="critical">{actionData.error}</Banner>}
 
+            {/* Badge Type */}
             <Card>
               <BlockStack gap="400">
-                <Text as="h2" variant="headingMd">Badge Text</Text>
-                <TextField label="Text" value={text} onChange={setText} autoComplete="off" />
-                <Text as="p" variant="bodyMd" tone="subdued">Quick presets:</Text>
-                <InlineGrid columns={{ xs: 3, sm: 5 }} gap="200">
-                  {PRESET_BADGES.map((preset) => (
-                    <Button key={preset} size="slim" pressed={text === preset} onClick={() => setText(preset)}>{preset}</Button>
-                  ))}
-                </InlineGrid>
+                <Text as="h2" variant="headingMd">Badge Type</Text>
+                <Select
+                  label="Type"
+                  options={[
+                    { label: "Text Badge", value: "text" },
+                    { label: "Image Badge", value: "image" },
+                    { label: "Dynamic Badge (auto-generated)", value: "dynamic" },
+                  ]}
+                  value={badgeType}
+                  onChange={setBadgeType}
+                />
+                {badgeType === "text" && (
+                  <>
+                    <TextField label="Badge Text" value={text} onChange={setText} autoComplete="off" />
+                    <Text as="p" variant="bodyMd" tone="subdued">Quick presets:</Text>
+                    <InlineGrid columns={{ xs: 3, sm: 5 }} gap="200">
+                      {PRESET_BADGES.map((preset) => (
+                        <Button key={preset} size="slim" pressed={text === preset} onClick={() => setText(preset)}>{preset}</Button>
+                      ))}
+                    </InlineGrid>
+                  </>
+                )}
+                {badgeType === "image" && (
+                  <TextField label="Badge Image URL" value={imageUrl} onChange={setImageUrl} autoComplete="off"
+                    helpText="URL to a badge image (PNG, SVG, or GIF). Recommended size: 200x80px." placeholder="https://example.com/badge.png" />
+                )}
+                {badgeType === "dynamic" && (
+                  <>
+                    <TextField label="Dynamic Text Template" value={text} onChange={setText} autoComplete="off"
+                      helpText="Use {{discount}}, {{inventory}}, {{sold}}, {{price}}, {{compare_price}} as placeholders." />
+                    <Text as="p" variant="bodyMd" tone="subdued">Template presets:</Text>
+                    <InlineGrid columns={{ xs: 2, sm: 2 }} gap="200">
+                      {DYNAMIC_TEXT_PRESETS.map((preset) => (
+                        <Button key={preset.label} size="slim" pressed={text === preset.label} onClick={() => setText(preset.label)}>{preset.label}</Button>
+                      ))}
+                    </InlineGrid>
+                  </>
+                )}
                 <Checkbox label="Active" checked={isActive} onChange={setIsActive} />
               </BlockStack>
             </Card>
 
+            {/* Automated Conditions */}
             <Card>
               <BlockStack gap="400">
-                <Text as="h2" variant="headingMd">Appearance</Text>
+                <Text as="h2" variant="headingMd">Automated Conditions</Text>
+                <Text as="p" variant="bodyMd" tone="subdued">Automatically show this badge when products match certain criteria.</Text>
                 <Select
-                  label="Shape"
+                  label="Condition"
                   options={[
-                    { label: "Circle", value: "circle" },
-                    { label: "Rectangle", value: "rectangle" },
-                    { label: "Ribbon", value: "ribbon" },
-                    { label: "Star", value: "star" },
-                    { label: "Square", value: "square" },
+                    { label: "None (always show)", value: "none" },
+                    { label: "On Sale (has compare-at price)", value: "on_sale" },
+                    { label: "New Arrival (by date)", value: "new_arrival" },
+                    { label: "Low Stock", value: "low_stock" },
+                    { label: "Out of Stock", value: "out_of_stock" },
+                    { label: "Discount Percentage", value: "discount_percent" },
+                    { label: "Price Range", value: "price_range" },
+                    { label: "Inventory Count", value: "inventory_count" },
                   ]}
-                  value={shape}
-                  onChange={setShape}
+                  value={conditionType}
+                  onChange={setConditionType}
                 />
-                <InlineGrid columns={2} gap="400">
-                  <TextField label="Badge Color" value={badgeColor} onChange={setBadgeColor} autoComplete="off"
-                    prefix={<div style={{ width: 20, height: 20, backgroundColor: badgeColor, borderRadius: 4, border: "1px solid #ccc" }} />} />
-                  <TextField label="Text Color" value={textColor} onChange={setTextColor} autoComplete="off"
-                    prefix={<div style={{ width: 20, height: 20, backgroundColor: textColor, borderRadius: 4, border: "1px solid #ccc" }} />} />
-                </InlineGrid>
-                <Select
-                  label="Position on Image"
-                  options={[
-                    { label: "Top Left", value: "top-left" },
-                    { label: "Top Right", value: "top-right" },
-                    { label: "Bottom Left", value: "bottom-left" },
-                    { label: "Bottom Right", value: "bottom-right" },
-                  ]}
-                  value={position}
-                  onChange={setPosition}
-                />
+                {conditionType === "new_arrival" && (
+                  <TextField label="Days since published" type="number" value={conditionValue} onChange={setConditionValue} autoComplete="off"
+                    helpText="Show badge on products published within this many days" />
+                )}
+                {conditionType === "low_stock" && (
+                  <TextField label="Stock threshold" type="number" value={conditionValue} onChange={setConditionValue} autoComplete="off"
+                    helpText="Show badge when inventory is at or below this number" />
+                )}
+                {conditionType === "discount_percent" && (
+                  <InlineGrid columns={2} gap="400">
+                    <Select label="Operator" options={[
+                      { label: "Greater than", value: "greater_than" }, { label: "Less than", value: "less_than" },
+                      { label: "Equal to", value: "equal_to" }, { label: "Between", value: "between" },
+                    ]} value={conditionOperator} onChange={setConditionOperator} />
+                    <TextField label="Discount %" type="number" value={conditionValue} onChange={setConditionValue} autoComplete="off"
+                      helpText={conditionOperator === "between" ? "e.g., 10-50" : "e.g., 20"} />
+                  </InlineGrid>
+                )}
+                {conditionType === "price_range" && (
+                  <TextField label="Price range" value={conditionValue} onChange={setConditionValue} autoComplete="off"
+                    helpText="Enter min-max (e.g., 0-25 for products under $25)" />
+                )}
+                {conditionType === "inventory_count" && (
+                  <InlineGrid columns={2} gap="400">
+                    <Select label="Operator" options={[
+                      { label: "Less than", value: "less_than" }, { label: "Greater than", value: "greater_than" },
+                      { label: "Equal to", value: "equal_to" },
+                    ]} value={conditionOperator} onChange={setConditionOperator} />
+                    <TextField label="Inventory count" type="number" value={conditionValue} onChange={setConditionValue} autoComplete="off" />
+                  </InlineGrid>
+                )}
               </BlockStack>
             </Card>
 
+            {/* Appearance */}
             <Card>
               <BlockStack gap="400">
-                <Text as="h2" variant="headingMd">Targeting</Text>
-                <Select
-                  label="Apply to"
-                  options={[
-                    { label: "All Products", value: "all" },
-                    { label: "Specific Products", value: "products" },
-                    { label: "By Collection", value: "collection" },
-                    { label: "By Tag", value: "tag" },
-                  ]}
-                  value={targetType}
-                  onChange={setTargetType}
-                />
+                <Text as="h2" variant="headingMd">Appearance</Text>
+                {badgeType !== "image" && (
+                  <Select label="Shape" options={[
+                    { label: "Rectangle", value: "rectangle" }, { label: "Circle", value: "circle" },
+                    { label: "Ribbon", value: "ribbon" }, { label: "Star", value: "star" }, { label: "Square", value: "square" },
+                  ]} value={shape} onChange={setShape} />
+                )}
+                <InlineGrid columns={2} gap="400">
+                  <TextField label="Badge Color" value={badgeColor} onChange={setBadgeColor} autoComplete="off"
+                    prefix={<div style={{ width: 20, height: 20, backgroundColor: badgeColor, borderRadius: 4, border: "1px solid #ccc" }} />} />
+                  {badgeType !== "image" && (
+                    <TextField label="Text Color" value={textColor} onChange={setTextColor} autoComplete="off"
+                      prefix={<div style={{ width: 20, height: 20, backgroundColor: textColor, borderRadius: 4, border: "1px solid #ccc" }} />} />
+                  )}
+                </InlineGrid>
+                <Select label="Position on Image" options={[
+                  { label: "Top Left", value: "top-left" }, { label: "Top Right", value: "top-right" },
+                  { label: "Bottom Left", value: "bottom-left" }, { label: "Bottom Right", value: "bottom-right" },
+                ]} value={position} onChange={setPosition} />
+                <TextField label="Gradient Background" value={gradient} onChange={setGradient} autoComplete="off"
+                  placeholder="linear-gradient(135deg, #ff6b6b, #ee5a24)" helpText="CSS gradient. Overrides badge color when set." />
+                <InlineGrid columns={2} gap="400">
+                  <TextField label="Font Size (px)" type="number" value={String(fontSize)} onChange={(v) => setFontSize(Number(v) || 11)} autoComplete="off" />
+                  <TextField label="Priority" type="number" value={String(priority)} onChange={(v) => setPriority(Number(v) || 0)} autoComplete="off"
+                    helpText="Higher = shown first." />
+                </InlineGrid>
+                <RangeSlider label={`Opacity: ${opacity}`} value={opacity * 100}
+                  onChange={useCallback((val: number) => setOpacity(Math.round(val) / 100), [])} min={10} max={100} output />
+                <RangeSlider label={`Rotation: ${rotation}°`} value={rotation}
+                  onChange={useCallback((val: number) => setRotation(val), [])} min={-45} max={45} output />
+                <InlineGrid columns={2} gap="400">
+                  <TextField label="Border Color" value={borderColor} onChange={setBorderColor} autoComplete="off" placeholder="#000000"
+                    prefix={borderColor ? <div style={{ width: 20, height: 20, backgroundColor: borderColor, borderRadius: 4, border: "1px solid #ccc" }} /> : undefined} />
+                  <TextField label="Border Width (px)" type="number" value={String(borderWidth)} onChange={(v) => setBorderWidth(Number(v) || 0)} autoComplete="off" />
+                </InlineGrid>
+              </BlockStack>
+            </Card>
+
+            {/* Targeting */}
+            <Card>
+              <BlockStack gap="400">
+                <Text as="h2" variant="headingMd">Product Targeting</Text>
+                <Select label="Apply to" options={[
+                  { label: "All Products", value: "all" }, { label: "Specific Products", value: "products" },
+                  { label: "By Collection", value: "collection" }, { label: "By Tag", value: "tag" },
+                  { label: "By Product Type", value: "product_type" }, { label: "By Vendor", value: "vendor" },
+                ]} value={targetType} onChange={setTargetType} />
                 {targetType !== "all" && (
                   <TextField
-                    label={targetType === "products" ? "Product IDs (comma-separated)" : targetType === "collection" ? "Collection handle" : "Product tag"}
-                    value={targetValue}
-                    onChange={setTargetValue}
-                    autoComplete="off"
-                  />
+                    label={targetType === "products" ? "Product IDs (comma-separated)" : targetType === "collection" ? "Collection handle" : targetType === "tag" ? "Product tag" : targetType === "product_type" ? "Product type" : "Vendor name"}
+                    value={targetValue} onChange={setTargetValue} autoComplete="off" />
                 )}
+              </BlockStack>
+            </Card>
+
+            {/* Display Pages */}
+            <Card>
+              <BlockStack gap="400">
+                <Text as="h2" variant="headingMd">Display Pages</Text>
+                <ChoiceList title="Show badge on" allowMultiple choices={[
+                  { label: "All Pages", value: "all" }, { label: "Home Page", value: "home" },
+                  { label: "Collection Pages", value: "collection" }, { label: "Product Pages", value: "product" },
+                  { label: "Search Results", value: "search" }, { label: "Cart Page", value: "cart" },
+                ]} selected={pages} onChange={setPages} />
+              </BlockStack>
+            </Card>
+
+            {/* Schedule */}
+            <Card>
+              <BlockStack gap="400">
+                <Text as="h2" variant="headingMd">Schedule</Text>
+                <Checkbox label="Enable scheduling" checked={scheduleEnabled} onChange={setScheduleEnabled}
+                  helpText="Only show this badge during a specific time period" />
+                {scheduleEnabled && (
+                  <InlineGrid columns={2} gap="400">
+                    <TextField label="Start Date" type="date" value={scheduleStart} onChange={setScheduleStart} autoComplete="off" />
+                    <TextField label="End Date" type="date" value={scheduleEnd} onChange={setScheduleEnd} autoComplete="off" />
+                  </InlineGrid>
+                )}
+              </BlockStack>
+            </Card>
+
+            {/* Custom CSS */}
+            <Card>
+              <BlockStack gap="400">
+                <Text as="h2" variant="headingMd">Custom CSS</Text>
+                <TextField label="Custom CSS" value={customCSS} onChange={setCustomCSS} autoComplete="off" multiline={3}
+                  placeholder="box-shadow: 0 2px 4px rgba(0,0,0,0.2); text-transform: uppercase;" helpText="Additional CSS properties applied to the badge element." />
               </BlockStack>
             </Card>
           </BlockStack>
         </Layout.Section>
 
+        {/* Preview */}
         <Layout.Section variant="oneThird">
           <Card>
             <BlockStack gap="300">
@@ -192,19 +373,23 @@ export default function EditProductBadge() {
                   <div style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
                     <Text as="p" variant="bodyMd" tone="subdued">Product Image</Text>
                   </div>
-                  <div style={{
-                    position: "absolute",
-                    ...(position.includes("top") ? { top: 8 } : { bottom: 8 }),
-                    ...(position.includes("left") ? { left: 8 } : { right: 8 }),
-                    backgroundColor: badgeColor, color: textColor,
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    fontSize: "12px", fontWeight: 700,
-                    ...shapeStyles[shape],
-                  }}>
-                    {text}
-                  </div>
+                  {badgeType === "image" && imageUrl ? (
+                    <img src={imageUrl} alt="Badge" style={{
+                      position: "absolute",
+                      ...(position.includes("top") ? { top: 8 } : { bottom: 8 }),
+                      ...(position.includes("left") ? { left: 8 } : { right: 8 }),
+                      maxWidth: 80, height: "auto", opacity,
+                      transform: rotation ? `rotate(${rotation}deg)` : undefined,
+                    }} />
+                  ) : (
+                    <div style={previewStyle}>
+                      {badgeType === "dynamic" ? text.replace(/\{\{discount\}\}/g, "25").replace(/\{\{inventory\}\}/g, "3").replace(/\{\{sold\}\}/g, "142").replace(/\{\{price\}\}/g, "$29.99").replace(/\{\{compare_price\}\}/g, "$39.99") : text}
+                    </div>
+                  )}
                 </div>
               </Box>
+              {badgeType === "dynamic" && <Banner tone="info">Dynamic placeholders will be replaced with real product data on your storefront.</Banner>}
+              {conditionType !== "none" && <Banner tone="info">This badge will only appear on products matching the "{conditionType.replace(/_/g, " ")}" condition.</Banner>}
             </BlockStack>
           </Card>
         </Layout.Section>

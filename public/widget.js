@@ -72,10 +72,7 @@
       w.trustBadges.forEach(function (badge) {
         renderTrustBadge(badge, page, gs);
       });
-    if (w.productBadges)
-      w.productBadges.forEach(function (badge) {
-        renderProductBadge(badge);
-      });
+    if (w.productBadges) renderProductBadges(w.productBadges, page);
     if (w.freeShippingBars)
       w.freeShippingBars.forEach(function (bar) {
         renderFreeShippingBar(bar, page);
@@ -379,49 +376,274 @@
   }
 
   /* ===================== PRODUCT BADGES ===================== */
-  function renderProductBadge(badge) {
-    var images = document.querySelectorAll(
-      ".product-card img, .product__media img, .grid-product__image, .product-image-container img"
-    );
-    if (images.length === 0)
-      images = document.querySelectorAll('[class*="product"] img');
 
-    images.forEach(function (img) {
-      var parent = img.closest("a") || img.parentElement;
-      if (!parent || parent.querySelector(".badgehq-product-badge")) return;
-      parent.style.position = "relative";
-      parent.style.overflow = "hidden";
+  // Shared position & shape maps
+  var POS_STYLES = {
+    "top-left": "top:8px;left:8px;",
+    "top-right": "top:8px;right:8px;",
+    "bottom-left": "bottom:8px;left:8px;",
+    "bottom-right": "bottom:8px;right:8px;",
+  };
+  var SHAPE_STYLES = {
+    circle: "border-radius:50%;width:48px;height:48px;",
+    rectangle: "border-radius:4px;padding:4px 10px;",
+    ribbon: "border-radius:0 4px 4px 0;padding:4px 12px 4px 8px;",
+    star: "border-radius:4px;width:48px;height:48px;clip-path:polygon(50% 0%,61% 35%,98% 35%,68% 57%,79% 91%,50% 70%,21% 91%,32% 57%,2% 35%,39% 35%);",
+    square: "border-radius:2px;width:48px;height:48px;",
+  };
 
-      var el = document.createElement("div");
-      el.className = "badgehq-product-badge";
+  // Check if a badge should display on this page
+  function badgeShowOnPage(badge, currentPage) {
+    var pages = badge.pages;
+    if (!pages || pages.length === 0) return true;
+    if (pages.indexOf("all") !== -1) return true;
+    return pages.indexOf(currentPage) !== -1;
+  }
 
-      var posStyles = {
-        "top-left": "top:8px;left:8px;",
-        "top-right": "top:8px;right:8px;",
-        "bottom-left": "bottom:8px;left:8px;",
-        "bottom-right": "bottom:8px;right:8px;",
+  // Check schedule
+  function badgeInSchedule(badge) {
+    var s = badge.schedule;
+    if (!s || (!s.startDate && !s.endDate)) return true;
+    var now = new Date();
+    if (s.startDate && new Date(s.startDate) > now) return false;
+    if (s.endDate && new Date(s.endDate + "T23:59:59") < now) return false;
+    return true;
+  }
+
+  // Evaluate automated condition against product data
+  function badgeConditionMet(badge, productData) {
+    var c = badge.condition;
+    if (!c || c.type === "none") return true;
+    if (!productData) return c.type === "none";
+
+    var price = productData.price || 0;
+    var comparePrice = productData.compare_at_price || 0;
+    var inventory = productData.inventory_quantity;
+    var createdAt = productData.created_at;
+
+    switch (c.type) {
+      case "on_sale":
+        return comparePrice > 0 && comparePrice > price;
+      case "out_of_stock":
+        return inventory !== undefined && inventory <= 0;
+      case "low_stock":
+        var threshold = parseInt(c.value, 10) || 10;
+        return inventory !== undefined && inventory > 0 && inventory <= threshold;
+      case "new_arrival":
+        if (!createdAt) return false;
+        var days = parseInt(c.value, 10) || 30;
+        var diff = (new Date() - new Date(createdAt)) / 86400000;
+        return diff <= days;
+      case "discount_percent":
+        if (!comparePrice || comparePrice <= price) return false;
+        var pct = Math.round(((comparePrice - price) / comparePrice) * 100);
+        var val = parseInt(c.value, 10) || 0;
+        var op = c.operator || "greater_than";
+        if (op === "greater_than") return pct > val;
+        if (op === "less_than") return pct < val;
+        if (op === "equal_to") return pct === val;
+        if (op === "between") {
+          var parts = String(c.value).split("-");
+          return pct >= parseInt(parts[0], 10) && pct <= parseInt(parts[1], 10);
+        }
+        return false;
+      case "price_range":
+        var range = String(c.value).split("-");
+        var min = parseFloat(range[0]) || 0;
+        var max = parseFloat(range[1]) || Infinity;
+        return price >= min && price <= max;
+      case "inventory_count":
+        if (inventory === undefined) return false;
+        var cnt = parseInt(c.value, 10) || 0;
+        var iop = c.operator || "less_than";
+        if (iop === "less_than") return inventory < cnt;
+        if (iop === "greater_than") return inventory > cnt;
+        if (iop === "equal_to") return inventory === cnt;
+        return false;
+      default:
+        return true;
+    }
+  }
+
+  // Replace dynamic text placeholders with product data
+  function resolveDynamicText(text, productData) {
+    if (!productData) return text;
+    var p = productData;
+    var discount = 0;
+    if (p.compare_at_price && p.compare_at_price > p.price) {
+      discount = Math.round(((p.compare_at_price - p.price) / p.compare_at_price) * 100);
+    }
+    return text
+      .replace(/\{\{discount\}\}/g, String(discount))
+      .replace(/\{\{inventory\}\}/g, String(p.inventory_quantity || 0))
+      .replace(/\{\{sold\}\}/g, String(p.sold || 0))
+      .replace(/\{\{price\}\}/g, "$" + (p.price || 0).toFixed(2))
+      .replace(/\{\{compare_price\}\}/g, "$" + (p.compare_at_price || 0).toFixed(2));
+  }
+
+  // Check targeting against product metadata embedded in DOM
+  function badgeTargetMatch(badge, productEl) {
+    var t = badge.targeting;
+    if (!t || t.type === "all") return true;
+
+    // Try to extract product metadata from the DOM or Shopify globals
+    var productMeta = getProductMeta(productEl);
+    if (!productMeta) return true; // can't verify, show by default
+
+    switch (t.type) {
+      case "tag":
+        return productMeta.tags && productMeta.tags.indexOf(t.value) !== -1;
+      case "product_type":
+        return productMeta.type && productMeta.type.toLowerCase() === (t.value || "").toLowerCase();
+      case "vendor":
+        return productMeta.vendor && productMeta.vendor.toLowerCase() === (t.value || "").toLowerCase();
+      case "collection":
+        return productMeta.collections && productMeta.collections.indexOf(t.value) !== -1;
+      case "products":
+        var ids = (t.value || "").split(",").map(function (s) { return s.trim(); });
+        return productMeta.id && ids.indexOf(String(productMeta.id)) !== -1;
+      default:
+        return true;
+    }
+  }
+
+  // Extract product metadata from DOM context or Shopify global
+  function getProductMeta(el) {
+    // On product pages, use the global product JSON
+    if (window.__BADGEHQ_PRODUCT__) return window.__BADGEHQ_PRODUCT__;
+
+    // Try to find product JSON-LD
+    if (!window.__BADGEHQ_PRODUCT__ && window.ShopifyAnalytics && window.ShopifyAnalytics.meta && window.ShopifyAnalytics.meta.product) {
+      var m = window.ShopifyAnalytics.meta.product;
+      window.__BADGEHQ_PRODUCT__ = {
+        id: m.id, tags: [], type: m.type || "", vendor: m.vendor || "",
+        collections: [], price: 0, compare_at_price: 0, inventory_quantity: undefined,
+        created_at: null,
       };
-      var shapeStyles = {
-        circle: "border-radius:50%;width:48px;height:48px;",
-        rectangle: "border-radius:4px;padding:4px 10px;",
-        ribbon: "border-radius:0 4px 4px 0;padding:4px 12px 4px 8px;",
-        star: "border-radius:4px;width:48px;height:48px;clip-path:polygon(50% 0%,61% 35%,98% 35%,68% 57%,79% 91%,50% 70%,21% 91%,32% 57%,2% 35%,39% 35%);",
-        square: "border-radius:2px;width:48px;height:48px;",
-      };
+      return window.__BADGEHQ_PRODUCT__;
+    }
 
-      el.style.cssText =
-        "position:absolute;z-index:10;display:flex;align-items:center;justify-content:center;" +
-        "background:" +
-        badge.badgeColor +
-        ";color:" +
-        badge.textColor +
-        ";font-size:11px;font-weight:700;line-height:1;" +
-        "width:auto;height:auto;max-width:max-content;white-space:nowrap;box-sizing:border-box;pointer-events:none;" +
-        (posStyles[badge.position] || posStyles["top-left"]) +
-        (shapeStyles[badge.shape] || shapeStyles["rectangle"]);
+    // On collection / home pages, try to read data attributes from the card
+    if (el) {
+      var card = el.closest("[data-product-id]");
+      if (card) {
+        return {
+          id: card.getAttribute("data-product-id"),
+          tags: (card.getAttribute("data-tags") || "").split(","),
+          type: card.getAttribute("data-product-type") || "",
+          vendor: card.getAttribute("data-vendor") || "",
+          collections: (card.getAttribute("data-collections") || "").split(","),
+        };
+      }
+    }
 
-      el.textContent = badge.text;
-      parent.appendChild(el);
+    return null;
+  }
+
+  // Fetch product JSON for condition evaluation (product pages only)
+  function fetchProductData(callback) {
+    if (window.__BADGEHQ_PRODUCT_DATA__) {
+      callback(window.__BADGEHQ_PRODUCT_DATA__);
+      return;
+    }
+    var path = window.location.pathname;
+    if (!path.match(/\/products\//)) { callback(null); return; }
+
+    fetch(path + ".json")
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        var p = data.product || {};
+        var v = (p.variants && p.variants[0]) || {};
+        window.__BADGEHQ_PRODUCT_DATA__ = {
+          id: p.id, price: parseFloat(v.price) || 0,
+          compare_at_price: parseFloat(v.compare_at_price) || 0,
+          inventory_quantity: v.inventory_quantity,
+          created_at: p.created_at, tags: (p.tags || "").split(", "),
+          type: p.product_type || "", vendor: p.vendor || "",
+          sold: 0, // Shopify doesn't expose this directly
+        };
+        callback(window.__BADGEHQ_PRODUCT_DATA__);
+      })
+      .catch(function () { callback(null); });
+  }
+
+  // Main product badges orchestrator — handles multi-badge, conditions, scheduling, pages
+  function renderProductBadges(badges, currentPage) {
+    // Filter badges by page and schedule first
+    var eligible = badges.filter(function (b) {
+      return badgeShowOnPage(b, currentPage) && badgeInSchedule(b);
+    });
+    if (eligible.length === 0) return;
+
+    // Fetch product data for condition evaluation, then render
+    fetchProductData(function (productData) {
+      var images = document.querySelectorAll(
+        ".product-card img, .product__media img, .grid-product__image, .product-image-container img"
+      );
+      if (images.length === 0)
+        images = document.querySelectorAll('[class*="product"] img');
+
+      images.forEach(function (img) {
+        var parent = img.closest("a") || img.parentElement;
+        if (!parent) return;
+        parent.style.position = "relative";
+
+        eligible.forEach(function (badge) {
+          // Check if this specific badge already rendered on this parent
+          if (parent.querySelector('.badgehq-pb-' + badge.id)) return;
+
+          // Check targeting
+          if (!badgeTargetMatch(badge, parent)) return;
+
+          // Check automated condition
+          if (!badgeConditionMet(badge, productData)) return;
+
+          // Render image badge
+          if (badge.badgeType === "image" && badge.imageUrl) {
+            var imgEl = document.createElement("img");
+            imgEl.className = "badgehq-product-badge badgehq-pb-" + badge.id;
+            imgEl.src = badge.imageUrl;
+            imgEl.alt = badge.text || "Badge";
+            imgEl.style.cssText =
+              "position:absolute;z-index:10;max-width:80px;height:auto;pointer-events:none;" +
+              "opacity:" + (badge.opacity || 1) + ";" +
+              (badge.rotation ? "transform:rotate(" + badge.rotation + "deg);" : "") +
+              (POS_STYLES[badge.position] || POS_STYLES["top-left"]) +
+              (badge.customCSS || "");
+            parent.appendChild(imgEl);
+            return;
+          }
+
+          // Render text / dynamic badge
+          var el = document.createElement("div");
+          el.className = "badgehq-product-badge badgehq-pb-" + badge.id;
+
+          var bgStyle = badge.gradient
+            ? "background:" + badge.gradient + ";"
+            : "background:" + badge.badgeColor + ";";
+
+          el.style.cssText =
+            "position:absolute;z-index:10;display:flex;align-items:center;justify-content:center;" +
+            bgStyle +
+            "color:" + badge.textColor + ";" +
+            "font-size:" + (badge.fontSize || 11) + "px;font-weight:700;line-height:1;" +
+            "width:auto;height:auto;max-width:max-content;white-space:nowrap;box-sizing:border-box;pointer-events:none;" +
+            "opacity:" + (badge.opacity || 1) + ";" +
+            (badge.rotation ? "transform:rotate(" + badge.rotation + "deg);" : "") +
+            (badge.borderWidth ? "border:" + badge.borderWidth + "px solid " + (badge.borderColor || "#000") + ";" : "") +
+            (POS_STYLES[badge.position] || POS_STYLES["top-left"]) +
+            (SHAPE_STYLES[badge.shape] || SHAPE_STYLES["rectangle"]) +
+            (badge.customCSS || "");
+
+          // Resolve dynamic text
+          var displayText = badge.badgeType === "dynamic"
+            ? resolveDynamicText(badge.text, productData)
+            : badge.text;
+
+          el.textContent = displayText;
+          parent.appendChild(el);
+        });
+      });
     });
   }
 

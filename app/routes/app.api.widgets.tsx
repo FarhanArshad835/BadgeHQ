@@ -26,7 +26,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const [trustBadges, productBadges, announcementBars, freeShippingBars, stickyCarts, countdownTimers] =
     await Promise.all([
       prisma.trustBadge.findMany({ where: { shop, isEnabled: true } }),
-      prisma.productBadge.findMany({ where: { shop, isActive: true } }),
+      prisma.productBadge.findMany({ where: { shop, isActive: true }, orderBy: { priority: "desc" } }),
       prisma.announcementBar.findMany({ where: { shop, isActive: true } }),
       prisma.freeShippingBar.findMany({ where: { shop, isActive: true } }),
       prisma.stickyCart.findMany({ where: { shop, isActive: true } }),
@@ -47,11 +47,24 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     productBadges: productBadges.map((b) => ({
       id: b.id,
       text: b.text,
+      badgeType: b.badgeType,
       shape: b.shape,
       badgeColor: b.badgeColor,
       textColor: b.textColor,
       position: b.position,
       targeting: JSON.parse(b.targeting),
+      condition: JSON.parse(b.condition),
+      pages: JSON.parse(b.pages),
+      schedule: JSON.parse(b.schedule),
+      priority: b.priority,
+      imageUrl: b.imageUrl,
+      fontSize: b.fontSize,
+      opacity: b.opacity,
+      rotation: b.rotation,
+      gradient: b.gradient,
+      borderColor: b.borderColor,
+      borderWidth: b.borderWidth,
+      customCSS: b.customCSS,
     })),
     announcementBars: announcementBars.map((b) => ({
       id: b.id,
