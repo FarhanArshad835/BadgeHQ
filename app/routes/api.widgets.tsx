@@ -1,17 +1,37 @@
 /**
- * App Proxy endpoint: handles storefront requests proxied by Shopify
- * from /apps/badgehq/api/widgets → /api/widgets
+ * Public widget API endpoint.
+ * Called directly from the storefront via cross-origin fetch.
+ * Also handles app proxy requests forwarded by Shopify.
  */
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import type { LoaderFunctionArgs, ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import prisma from "../db.server";
 
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+};
+
+// Handle CORS preflight
+export const action = async ({ request }: ActionFunctionArgs) => {
+  if (request.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: CORS_HEADERS });
+  }
+  return json({ error: "Method not allowed" }, { status: 405, headers: CORS_HEADERS });
+};
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
+  // Handle CORS preflight that may arrive as GET on some browsers
+  if (request.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: CORS_HEADERS });
+  }
+
   const url = new URL(request.url);
   const shop = url.searchParams.get("shop");
 
   if (!shop) {
-    return json({ error: "Missing shop parameter" }, { status: 400 });
+    return json({ error: "Missing shop parameter" }, { status: 400, headers: CORS_HEADERS });
   }
 
   const appSettings = await prisma.appSettings.findUnique({
@@ -23,7 +43,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       { enabled: false, widgets: {} },
       {
         headers: {
-          "Access-Control-Allow-Origin": "*",
+          ...CORS_HEADERS,
           "Cache-Control": "public, max-age=60",
         },
       },
@@ -105,7 +125,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     { enabled: true, globalSettings, widgets },
     {
       headers: {
-        "Access-Control-Allow-Origin": "*",
+        ...CORS_HEADERS,
         "Cache-Control": "public, max-age=60",
       },
     },

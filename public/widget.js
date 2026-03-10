@@ -1,7 +1,7 @@
 /**
  * BadgeHQ - Storefront Widget Script
  * Vanilla JS, no dependencies. Injected into store themes.
- * Fetches config from app proxy and renders all active widgets.
+ * Fetches config from app server and renders all active widgets.
  */
 (function () {
   "use strict";
@@ -9,7 +9,32 @@
   var SHOP = window.Shopify && window.Shopify.shop;
   if (!SHOP) return;
 
-  var API_URL = "/apps/badgehq/api/widgets?shop=" + encodeURIComponent(SHOP);
+  // Derive the app server URL from this script's own src attribute
+  // (the ScriptTag points to ${SHOPIFY_APP_URL}/widget.js)
+  var scriptEl = document.currentScript || (function () {
+    var scripts = document.getElementsByTagName("script");
+    for (var i = scripts.length - 1; i >= 0; i--) {
+      if (scripts[i].src && scripts[i].src.indexOf("widget.js") !== -1) {
+        return scripts[i];
+      }
+    }
+    return null;
+  })();
+
+  var APP_ORIGIN = "";
+  if (scriptEl && scriptEl.src) {
+    try {
+      var u = new URL(scriptEl.src);
+      APP_ORIGIN = u.origin;
+    } catch (e) {
+      // fallback: strip /widget.js from the src
+      APP_ORIGIN = scriptEl.src.replace(/\/widget\.js(\?.*)?$/, "");
+    }
+  }
+
+  var API_URL = APP_ORIGIN
+    ? APP_ORIGIN + "/api/widgets?shop=" + encodeURIComponent(SHOP)
+    : "/apps/badgehq/api/widgets?shop=" + encodeURIComponent(SHOP);
 
   function onReady(fn) {
     if (document.readyState === "loading") {
