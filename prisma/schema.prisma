@@ -44,12 +44,28 @@ model ProductBadge {
   id         String   @id @default(cuid())
   shop       String
   text       String   @default("Sale")
+  badgeType  String   @default("text")
   shape      String   @default("rectangle")
   badgeColor String   @default("#e74c3c")
   textColor  String   @default("#ffffff")
   position   String   @default("top-left")
   targeting  String   @default("{\"type\":\"all\"}")
   isActive   Boolean  @default(true)
+
+  // ShineTrust-level features
+  condition  String   @default("{\"type\":\"none\"}")
+  pages      String   @default("[\"all\"]")
+  schedule   String   @default("{}")
+  priority   Int      @default(0)
+  imageUrl   String   @default("")
+  fontSize   Int      @default(11)
+  opacity    Float    @default(1.0)
+  rotation   Int      @default(0)
+  gradient   String   @default("")
+  borderColor String  @default("")
+  borderWidth Int     @default(0)
+  customCSS  String   @default("")
+
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
