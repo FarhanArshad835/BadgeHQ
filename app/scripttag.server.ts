@@ -69,6 +69,12 @@ export async function ensureScriptTag(admin: { graphql: GraphQLClient }) {
       console.log("BadgeHQ: ScriptTag registered:", widgetSrc);
     }
   } catch (e) {
-    console.error("BadgeHQ: ScriptTag registration failed:", e);
+    // Catch both Error objects and thrown Response objects (from Shopify client error handler).
+    // A thrown Response here could break the afterAuth hook and cause an auth loop.
+    if (e instanceof Response) {
+      console.error("BadgeHQ: ScriptTag registration got HTTP error:", e.status, e.statusText);
+    } else {
+      console.error("BadgeHQ: ScriptTag registration failed:", e);
+    }
   }
 }
