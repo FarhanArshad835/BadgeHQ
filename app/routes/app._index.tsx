@@ -11,7 +11,6 @@ import {
   Box,
   Badge,
   Banner,
-  Button,
   List,
 } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
@@ -41,9 +40,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     prisma.appSettings.findUnique({ where: { shop } }),
   ]);
 
-  // Build Theme Editor deep link to App Embeds tab
+  // Build Theme Editor deep link to App Embeds tab.
+  // Use admin.shopify.com/store/{handle} format (not myshopify.com/admin)
+  // which is the URL Shopify admin uses internally.
+  const shopHandle = shop.replace(".myshopify.com", "");
   const apiKey = process.env.SHOPIFY_API_KEY || "";
-  const themeEditorUrl = `https://${shop}/admin/themes/current/editor?context=apps&activateAppId=${apiKey}/badgehq-widget`;
+  const themeEditorUrl = `https://admin.shopify.com/store/${shopHandle}/themes/current/editor?context=apps&activateAppId=${apiKey}/badgehq-widget`;
 
   return json({
     stats: {
@@ -133,9 +135,33 @@ export default function Dashboard() {
                     </List.Item>
                   </List>
                   <Box paddingBlockStart="200">
-                    <Button url={themeEditorUrl} external>
-                      Open Theme Editor
-                    </Button>
+                    {/*
+                      target="_top" navigates the top-level browser frame to the URL,
+                      escaping the embedded iframe. App Bridge cannot intercept this.
+                      Polaris Button / window.open both fail inside cross-origin iframes.
+                    */}
+                    <a
+                      href={themeEditorUrl}
+                      target="_top"
+                      rel="noopener noreferrer"
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "4px",
+                        padding: "6px 12px",
+                        border: "1px solid #8c9196",
+                        borderRadius: "6px",
+                        background: "#ffffff",
+                        color: "#202223",
+                        fontSize: "0.875rem",
+                        fontWeight: 500,
+                        textDecoration: "none",
+                        cursor: "pointer",
+                        lineHeight: 1.5,
+                      }}
+                    >
+                      Open Theme Editor ↗
+                    </a>
                   </Box>
                 </BlockStack>
               </Banner>
