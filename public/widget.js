@@ -379,11 +379,13 @@
   /* ===================== PRODUCT BADGES ===================== */
 
   // Shared position & shape maps
+  // Explicitly set opposing axis to "auto" so Dawn's .media > * { top:0; left:0 }
+  // doesn't combine with our bottom/right values and stretch the badge to full height/width.
   var POS_STYLES = {
-    "top-left": "top:8px;left:8px;",
-    "top-right": "top:8px;right:8px;",
-    "bottom-left": "bottom:8px;left:8px;",
-    "bottom-right": "bottom:8px;right:8px;",
+    "top-left":     "top:8px;left:8px;bottom:auto;right:auto;",
+    "top-right":    "top:8px;right:8px;bottom:auto;left:auto;",
+    "bottom-left":  "bottom:8px;left:8px;top:auto;right:auto;",
+    "bottom-right": "bottom:8px;right:8px;top:auto;left:auto;",
   };
   var SHAPE_STYLES = {
     circle: "border-radius:50%;width:48px;height:48px;",
