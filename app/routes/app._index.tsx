@@ -44,8 +44,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   // Use admin.shopify.com/store/{handle} format (not myshopify.com/admin)
   // which is the URL Shopify admin uses internally.
   const shopHandle = shop.replace(".myshopify.com", "");
-  const apiKey = process.env.SHOPIFY_API_KEY || "";
-  const themeEditorUrl = `https://admin.shopify.com/store/${shopHandle}/themes/current/editor?context=apps&activateAppId=${apiKey}/badgehq-widget`;
+  // activateAppId only works after `shopify app deploy` registers the extension.
+  // Until then, just open the App Embeds tab so the merchant can find it manually.
+  const themeEditorUrl = `https://admin.shopify.com/store/${shopHandle}/themes/current/editor?context=apps`;
 
   return json({
     stats: {
