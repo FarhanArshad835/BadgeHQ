@@ -44,7 +44,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       {
         headers: {
           ...CORS_HEADERS,
-          "Cache-Control": "public, max-age=0",
+          "Cache-Control": "no-store, no-cache, must-revalidate",
         },
       },
     );
