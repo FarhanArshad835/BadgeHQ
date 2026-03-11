@@ -47,7 +47,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
     if (w.announcementBars) w.announcementBars.forEach(function(bar) { renderAnnouncementBar(bar, page); });
     if (w.trustBadges) w.trustBadges.forEach(function(badge) { renderTrustBadge(badge, page, gs); });
-    if (w.productBadges) w.productBadges.forEach(function(badge) { renderProductBadge(badge); });
+    if (w.productBadges) w.productBadges.forEach(function(badge) { renderProductBadge(badge, page); });
     if (w.freeShippingBars) w.freeShippingBars.forEach(function(bar) { renderFreeShippingBar(bar, page); });
     if (w.stickyCarts) w.stickyCarts.forEach(function(cart) { renderStickyCart(cart); });
     if (w.countdownTimers) w.countdownTimers.forEach(function(timer) { renderCountdownTimer(timer, page, gs); });
@@ -167,41 +167,71 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
 
   // PRODUCT BADGES
-  function renderProductBadge(badge) {
-    var images = document.querySelectorAll('.product-card img, .product__media img, .grid-product__image, .product-image-container img');
-    if (images.length === 0) images = document.querySelectorAll('[class*="product"] img');
+  function renderProductBadge(badge, page) {
+    if (!shouldShowOnPage(badge.pages, page)) return;
 
-    images.forEach(function(img) {
-      var parent = img.closest('a') || img.parentElement;
-      if (!parent || parent.querySelector('.badgehq-product-badge')) return;
+    var posStyles = {
+      'top-left': 'top:8px;left:8px;',
+      'top-right': 'top:8px;right:8px;',
+      'bottom-left': 'bottom:8px;left:8px;',
+      'bottom-right': 'bottom:8px;right:8px;',
+    };
+    var shapeStyles = {
+      'circle': 'border-radius:50%;width:48px;height:48px;',
+      'rectangle': 'border-radius:4px;padding:4px 10px;',
+      'ribbon': 'border-radius:0 4px 4px 0;padding:4px 12px 4px 8px;',
+      'star': 'border-radius:4px;width:48px;height:48px;clip-path:polygon(50% 0%,61% 35%,98% 35%,68% 57%,79% 91%,50% 70%,21% 91%,32% 57%,2% 35%,39% 35%);',
+      'square': 'border-radius:2px;width:48px;height:48px;',
+    };
+    var badgeClass = 'badgehq-pb-' + badge.id;
+
+    function attachBadge(img) {
+      // Use the image's direct parent so position:absolute is relative to the image area
+      var parent = img.parentElement;
+      if (!parent) return;
+      if (parent.querySelector('.' + badgeClass)) return;
       parent.style.position = 'relative';
-      parent.style.overflow = 'hidden';
 
       var el = document.createElement('div');
-      el.className = 'badgehq-product-badge';
-      var posStyles = {
-        'top-left': 'top:8px;left:8px;',
-        'top-right': 'top:8px;right:8px;',
-        'bottom-left': 'bottom:8px;left:8px;',
-        'bottom-right': 'bottom:8px;right:8px;',
-      };
-
-      var shapeStyles = {
-        'circle': 'border-radius:50%;width:48px;height:48px;',
-        'rectangle': 'border-radius:4px;padding:4px 10px;',
-        'ribbon': 'border-radius:0 4px 4px 0;padding:4px 12px 4px 8px;',
-        'star': 'border-radius:4px;width:48px;height:48px;clip-path:polygon(50% 0%,61% 35%,98% 35%,68% 57%,79% 91%,50% 70%,21% 91%,32% 57%,2% 35%,39% 35%);',
-        'square': 'border-radius:2px;width:48px;height:48px;',
-      };
-
+      el.className = 'badgehq-product-badge ' + badgeClass;
       el.style.cssText = 'position:absolute;z-index:10;display:flex;align-items:center;justify-content:center;' +
         'background:' + badge.badgeColor + ';color:' + badge.textColor + ';font-size:11px;font-weight:700;' +
         (posStyles[badge.position] || posStyles['top-left']) +
         (shapeStyles[badge.shape] || shapeStyles['rectangle']);
-
       el.textContent = badge.text;
       parent.appendChild(el);
-    });
+    }
+
+    function findAndAttach() {
+      // Broad set of selectors covering Dawn, Debut, Broadcast, Impulse, and other popular themes
+      var selectors = [
+        '.product-card img',
+        '.product-card-wrapper img',
+        '.card__media img',
+        '.card-product__image img',
+        '.product__media img',
+        '.product-media-container img',
+        '.grid-product__image',
+        '.product-image-container img',
+        '.product-item__image img',
+        '.product-grid-item img',
+        '[class*="product-card"] img',
+        '[class*="ProductCard"] img',
+        '[class*="product-image"] img',
+        'a[href*="/products/"] img',
+      ].join(',');
+
+      var images = document.querySelectorAll(selectors);
+      images.forEach(attachBadge);
+    }
+
+    findAndAttach();
+
+    // Handle lazy-loaded / dynamically injected images
+    var observer = new MutationObserver(function() { findAndAttach(); });
+    observer.observe(document.body, { childList: true, subtree: true });
+    // Disconnect after 10s to avoid long-running observers
+    setTimeout(function() { observer.disconnect(); }, 10000);
   }
 
   // FREE SHIPPING BAR

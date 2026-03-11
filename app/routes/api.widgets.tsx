@@ -44,7 +44,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       {
         headers: {
           ...CORS_HEADERS,
-          "Cache-Control": "public, max-age=60",
+          "Cache-Control": "public, max-age=0",
         },
       },
     );
@@ -139,7 +139,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     {
       headers: {
         ...CORS_HEADERS,
-        "Cache-Control": "public, max-age=60",
+        "Cache-Control": "public, max-age=0",
       },
     },
   );
