@@ -3,10 +3,8 @@ import {
   ApiVersion,
   AppDistribution,
   shopifyApp,
-  DeliveryMethod,
 } from "@shopify/shopify-app-remix/server";
 import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prisma";
-import { restResources } from "@shopify/shopify-api/rest/admin/2025-01";
 import prisma from "./db.server";
 import { ensureScriptTag } from "./scripttag.server";
 
@@ -32,8 +30,7 @@ const shopify = shopifyApp({
   appUrl: process.env.SHOPIFY_APP_URL || "",
   authPathPrefix: "/auth",
   sessionStorage: new PrismaSessionStorage(prisma),
-  distribution: AppDistribution.SingleMerchant,
-  restResources: restResources as any,
+  distribution: AppDistribution.AppStore,
   isEmbeddedApp: true,
   future: {
     unstable_newEmbeddedAuthStrategy: true,
