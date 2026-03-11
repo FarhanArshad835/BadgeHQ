@@ -9,20 +9,18 @@ import {
   Text,
   InlineGrid,
   Box,
-  Icon,
   Badge,
+  Banner,
+  Button,
+  List,
 } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { ensureScriptTag } from "../scripttag.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session, admin } = await authenticate.admin(request);
+  const { session } = await authenticate.admin(request);
   const shop = session.shop;
-
-  // Ensure ScriptTag is registered so widget.js loads on the storefront
-  await ensureScriptTag(admin);
 
   const [
     trustBadgeCount,
@@ -42,6 +40,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     prisma.appSettings.findUnique({ where: { shop } }),
   ]);
 
+  // Build Theme Editor deep link to App Embeds tab
+  const apiKey = process.env.SHOPIFY_API_KEY || "";
+  const themeEditorUrl = `https://${shop}/admin/themes/current/editor?context=apps&activateAppId=${apiKey}/badgehq-widget`;
+
   return json({
     stats: {
       trustBadges: trustBadgeCount,
@@ -52,6 +54,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       countdownTimers: countdownTimerCount,
     },
     isEnabled: appSettings?.isEnabled ?? true,
+    themeEditorUrl,
   });
 };
 
@@ -95,7 +98,7 @@ const features = [
 ];
 
 export default function Dashboard() {
-  const { stats, isEnabled } = useLoaderData<typeof loader>();
+  const { stats, isEnabled, themeEditorUrl } = useLoaderData<typeof loader>();
   const navigate = useNavigate();
 
   return (
@@ -104,24 +107,57 @@ export default function Dashboard() {
       <BlockStack gap="500">
         <Layout>
           <Layout.Section>
-            <Card>
-              <BlockStack gap="400">
-                <InlineGrid columns={2} alignItems="center">
-                  <Text as="h2" variant="headingLg">
-                    Welcome to BadgeHQ
+            <BlockStack gap="400">
+              {/* Setup instructions banner */}
+              <Banner
+                title="Activate BadgeHQ on your storefront"
+                tone="warning"
+                action={{
+                  content: "Open Theme Editor",
+                  url: themeEditorUrl,
+                  external: true,
+                }}
+              >
+                <BlockStack gap="200">
+                  <Text as="p" variant="bodyMd">
+                    BadgeHQ uses a Theme App Extension to display widgets on your storefront. Follow these steps to get started:
                   </Text>
-                  <Box>
-                    <Badge tone={isEnabled ? "success" : "critical"}>
-                      {isEnabled ? "App Enabled" : "App Disabled"}
-                    </Badge>
-                  </Box>
-                </InlineGrid>
-                <Text as="p" variant="bodyMd" tone="subdued">
-                  Boost your store's trust and conversions with badges, banners,
-                  and conversion tools.
-                </Text>
-              </BlockStack>
-            </Card>
+                  <List type="number">
+                    <List.Item>
+                      Click <strong>Open Theme Editor</strong> above to go directly to the App Embeds section.
+                    </List.Item>
+                    <List.Item>
+                      Find <strong>BadgeHQ Widget</strong> in the App Embeds list and toggle it on.
+                    </List.Item>
+                    <List.Item>
+                      Click <strong>Save</strong> in the Theme Editor to activate the widget on your store.
+                    </List.Item>
+                    <List.Item>
+                      Return here to create and manage your badges and widgets.
+                    </List.Item>
+                  </List>
+                </BlockStack>
+              </Banner>
+
+              <Card>
+                <BlockStack gap="400">
+                  <InlineGrid columns={2} alignItems="center">
+                    <Text as="h2" variant="headingLg">
+                      Welcome to BadgeHQ
+                    </Text>
+                    <Box>
+                      <Badge tone={isEnabled ? "success" : "critical"}>
+                        {isEnabled ? "App Enabled" : "App Disabled"}
+                      </Badge>
+                    </Box>
+                  </InlineGrid>
+                  <Text as="p" variant="bodyMd" tone="subdued">
+                    Boost your store's trust and conversions with badges, banners,
+                    and conversion tools.
+                  </Text>
+                </BlockStack>
+              </Card>
+            </BlockStack>
           </Layout.Section>
         </Layout>
 

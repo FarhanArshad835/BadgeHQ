@@ -6,7 +6,6 @@ import {
 } from "@shopify/shopify-app-remix/server";
 import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prisma";
 import prisma from "./db.server";
-import { ensureScriptTag } from "./scripttag.server";
 
 // Validate critical env vars at startup
 const requiredVars = ["SHOPIFY_API_KEY", "SHOPIFY_API_SECRET", "SHOPIFY_APP_URL", "SCOPES"] as const;
@@ -35,16 +34,6 @@ const shopify = shopifyApp({
   future: {
     unstable_newEmbeddedAuthStrategy: true,
   } as any,
-  hooks: {
-    afterAuth: async ({ session, admin }) => {
-      try {
-        await ensureScriptTag(admin);
-      } catch (error) {
-        // Never let the afterAuth hook break the auth flow
-        console.error("BadgeHQ: afterAuth hook error:", error);
-      }
-    },
-  },
   ...(process.env.SHOP_CUSTOM_DOMAIN
     ? { customShopDomains: [process.env.SHOP_CUSTOM_DOMAIN] }
     : {}),
