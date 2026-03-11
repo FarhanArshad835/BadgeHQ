@@ -192,11 +192,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
                 img.getAttribute('data-lazy-src') || img.getAttribute('data-original') || '';
       if (!src) return;
 
-      // Use the image's direct parent so position:absolute is relative to the image area
+      // Walk up past <picture> — appending a <div> inside <picture> is invalid HTML
+      // and causes browsers to re-render, hiding the image
       var parent = img.parentElement;
+      if (parent && parent.tagName === 'PICTURE') parent = parent.parentElement;
       if (!parent) return;
       if (parent.querySelector('.' + badgeClass)) return;
-      if (!parent.style.position || parent.style.position === 'static') {
+
+      // Use computed style so we don't override CSS-positioned parents
+      if (window.getComputedStyle(parent).position === 'static') {
         parent.style.position = 'relative';
       }
 
