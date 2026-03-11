@@ -58,7 +58,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     if (path.match(/\\/products\\//)) return 'product';
     if (path.match(/\\/cart/)) return 'cart';
     if (path.match(/\\/collections\\//)) return 'collection';
-    if (path === '/' || path === '') return 'home';
+    // Match homepage: exactly "/" or Shopify Markets locale prefixes like /en, /fr, /en-US
+    if (path === '/' || path === '' || /^\\/[a-z]{2}(-[a-z]{2,4})?\\/?\$/i.test(path)) return 'home';
     return 'other';
   }
 
@@ -186,9 +187,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     var badgeClass = 'badgehq-pb-' + badge.id;
 
     function attachBadge(img) {
-      // Skip placeholders: no real src, tiny SVGs, or base64 blanks
-      var src = img.getAttribute('src') || '';
-      if (!src || src.indexOf('data:image/gif') === 0 || src.indexOf('data:image/svg') === 0) return;
+      // Skip images with no source at all (not even a lazy-load data attribute)
+      var src = img.getAttribute('src') || img.getAttribute('data-src') ||
+                img.getAttribute('data-lazy-src') || img.getAttribute('data-original') || '';
+      if (!src) return;
 
       // Use the image's direct parent so position:absolute is relative to the image area
       var parent = img.parentElement;
