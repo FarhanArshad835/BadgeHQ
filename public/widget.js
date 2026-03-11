@@ -92,7 +92,8 @@
     if (path.match(/\/products\//)) return "product";
     if (path.match(/\/cart/)) return "cart";
     if (path.match(/\/collections\//)) return "collection";
-    if (path === "/" || path === "") return "home";
+    // Match homepage: exactly "/" or Shopify Markets locale prefixes like /en, /fr, /en-US
+    if (path === "/" || path === "" || /^\/[a-z]{2}(-[a-z]{2,4})?\/?\s*$/i.test(path)) return "home";
     return "other";
   }
 
@@ -577,26 +578,72 @@
 
     // Fetch product data for condition evaluation, then render
     fetchProductData(function (productData) {
-      var images = document.querySelectorAll(
-        ".product-card img, .product__media img, .grid-product__image, .product-image-container img"
-      );
-      if (images.length === 0)
-        images = document.querySelectorAll('[class*="product"] img');
 
-      images.forEach(function (img) {
-        var parent = img.closest("a") || img.parentElement;
-        if (!parent) return;
-        parent.style.position = "relative";
+      // Selectors covering Dawn, Debut, Broadcast, Impulse and other popular themes
+      var SELECTORS = [
+        ".product-card img",
+        ".product-card-wrapper img",
+        ".card__media img",
+        ".card-product__image img",
+        ".product__media img",
+        ".product-media-container img",
+        ".grid-product__image",
+        ".product-image-container img",
+        ".product-item__image img",
+        ".product-grid-item img",
+        '[class*="product-card"] img',
+        '[class*="ProductCard"] img',
+        '[class*="product-image"] img',
+        'a[href*="/products/"] img',
+      ].join(",");
+
+      function attachBadges(img) {
+        // Skip images inside navigation/header — they flash briefly then nav JS hides them
+        if (img.closest("header, nav, .site-header, .site-nav, [role='navigation'], #site-nav, #header")) return;
+
+        // Skip hidden images (display:none parent). offsetWidth is reliable for Dawn theme
+        // which uses position:absolute + padding-bottom aspect ratio (offsetHeight is 0 there).
+        if (img.offsetWidth === 0) return;
+
+        // Skip placeholder GIFs / images that haven't decoded yet
+        if (!img.complete || img.naturalWidth <= 1) return;
 
         eligible.forEach(function (badge) {
-          // Check if this specific badge already rendered on this parent
-          if (parent.querySelector('.badgehq-pb-' + badge.id)) return;
+          var key = "data-badgehq-" + badge.id;
+
+          // Track on the image element itself (survives parent DOM changes)
+          if (img.getAttribute(key)) return;
+          img.setAttribute(key, "1");
 
           // Check targeting
-          if (!badgeTargetMatch(badge, parent)) return;
+          if (!badgeTargetMatch(badge, img)) return;
 
           // Check automated condition
           if (!badgeConditionMet(badge, productData)) return;
+
+          // Walk up the DOM to find the nearest already-positioned ancestor.
+          // NEVER modify existing element CSS — setting position:relative on a
+          // static ancestor resets Dawn's padding-bottom aspect-ratio layout,
+          // making images collapse to height:0 (the "images disappear" bug).
+          var container = null;
+          var node = img.parentElement;
+          for (var i = 0; i < 8; i++) {
+            if (!node || node === document.body) break;
+            if (node.tagName === "PICTURE") { node = node.parentElement; continue; }
+            if (window.getComputedStyle(node).position !== "static") { container = node; break; }
+            node = node.parentElement;
+          }
+          // Fallback: use first non-inline block parent, set position only then
+          if (!container) {
+            node = img.parentElement;
+            while (node && node !== document.body && (
+              node.tagName === "PICTURE" ||
+              window.getComputedStyle(node).display === "inline"
+            )) { node = node.parentElement; }
+            if (!node || node === document.body) return;
+            container = node;
+            container.style.position = "relative";
+          }
 
           // Render image badge
           if (badge.badgeType === "image" && badge.imageUrl) {
@@ -610,7 +657,7 @@
               (badge.rotation ? "transform:rotate(" + badge.rotation + "deg);" : "") +
               (POS_STYLES[badge.position] || POS_STYLES["top-left"]) +
               (badge.customCSS || "");
-            parent.appendChild(imgEl);
+            container.appendChild(imgEl);
             return;
           }
 
@@ -635,15 +682,23 @@
             (SHAPE_STYLES[badge.shape] || SHAPE_STYLES["rectangle"]) +
             (badge.customCSS || "");
 
-          // Resolve dynamic text
-          var displayText = badge.badgeType === "dynamic"
+          el.textContent = badge.badgeType === "dynamic"
             ? resolveDynamicText(badge.text, productData)
             : badge.text;
 
-          el.textContent = displayText;
-          parent.appendChild(el);
+          container.appendChild(el);
         });
-      });
+      }
+
+      function findAndAttach() {
+        document.querySelectorAll(SELECTORS).forEach(attachBadges);
+      }
+
+      // Delay first run so theme JS (lazy-loaders, image reveal animations) finishes
+      // before we touch the DOM. Retries catch images loaded later (lazy scroll, AJAX).
+      setTimeout(findAndAttach, 1000);
+      setTimeout(findAndAttach, 2500);
+      setTimeout(findAndAttach, 6000);
     });
   }
 
