@@ -21,7 +21,7 @@ import {
   ChoiceList,
   Tag,
 } from "@shopify/polaris";
-import { TitleBar, ResourcePicker } from "@shopify/app-bridge-react";
+import { TitleBar, useAppBridge } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 
@@ -83,6 +83,7 @@ export default function NewProductBadge() {
   const actionData = useActionData<{ success?: boolean; error?: string }>();
   const navigate = useNavigate();
   const submit = useSubmit();
+  const shopify = useAppBridge();
 
   // Basic fields
   const [text, setText] = useState("Sale");
@@ -97,8 +98,6 @@ export default function NewProductBadge() {
   const [targetType, setTargetType] = useState("all");
   const [targetValue, setTargetValue] = useState("");
   const [targetLabels, setTargetLabels] = useState<string[]>([]);
-  const [productPickerOpen, setProductPickerOpen] = useState(false);
-  const [collectionPickerOpen, setCollectionPickerOpen] = useState(false);
 
   // Automated conditions (ShineTrust-level)
   const [conditionType, setConditionType] = useState("none");
@@ -128,21 +127,22 @@ export default function NewProductBadge() {
   const [borderWidth, setBorderWidth] = useState(0);
   const [customCSS, setCustomCSS] = useState("");
 
-  const handleProductSelection = useCallback((resources: { selection: Array<{ id: string; title: string }> }) => {
-    const ids = resources.selection.map((p) => p.id.replace("gid://shopify/Product/", ""));
-    setTargetValue(ids.join(","));
-    setTargetLabels(resources.selection.map((p) => p.title));
-    setProductPickerOpen(false);
-  }, []);
+  const openProductPicker = useCallback(async () => {
+    const selected = await shopify.resourcePicker({ type: "product", multiple: true, selectionIds: targetValue ? targetValue.split(",").map((id) => ({ id: "gid://shopify/Product/" + id.trim() })) : [] });
+    if (selected) {
+      setTargetValue(selected.map((p: any) => p.id.replace("gid://shopify/Product/", "")).join(","));
+      setTargetLabels(selected.map((p: any) => p.title));
+    }
+  }, [shopify, targetValue]);
 
-  const handleCollectionSelection = useCallback((resources: { selection: Array<{ id: string; title: string; handle: string }> }) => {
-    const col = resources.selection[0];
-    if (col) {
+  const openCollectionPicker = useCallback(async () => {
+    const selected = await shopify.resourcePicker({ type: "collection", multiple: false });
+    if (selected && selected[0]) {
+      const col = selected[0] as any;
       setTargetValue(col.handle || col.id.replace("gid://shopify/Collection/", ""));
       setTargetLabels([col.title]);
     }
-    setCollectionPickerOpen(false);
-  }, []);
+  }, [shopify]);
 
   const handleSave = () => {
     const data = {
@@ -504,21 +504,6 @@ export default function NewProductBadge() {
                   Choose which products this badge appears on.
                 </Text>
 
-                <ResourcePicker
-                  resourceType="Product"
-                  open={productPickerOpen}
-                  onSelection={handleProductSelection}
-                  onCancel={() => setProductPickerOpen(false)}
-                  allowMultiple
-                  showVariants={false}
-                />
-                <ResourcePicker
-                  resourceType="Collection"
-                  open={collectionPickerOpen}
-                  onSelection={handleCollectionSelection}
-                  onCancel={() => setCollectionPickerOpen(false)}
-                />
-
                 <Select
                   label="Apply to"
                   options={[
@@ -535,7 +520,7 @@ export default function NewProductBadge() {
 
                 {targetType === "products" && (
                   <BlockStack gap="200">
-                    <Button onClick={() => setProductPickerOpen(true)}>Browse products</Button>
+                    <Button onClick={openProductPicker}>Browse products</Button>
                     {targetLabels.length > 0 ? (
                       <InlineStack gap="200" wrap>
                         {targetLabels.map((label, i) => (
@@ -555,7 +540,7 @@ export default function NewProductBadge() {
 
                 {targetType === "collection" && (
                   <BlockStack gap="200">
-                    <Button onClick={() => setCollectionPickerOpen(true)}>Browse collections</Button>
+                    <Button onClick={openCollectionPicker}>Browse collections</Button>
                     {targetLabels.length > 0 ? (
                       <InlineStack gap="200">
                         {targetLabels.map((label, i) => (
