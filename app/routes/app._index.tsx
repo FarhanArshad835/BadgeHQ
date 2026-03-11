@@ -18,14 +18,6 @@ import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 
-function openExternal(url: string) {
-  // In embedded apps the current window is an iframe inside admin.shopify.com.
-  // window.top breaks out of the iframe so the URL opens in the merchant's
-  // main browser tab instead of trying to load inside the iframe.
-  if (typeof window !== "undefined") {
-    (window.top ?? window).open(url, "_blank", "noopener,noreferrer");
-  }
-}
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -141,7 +133,7 @@ export default function Dashboard() {
                     </List.Item>
                   </List>
                   <Box paddingBlockStart="200">
-                    <Button onClick={() => openExternal(themeEditorUrl)}>
+                    <Button url={themeEditorUrl} external>
                       Open Theme Editor
                     </Button>
                   </Box>
