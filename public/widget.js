@@ -484,91 +484,121 @@
       .replace(/\{\{compare_price\}\}/g, "$" + (p.compare_at_price || 0).toFixed(2));
   }
 
-  // Check targeting against product metadata embedded in DOM
-  function badgeTargetMatch(badge, productEl) {
-    var t = badge.targeting;
-    if (!t || t.type === "all") return true;
+  // Per-product data cache keyed by handle — avoids duplicate fetches for same product
+  var _productDataCache = {};
 
-    // Try to extract product metadata from the DOM or Shopify globals
-    var productMeta = getProductMeta(productEl);
-    if (!productMeta) return true; // can't verify, show by default
-
-    switch (t.type) {
-      case "tag":
-        return productMeta.tags && productMeta.tags.indexOf(t.value) !== -1;
-      case "product_type":
-        return productMeta.type && productMeta.type.toLowerCase() === (t.value || "").toLowerCase();
-      case "vendor":
-        return productMeta.vendor && productMeta.vendor.toLowerCase() === (t.value || "").toLowerCase();
-      case "collection":
-        return productMeta.collections && productMeta.collections.indexOf(t.value) !== -1;
-      case "products":
-        var ids = (t.value || "").split(",").map(function (s) { return s.trim(); });
-        return productMeta.id && ids.indexOf(String(productMeta.id)) !== -1;
-      default:
-        return true;
-    }
+  // Parse a raw Shopify product API response into a normalized object
+  function _parseProductJson(data) {
+    var p = data.product || {};
+    var v = (p.variants && p.variants[0]) || {};
+    return {
+      id: p.id,
+      price: parseFloat(v.price) || 0,
+      compare_at_price: parseFloat(v.compare_at_price) || 0,
+      inventory_quantity: v.inventory_quantity,
+      created_at: p.created_at,
+      tags: (p.tags || "").split(",").map(function (t) { return t.trim(); }),
+      type: p.product_type || "",
+      vendor: p.vendor || "",
+      sold: 0,
+      collections: [],
+    };
   }
 
-  // Extract product metadata from DOM context or Shopify global
-  function getProductMeta(el) {
-    // On product pages, use the global product JSON
-    if (window.__BADGEHQ_PRODUCT__) return window.__BADGEHQ_PRODUCT__;
-
-    // Try to find product JSON-LD
-    if (!window.__BADGEHQ_PRODUCT__ && window.ShopifyAnalytics && window.ShopifyAnalytics.meta && window.ShopifyAnalytics.meta.product) {
-      var m = window.ShopifyAnalytics.meta.product;
-      window.__BADGEHQ_PRODUCT__ = {
-        id: m.id, tags: [], type: m.type || "", vendor: m.vendor || "",
-        collections: [], price: 0, compare_at_price: 0, inventory_quantity: undefined,
-        created_at: null,
-      };
-      return window.__BADGEHQ_PRODUCT__;
-    }
-
-    // On collection / home pages, try to read data attributes from the card
-    if (el) {
-      var card = el.closest("[data-product-id]");
-      if (card) {
-        return {
-          id: card.getAttribute("data-product-id"),
-          tags: (card.getAttribute("data-tags") || "").split(","),
-          type: card.getAttribute("data-product-type") || "",
-          vendor: card.getAttribute("data-vendor") || "",
-          collections: (card.getAttribute("data-collections") || "").split(","),
-        };
-      }
-    }
-
-    return null;
-  }
-
-  // Fetch product JSON for condition evaluation (product pages only)
-  function fetchProductData(callback) {
-    if (window.__BADGEHQ_PRODUCT_DATA__) {
-      callback(window.__BADGEHQ_PRODUCT_DATA__);
-      return;
-    }
-    var path = window.location.pathname;
-    if (!path.match(/\/products\//)) { callback(null); return; }
-
-    fetch(path + ".json")
+  // Fetch /products/{handle}.json, with per-handle caching
+  function fetchProductDataByHandle(handle, callback) {
+    if (_productDataCache[handle]) { callback(_productDataCache[handle]); return; }
+    fetch("/products/" + handle + ".json")
       .then(function (r) { return r.json(); })
       .then(function (data) {
-        var p = data.product || {};
-        var v = (p.variants && p.variants[0]) || {};
-        window.__BADGEHQ_PRODUCT_DATA__ = {
-          id: p.id, price: parseFloat(v.price) || 0,
-          compare_at_price: parseFloat(v.compare_at_price) || 0,
-          inventory_quantity: v.inventory_quantity,
-          created_at: p.created_at, tags: (p.tags || "").split(", "),
-          type: p.product_type || "", vendor: p.vendor || "",
-          sold: 0, // Shopify doesn't expose this directly
-        };
-        callback(window.__BADGEHQ_PRODUCT_DATA__);
+        _productDataCache[handle] = _parseProductJson(data);
+        callback(_productDataCache[handle]);
       })
       .catch(function () { callback(null); });
   }
+
+  // Find the product handle from the nearest product link relative to an img element
+  function getHandleFromImg(img) {
+    // Direct ancestor link
+    var link = img.closest('a[href*="/products/"]');
+    if (!link) {
+      // Look within the card container for any product link
+      var card = img.closest(
+        'li, article, [class*="product-card"], [class*="ProductCard"], ' +
+        '[class*="product-item"], [class*="grid-product"], .card-wrapper'
+      );
+      if (card) link = card.querySelector('a[href*="/products/"]');
+    }
+    if (!link) return null;
+    var m = (link.getAttribute("href") || "").match(/\/products\/([^/?#]+)/);
+    return m ? m[1] : null;
+  }
+
+  // Fetch product data for a given img element (works on all page types)
+  function fetchProductDataForImg(img, callback) {
+    // On product pages use the already-fetched global (avoids redundant fetches)
+    if (window.__BADGEHQ_PRODUCT_DATA__) { callback(window.__BADGEHQ_PRODUCT_DATA__); return; }
+
+    // On product pages, seed from current path
+    var pathMatch = window.location.pathname.match(/\/products\/([^/?#]+)/);
+    if (pathMatch) {
+      fetchProductDataByHandle(pathMatch[1], function (data) {
+        window.__BADGEHQ_PRODUCT_DATA__ = data;
+        callback(data);
+      });
+      return;
+    }
+
+    // On collection/home pages, find the handle from the card's link
+    var handle = getHandleFromImg(img);
+    if (handle) { fetchProductDataByHandle(handle, callback); return; }
+
+    callback(null);
+  }
+
+  // Check targeting using fetched product data (works on all page types)
+  function badgeTargetMatch(badge, img, productData) {
+    var t = badge.targeting;
+    if (!t || t.type === "all") return true;
+
+    // Use fetched product data when available (reliable on all pages)
+    if (productData) {
+      switch (t.type) {
+        case "tag":
+          return productData.tags && productData.tags.indexOf(t.value) !== -1;
+        case "product_type":
+          return productData.type && productData.type.toLowerCase() === (t.value || "").toLowerCase();
+        case "vendor":
+          return productData.vendor && productData.vendor.toLowerCase() === (t.value || "").toLowerCase();
+        case "products":
+          var ids = (t.value || "").split(",").map(function (s) { return s.trim(); });
+          return productData.id && ids.indexOf(String(productData.id)) !== -1;
+        case "collection":
+          // Collections not in product JSON — fall through to DOM fallback
+          break;
+        default:
+          return true;
+      }
+    }
+
+    // DOM fallback for collection targeting (data-product-collection or card container)
+    if (t.type === "collection") {
+      var card = img.closest("[data-product-collection], [data-collections]");
+      if (card) {
+        var cols = (card.getAttribute("data-product-collection") ||
+                    card.getAttribute("data-collections") || "").split(",");
+        return cols.indexOf(t.value) !== -1;
+      }
+      // Cannot verify collection targeting — show by default
+      return true;
+    }
+
+    // No data at all — show by default so badges aren't silently hidden
+    return true;
+  }
+
+  // Kept for backward compatibility — now delegates to per-img fetch
+  function fetchProductData(callback) { callback(null); }
 
   // Main product badges orchestrator — handles multi-badge, conditions, scheduling, pages
   function renderProductBadges(badges, currentPage) {
@@ -578,11 +608,8 @@
     });
     if (eligible.length === 0) return;
 
-    // Fetch product data for condition evaluation, then render
-    fetchProductData(function (productData) {
-
-      // Selectors covering Dawn, Debut, Broadcast, Impulse and other popular themes
-      var SELECTORS = [
+    // Selectors covering Dawn, Debut, Broadcast, Impulse and other popular themes
+    var SELECTORS = [
         ".product-card img",
         ".product-card-wrapper img",
         ".card__media img",
@@ -610,6 +637,13 @@
         // Skip placeholder GIFs / images that haven't decoded yet
         if (!img.complete || img.naturalWidth <= 1) return;
 
+        // Fetch per-card product data (works on all page types — home, collection, product)
+        fetchProductDataForImg(img, function (productData) {
+          renderBadgesOnImg(img, productData);
+        });
+      }
+
+      function renderBadgesOnImg(img, productData) {
         eligible.forEach(function (badge) {
           var key = "data-badgehq-" + badge.id;
 
@@ -617,10 +651,10 @@
           if (img.getAttribute(key)) return;
           img.setAttribute(key, "1");
 
-          // Check targeting
-          if (!badgeTargetMatch(badge, img)) return;
+          // Check targeting using fetched product data (accurate on all page types)
+          if (!badgeTargetMatch(badge, img, productData)) return;
 
-          // Check automated condition
+          // Check automated condition using fetched product data
           if (!badgeConditionMet(badge, productData)) return;
 
           // Walk up the DOM to find the nearest already-positioned ancestor.
@@ -698,10 +732,9 @@
 
       // Delay first run so theme JS (lazy-loaders, image reveal animations) finishes
       // before we touch the DOM. Retries catch images loaded later (lazy scroll, AJAX).
-      setTimeout(findAndAttach, 1000);
-      setTimeout(findAndAttach, 2500);
-      setTimeout(findAndAttach, 6000);
-    });
+    setTimeout(findAndAttach, 1000);
+    setTimeout(findAndAttach, 2500);
+    setTimeout(findAndAttach, 6000);
   }
 
   /* ===================== FREE SHIPPING BAR ===================== */
