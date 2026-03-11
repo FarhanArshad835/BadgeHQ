@@ -186,11 +186,17 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     var badgeClass = 'badgehq-pb-' + badge.id;
 
     function attachBadge(img) {
+      // Skip placeholders: no real src, tiny SVGs, or base64 blanks
+      var src = img.getAttribute('src') || '';
+      if (!src || src.indexOf('data:image/gif') === 0 || src.indexOf('data:image/svg') === 0) return;
+
       // Use the image's direct parent so position:absolute is relative to the image area
       var parent = img.parentElement;
       if (!parent) return;
       if (parent.querySelector('.' + badgeClass)) return;
-      parent.style.position = 'relative';
+      if (!parent.style.position || parent.style.position === 'static') {
+        parent.style.position = 'relative';
+      }
 
       var el = document.createElement('div');
       el.className = 'badgehq-product-badge ' + badgeClass;
@@ -225,13 +231,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       images.forEach(attachBadge);
     }
 
+    // Run immediately, then retry at 500ms, 1.5s, and 4s to catch lazy-loaded images
+    // without using a MutationObserver which can interfere with theme image loading
     findAndAttach();
-
-    // Handle lazy-loaded / dynamically injected images
-    var observer = new MutationObserver(function() { findAndAttach(); });
-    observer.observe(document.body, { childList: true, subtree: true });
-    // Disconnect after 10s to avoid long-running observers
-    setTimeout(function() { observer.disconnect(); }, 10000);
+    setTimeout(findAndAttach, 500);
+    setTimeout(findAndAttach, 1500);
+    setTimeout(findAndAttach, 4000);
   }
 
   // FREE SHIPPING BAR
