@@ -187,9 +187,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     var badgeClass = 'badgehq-pb-' + badge.id;
 
     function attachBadge(img) {
+      // Skip images inside navigation/header — they show briefly then get hidden by nav JS
+      if (img.closest('header, nav, .site-header, .site-nav, [role="navigation"], #site-nav, #header')) return;
+
+      // Skip images that are not currently visible in the layout (hidden dropdowns, offscreen carousels)
+      if (img.offsetWidth === 0 || img.offsetHeight === 0) return;
+
       // naturalWidth > 1 means the real image has decoded (not a 1×1 placeholder GIF).
-      // getBoundingClientRect width is non-zero even for unloaded lazy images that have
-      // CSS width:100%, so we must use naturalWidth instead.
       if (!img.complete || img.naturalWidth <= 1) return;
 
       // Track on the image itself — survives parent DOM changes during lazy loading
