@@ -19,8 +19,9 @@ import {
   RangeSlider,
   Divider,
   ChoiceList,
+  Tag,
 } from "@shopify/polaris";
-import { TitleBar } from "@shopify/app-bridge-react";
+import { TitleBar, ResourcePicker } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 
@@ -95,6 +96,9 @@ export default function NewProductBadge() {
   // Targeting
   const [targetType, setTargetType] = useState("all");
   const [targetValue, setTargetValue] = useState("");
+  const [targetLabels, setTargetLabels] = useState<string[]>([]);
+  const [productPickerOpen, setProductPickerOpen] = useState(false);
+  const [collectionPickerOpen, setCollectionPickerOpen] = useState(false);
 
   // Automated conditions (ShineTrust-level)
   const [conditionType, setConditionType] = useState("none");
@@ -124,6 +128,22 @@ export default function NewProductBadge() {
   const [borderWidth, setBorderWidth] = useState(0);
   const [customCSS, setCustomCSS] = useState("");
 
+  const handleProductSelection = useCallback((resources: { selection: Array<{ id: string; title: string }> }) => {
+    const ids = resources.selection.map((p) => p.id.replace("gid://shopify/Product/", ""));
+    setTargetValue(ids.join(","));
+    setTargetLabels(resources.selection.map((p) => p.title));
+    setProductPickerOpen(false);
+  }, []);
+
+  const handleCollectionSelection = useCallback((resources: { selection: Array<{ id: string; title: string; handle: string }> }) => {
+    const col = resources.selection[0];
+    if (col) {
+      setTargetValue(col.handle || col.id.replace("gid://shopify/Collection/", ""));
+      setTargetLabels([col.title]);
+    }
+    setCollectionPickerOpen(false);
+  }, []);
+
   const handleSave = () => {
     const data = {
       text,
@@ -132,7 +152,7 @@ export default function NewProductBadge() {
       badgeColor,
       textColor,
       position,
-      targeting: { type: targetType, value: targetValue },
+      targeting: { type: targetType, value: targetValue, labels: targetLabels },
       isActive,
       condition: {
         type: conditionType,
@@ -386,7 +406,7 @@ export default function NewProductBadge() {
                     value={badgeColor}
                     onChange={setBadgeColor}
                     autoComplete="off"
-                    prefix={<div style={{ width: 20, height: 20, backgroundColor: badgeColor, borderRadius: 4, border: "1px solid #ccc" }} />}
+                    prefix={<input type="color" value={badgeColor} onChange={(e) => setBadgeColor(e.target.value)} style={{ width: 24, height: 24, padding: 0, border: "none", cursor: "pointer", borderRadius: 4 }} />}
                   />
                   {badgeType !== "image" && (
                     <TextField
@@ -394,7 +414,7 @@ export default function NewProductBadge() {
                       value={textColor}
                       onChange={setTextColor}
                       autoComplete="off"
-                      prefix={<div style={{ width: 20, height: 20, backgroundColor: textColor, borderRadius: 4, border: "1px solid #ccc" }} />}
+                      prefix={<input type="color" value={textColor} onChange={(e) => setTextColor(e.target.value)} style={{ width: 24, height: 24, padding: 0, border: "none", cursor: "pointer", borderRadius: 4 }} />}
                     />
                   )}
                 </InlineGrid>
@@ -463,7 +483,7 @@ export default function NewProductBadge() {
                     onChange={setBorderColor}
                     autoComplete="off"
                     placeholder="#000000"
-                    prefix={borderColor ? <div style={{ width: 20, height: 20, backgroundColor: borderColor, borderRadius: 4, border: "1px solid #ccc" }} /> : undefined}
+                    prefix={<input type="color" value={borderColor || "#000000"} onChange={(e) => setBorderColor(e.target.value)} style={{ width: 24, height: 24, padding: 0, border: "none", cursor: "pointer", borderRadius: 4 }} />}
                   />
                   <TextField
                     label="Border Width (px)"
@@ -480,6 +500,25 @@ export default function NewProductBadge() {
             <Card>
               <BlockStack gap="400">
                 <Text as="h2" variant="headingMd">Product Targeting</Text>
+                <Text as="p" variant="bodyMd" tone="subdued">
+                  Choose which products this badge appears on.
+                </Text>
+
+                <ResourcePicker
+                  resourceType="Product"
+                  open={productPickerOpen}
+                  onSelection={handleProductSelection}
+                  onCancel={() => setProductPickerOpen(false)}
+                  allowMultiple
+                  showVariants={false}
+                />
+                <ResourcePicker
+                  resourceType="Collection"
+                  open={collectionPickerOpen}
+                  onSelection={handleCollectionSelection}
+                  onCancel={() => setCollectionPickerOpen(false)}
+                />
+
                 <Select
                   label="Apply to"
                   options={[
@@ -491,14 +530,48 @@ export default function NewProductBadge() {
                     { label: "By Vendor", value: "vendor" },
                   ]}
                   value={targetType}
-                  onChange={setTargetType}
+                  onChange={(val) => { setTargetType(val); setTargetValue(""); setTargetLabels([]); }}
                 />
-                {targetType !== "all" && (
+
+                {targetType === "products" && (
+                  <BlockStack gap="200">
+                    <Button onClick={() => setProductPickerOpen(true)}>Browse products</Button>
+                    {targetLabels.length > 0 ? (
+                      <InlineStack gap="200" wrap>
+                        {targetLabels.map((label, i) => (
+                          <Tag key={i} onRemove={() => {
+                            const newLabels = targetLabels.filter((_, j) => j !== i);
+                            const ids = targetValue.split(",").filter((_, j) => j !== i);
+                            setTargetLabels(newLabels);
+                            setTargetValue(ids.join(","));
+                          }}>{label}</Tag>
+                        ))}
+                      </InlineStack>
+                    ) : (
+                      <Text as="p" variant="bodySm" tone="subdued">No products selected. Click "Browse products" to pick from your store.</Text>
+                    )}
+                  </BlockStack>
+                )}
+
+                {targetType === "collection" && (
+                  <BlockStack gap="200">
+                    <Button onClick={() => setCollectionPickerOpen(true)}>Browse collections</Button>
+                    {targetLabels.length > 0 ? (
+                      <InlineStack gap="200">
+                        {targetLabels.map((label, i) => (
+                          <Tag key={i} onRemove={() => { setTargetLabels([]); setTargetValue(""); }}>{label}</Tag>
+                        ))}
+                      </InlineStack>
+                    ) : (
+                      <Text as="p" variant="bodySm" tone="subdued">No collection selected. Click "Browse collections" to pick one.</Text>
+                    )}
+                  </BlockStack>
+                )}
+
+                {(targetType === "tag" || targetType === "product_type" || targetType === "vendor") && (
                   <TextField
                     label={
-                      targetType === "products" ? "Product IDs (comma-separated)"
-                        : targetType === "collection" ? "Collection handle"
-                        : targetType === "tag" ? "Product tag"
+                      targetType === "tag" ? "Product tag"
                         : targetType === "product_type" ? "Product type"
                         : "Vendor name"
                     }
@@ -506,11 +579,9 @@ export default function NewProductBadge() {
                     onChange={setTargetValue}
                     autoComplete="off"
                     helpText={
-                      targetType === "products" ? "Enter Shopify product IDs separated by commas"
-                        : targetType === "collection" ? "Enter the collection handle (e.g., 'summer-sale')"
-                        : targetType === "tag" ? "Enter the product tag to match"
-                        : targetType === "product_type" ? "Enter the product type to match"
-                        : "Enter the vendor name to match"
+                      targetType === "tag" ? "Exact tag to match (e.g., 'sale', 'new-arrival')"
+                        : targetType === "product_type" ? "Product type to match (e.g., 'T-Shirts', 'Shoes')"
+                        : "Vendor name to match (e.g., 'Nike', 'Apple')"
                     }
                   />
                 )}
