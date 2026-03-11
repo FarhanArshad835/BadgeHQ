@@ -321,7 +321,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     headers: {
       "Content-Type": "application/javascript",
       "Access-Control-Allow-Origin": "*",
-      "Cache-Control": "public, max-age=300",
+      "Cache-Control": "public, max-age=0",
     },
   });
 };
