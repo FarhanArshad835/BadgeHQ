@@ -190,8 +190,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       // Skip images inside navigation/header — they show briefly then get hidden by nav JS
       if (img.closest('header, nav, .site-header, .site-nav, [role="navigation"], #site-nav, #header')) return;
 
-      // Skip images that are not currently visible in the layout (hidden dropdowns, offscreen carousels)
-      if (img.offsetWidth === 0 || img.offsetHeight === 0) return;
+      // Skip images that are not currently visible in the layout (hidden dropdowns, offscreen carousels).
+      // Only check offsetWidth — Dawn theme uses padding-bottom aspect-ratio containers where
+      // img.offsetHeight === 0 even though the image is fully visible (position:absolute;height:100%
+      // resolves against the container's height:0 property, not its visual padding area).
+      if (img.offsetWidth === 0) return;
 
       // naturalWidth > 1 means the real image has decoded (not a 1×1 placeholder GIF).
       if (!img.complete || img.naturalWidth <= 1) return;
