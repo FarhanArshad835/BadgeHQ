@@ -187,21 +187,28 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     var badgeClass = 'badgehq-pb-' + badge.id;
 
     function attachBadge(img) {
-      // Skip images with no source at all (not even a lazy-load data attribute)
-      var src = img.getAttribute('src') || img.getAttribute('data-src') ||
-                img.getAttribute('data-lazy-src') || img.getAttribute('data-original') || '';
-      if (!src) return;
+      // Only process images that are fully rendered — skip anything not yet painted
+      // (lazy-load placeholders have 0 width until the real image loads)
+      var rect = img.getBoundingClientRect();
+      if (rect.width < 50) return;
 
-      // Walk up past <picture> — appending a <div> inside <picture> is invalid HTML
-      // and causes browsers to re-render, hiding the image
-      var parent = img.parentElement;
-      if (parent && parent.tagName === 'PICTURE') parent = parent.parentElement;
-      if (!parent) return;
-      if (parent.querySelector('.' + badgeClass)) return;
+      // Track on the image element itself so duplicate checks survive parent DOM changes
+      if (img.getAttribute('data-badgehq') === badge.id) return;
+      img.setAttribute('data-badgehq', badge.id);
 
-      // Use computed style so we don't override CSS-positioned parents
-      if (window.getComputedStyle(parent).position === 'static') {
-        parent.style.position = 'relative';
+      // Walk up past <picture> (invalid to append <div> there) and any inline wrappers
+      var container = img.parentElement;
+      while (container && (
+        container.tagName === 'PICTURE' ||
+        window.getComputedStyle(container).display === 'inline'
+      )) {
+        container = container.parentElement;
+      }
+      if (!container || container === document.body) return;
+
+      // Only set position if the container is static — don't override theme-positioned elements
+      if (window.getComputedStyle(container).position === 'static') {
+        container.style.position = 'relative';
       }
 
       var el = document.createElement('div');
@@ -211,7 +218,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         (posStyles[badge.position] || posStyles['top-left']) +
         (shapeStyles[badge.shape] || shapeStyles['rectangle']);
       el.textContent = badge.text;
-      parent.appendChild(el);
+      container.appendChild(el);
     }
 
     function findAndAttach() {
@@ -233,16 +240,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         'a[href*="/products/"] img',
       ].join(',');
 
-      var images = document.querySelectorAll(selectors);
-      images.forEach(attachBadge);
+      document.querySelectorAll(selectors).forEach(attachBadge);
     }
 
-    // Run immediately, then retry at 500ms, 1.5s, and 4s to catch lazy-loaded images
-    // without using a MutationObserver which can interfere with theme image loading
-    findAndAttach();
-    setTimeout(findAndAttach, 500);
-    setTimeout(findAndAttach, 1500);
-    setTimeout(findAndAttach, 4000);
+    // Skip the immediate run — let the page finish rendering first.
+    // Retries at 800ms, 2s, and 5s catch lazy-loaded images without
+    // interfering with the theme's image initialisation at page load.
+    setTimeout(findAndAttach, 800);
+    setTimeout(findAndAttach, 2000);
+    setTimeout(findAndAttach, 5000);
   }
 
   // FREE SHIPPING BAR
