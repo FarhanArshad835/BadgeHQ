@@ -187,33 +187,44 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     var badgeClass = 'badgehq-pb-' + badge.id;
 
     function attachBadge(img) {
-      // Only process images that are fully rendered — skip anything not yet painted
-      // (lazy-load placeholders have 0 width until the real image loads)
-      var rect = img.getBoundingClientRect();
-      if (rect.width < 50) return;
+      // naturalWidth > 1 means the real image has decoded (not a 1×1 placeholder GIF).
+      // getBoundingClientRect width is non-zero even for unloaded lazy images that have
+      // CSS width:100%, so we must use naturalWidth instead.
+      if (!img.complete || img.naturalWidth <= 1) return;
 
-      // Track on the image element itself so duplicate checks survive parent DOM changes
-      if (img.getAttribute('data-badgehq') === badge.id) return;
-      img.setAttribute('data-badgehq', badge.id);
+      // Track on the image itself — survives parent DOM changes during lazy loading
+      if (img.getAttribute('data-badgehq') === String(badge.id)) return;
+      img.setAttribute('data-badgehq', String(badge.id));
 
-      // Walk up past <picture> (invalid to append <div> there) and any inline wrappers
-      var container = img.parentElement;
-      while (container && (
-        container.tagName === 'PICTURE' ||
-        window.getComputedStyle(container).display === 'inline'
-      )) {
-        container = container.parentElement;
+      // Walk up the DOM to find the nearest ancestor that is ALREADY positioned.
+      // Every Shopify theme sets position:relative on product card image containers
+      // (needed for their own Sale/Sold Out badges), so this almost always succeeds.
+      // Crucially, we NEVER modify any existing element's CSS — that was causing
+      // the theme's image reveal animations/transitions to reset and hide images.
+      var container = null;
+      var node = img.parentElement;
+      for (var i = 0; i < 8; i++) {
+        if (!node || node === document.body) break;
+        if (node.tagName === 'PICTURE') { node = node.parentElement; continue; }
+        if (window.getComputedStyle(node).position !== 'static') { container = node; break; }
+        node = node.parentElement;
       }
-      if (!container || container === document.body) return;
 
-      // Only set position if the container is static — don't override theme-positioned elements
-      if (window.getComputedStyle(container).position === 'static') {
+      // Fallback for unusual themes: use direct block parent and set position only then
+      if (!container) {
+        node = img.parentElement;
+        while (node && node !== document.body && (
+          node.tagName === 'PICTURE' ||
+          window.getComputedStyle(node).display === 'inline'
+        )) { node = node.parentElement; }
+        if (!node || node === document.body) return;
+        container = node;
         container.style.position = 'relative';
       }
 
       var el = document.createElement('div');
       el.className = 'badgehq-product-badge ' + badgeClass;
-      el.style.cssText = 'position:absolute;z-index:10;display:flex;align-items:center;justify-content:center;' +
+      el.style.cssText = 'position:absolute;z-index:10;display:flex;align-items:center;justify-content:center;pointer-events:none;' +
         'background:' + badge.badgeColor + ';color:' + badge.textColor + ';font-size:11px;font-weight:700;' +
         (posStyles[badge.position] || posStyles['top-left']) +
         (shapeStyles[badge.shape] || shapeStyles['rectangle']);
@@ -222,7 +233,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }
 
     function findAndAttach() {
-      // Broad set of selectors covering Dawn, Debut, Broadcast, Impulse, and other popular themes
       var selectors = [
         '.product-card img',
         '.product-card-wrapper img',
@@ -239,16 +249,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         '[class*="product-image"] img',
         'a[href*="/products/"] img',
       ].join(',');
-
       document.querySelectorAll(selectors).forEach(attachBadge);
     }
 
-    // Skip the immediate run — let the page finish rendering first.
-    // Retries at 800ms, 2s, and 5s catch lazy-loaded images without
-    // interfering with the theme's image initialisation at page load.
-    setTimeout(findAndAttach, 800);
-    setTimeout(findAndAttach, 2000);
-    setTimeout(findAndAttach, 5000);
+    // Start at 1s so the theme's lazy-load + image reveal animations finish first.
+    // Retries at 2.5s and 6s catch images loaded further down the page.
+    setTimeout(findAndAttach, 1000);
+    setTimeout(findAndAttach, 2500);
+    setTimeout(findAndAttach, 6000);
   }
 
   // FREE SHIPPING BAR
