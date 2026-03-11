@@ -486,6 +486,8 @@
 
   // Per-product data cache keyed by handle — avoids duplicate fetches for same product
   var _productDataCache = {};
+  // In-flight fetch queue — prevents duplicate simultaneous requests for same handle
+  var _productFetchQueue = {};
 
   // Parse a raw Shopify product API response into a normalized object
   function _parseProductJson(data) {
@@ -505,16 +507,25 @@
     };
   }
 
-  // Fetch /products/{handle}.json, with per-handle caching
+  // Fetch /products/{handle}.json with per-handle caching and in-flight deduplication.
+  // Multiple simultaneous calls for the same handle queue up and all resolve together.
   function fetchProductDataByHandle(handle, callback) {
     if (_productDataCache[handle]) { callback(_productDataCache[handle]); return; }
+    if (_productFetchQueue[handle]) { _productFetchQueue[handle].push(callback); return; }
+    _productFetchQueue[handle] = [callback];
     fetch("/products/" + handle + ".json")
       .then(function (r) { return r.json(); })
       .then(function (data) {
         _productDataCache[handle] = _parseProductJson(data);
-        callback(_productDataCache[handle]);
+        var cbs = _productFetchQueue[handle] || [];
+        delete _productFetchQueue[handle];
+        cbs.forEach(function (cb) { cb(_productDataCache[handle]); });
       })
-      .catch(function () { callback(null); });
+      .catch(function () {
+        var cbs = _productFetchQueue[handle] || [];
+        delete _productFetchQueue[handle];
+        cbs.forEach(function (cb) { cb(null); });
+      });
   }
 
   // Find the product handle from the nearest product link relative to an img element
@@ -596,9 +607,6 @@
     // No data at all — show by default so badges aren't silently hidden
     return true;
   }
-
-  // Kept for backward compatibility — now delegates to per-img fetch
-  function fetchProductData(callback) { callback(null); }
 
   // Main product badges orchestrator — handles multi-badge, conditions, scheduling, pages
   function renderProductBadges(badges, currentPage) {
