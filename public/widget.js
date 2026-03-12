@@ -82,7 +82,7 @@
     }
     if (w.stickyCarts)
       w.stickyCarts.forEach(function (cart) {
-        renderStickyCart(cart);
+        renderStickyCart(cart, currencySymbol);
       });
     if (w.countdownTimers)
       w.countdownTimers.forEach(function (timer) {
@@ -925,19 +925,54 @@
   }
 
   /* ===================== STICKY ADD TO CART ===================== */
-  function renderStickyCart(cart) {
+  function renderStickyCart(cart, currencySymbol) {
     if (!cart.showMobile && window.innerWidth < 768) return;
     if (!cart.showDesktop && window.innerWidth >= 768) return;
 
     // Dawn mounts <product-form> as a web component after initial parse —
     // delay DOM lookup so the ATC button is available.
-    setTimeout(function () { mountStickyCart(cart); }, 800);
+    setTimeout(function () { mountStickyCart(cart, currencySymbol); }, 800);
     setTimeout(function () {
-      if (!document.getElementById("badgehq-sticky-cart")) mountStickyCart(cart);
+      if (!document.getElementById("badgehq-sticky-cart")) mountStickyCart(cart, currencySymbol);
     }, 2000);
   }
 
-  function mountStickyCart(cart) {
+  // Get current variant unit price in currency units.
+  // ShopifyAnalytics.meta reports prices in cents; product JSON uses string decimals.
+  function getStickyCartUnitPrice(callback) {
+    try {
+      var meta = window.ShopifyAnalytics && window.ShopifyAnalytics.meta;
+      if (meta && meta.product && meta.product.variants && meta.product.variants.length) {
+        var variants = meta.product.variants;
+        var selectedId = String(meta.selectedVariantId || variants[0].id);
+        var variant = null;
+        for (var i = 0; i < variants.length; i++) {
+          if (String(variants[i].id) === selectedId) { variant = variants[i]; break; }
+        }
+        if (!variant) variant = variants[0];
+        if (variant && variant.price) {
+          // ShopifyAnalytics prices are in cents (integer)
+          callback(parseInt(variant.price, 10) / 100);
+          return;
+        }
+      }
+    } catch (e) {}
+    // Fallback: fetch from product JSON
+    var pathMatch = window.location.pathname.match(/\/products\/([^/?#]+)/);
+    if (pathMatch) {
+      fetch("/products/" + pathMatch[1] + ".json?fields=variants")
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          var v = data.product && data.product.variants && data.product.variants[0];
+          callback(v ? parseFloat(v.price) || 0 : 0);
+        })
+        .catch(function () { callback(0); });
+      return;
+    }
+    callback(0);
+  }
+
+  function mountStickyCart(cart, currencySymbol) {
     if (document.getElementById("badgehq-sticky-cart")) return; // already mounted
 
     var ATC_SELECTORS =
@@ -965,7 +1000,7 @@
       "background:" + bgColor + ";padding:10px 16px;" +
       "box-shadow:0 " + (cart.position === "top" ? "2px" : "-2px") + " 8px rgba(0,0,0,0.15);";
 
-    // Get product price — use .price-item--regular (the value span, not the wrapper div)
+    // Initial price text shown before async price resolves (shows formatted DOM value)
     var priceText = "";
     if (cart.showPrice !== false) {
       var priceEl = document.querySelector(
@@ -973,9 +1008,10 @@
       );
       if (priceEl) {
         var rawPrice = (priceEl.innerText !== undefined ? priceEl.innerText : priceEl.textContent) || "";
-        priceText = rawPrice.trim().split(/[\n\r]+/).filter(function(l){ return l.trim(); })[0] || "";
+        priceText = rawPrice.trim().split(/[\n\r]+/).filter(function (l) { return l.trim(); })[0] || "";
       }
     }
+    var sym = currencySymbol || "$";
 
     // Quantity selector HTML (syncs with product form's native qty input)
     var qtyHtml = "";
@@ -1022,27 +1058,19 @@
     var qtyPlus = el.querySelector("#badgehq-qty-plus");
     var priceDisplay = el.querySelector("#badgehq-sticky-price");
 
-    // Parse a raw unit price from the DOM price text (strips currency symbols/formatting)
-    function parseUnitPrice(text) {
-      if (!text) return 0;
-      var cleaned = text.replace(/[^\d.,]/g, "").replace(/,(\d{2})$/, ".$1").replace(/,/g, "");
-      return parseFloat(cleaned) || 0;
-    }
-
-    // Extract currency prefix (everything before the first digit)
-    function parseCurrencyPrefix(text) {
-      if (!text) return "";
-      var m = text.match(/^([^\d]*)/);
-      return m ? m[1] : "";
-    }
-
-    var unitPrice = parseUnitPrice(priceText);
-    var currencyPrefix = parseCurrencyPrefix(priceText);
+    // Fetch unit price reliably from Shopify globals (cents/100) or product JSON
+    var unitPrice = 0;
+    getStickyCartUnitPrice(function (price) {
+      unitPrice = price;
+      // Update initial display with accurate price (replaces DOM-scraped text)
+      if (priceDisplay && unitPrice > 0) {
+        priceDisplay.textContent = sym + unitPrice.toFixed(2);
+      }
+    });
 
     function updatePriceDisplay(qty) {
       if (!priceDisplay || unitPrice <= 0) return;
-      var total = (unitPrice * qty).toFixed(2);
-      priceDisplay.textContent = currencyPrefix + total;
+      priceDisplay.textContent = sym + (unitPrice * qty).toFixed(2);
     }
 
     if (qtyMinus && qtyPlus && qtyVal) {
@@ -1064,7 +1092,6 @@
     }
 
     el.querySelector("#badgehq-atc-btn").onclick = function () {
-      // Sync qty to form before submitting
       if (qtyInput && qtyVal) qtyInput.value = qtyVal.textContent;
       atcBtn.click();
     };
