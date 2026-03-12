@@ -790,11 +790,13 @@
       }, 300);
     }
 
-    // Intercept fetch (Dawn theme uses fetch for cart updates)
+    // Intercept fetch (Dawn theme passes Request objects, not plain strings)
     var origFetch = window.fetch;
     window.fetch = function (url) {
       var result = origFetch.apply(this, arguments);
-      if (typeof url === "string" && cartMutationPattern.test(url)) {
+      var urlStr = typeof url === "string" ? url
+        : (url && typeof url === "object" && url.url) ? url.url : "";
+      if (urlStr && cartMutationPattern.test(urlStr)) {
         result.then(scheduleRefresh).catch(function () {});
       }
       return result;
@@ -813,6 +815,23 @@
     document.addEventListener("cart:updated", scheduleRefresh);
     document.addEventListener("cart:refresh", scheduleRefresh);
     document.addEventListener("sections:rendered", scheduleRefresh); // Dawn sections API
+
+    // MutationObserver fallback: watch cart total/subtotal elements for text changes
+    // Catches themes that update cart price display via DOM without triggering a detectable event
+    try {
+      var cartTotalSelectors = [
+        ".cart-subtotal__price", ".totals__subtotal-value",
+        ".cart__total", ".cart-subtotal", "[data-cart-total]",
+        ".cart-drawer__footer .price", ".cart__footer .price"
+      ].join(",");
+      var cartTotalEls = document.querySelectorAll(cartTotalSelectors);
+      if (cartTotalEls.length > 0) {
+        var observer = new MutationObserver(scheduleRefresh);
+        cartTotalEls.forEach(function (el) {
+          observer.observe(el, { childList: true, subtree: true, characterData: true });
+        });
+      }
+    } catch (e) {}
   }
 
   function renderFreeShippingBar(bar, page, currencySymbol) {
