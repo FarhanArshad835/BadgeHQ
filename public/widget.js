@@ -763,21 +763,22 @@
     function render(total) {
       var c = bar.colors || {};
       var m = bar.messages || {};
-      var pct = Math.min((total / bar.threshold) * 100, 100);
-      var remaining = Math.max(bar.threshold - total, 0).toFixed(2);
+      var threshold = parseFloat(bar.threshold) || 50;
+      var pct = threshold > 0 ? Math.min((total / threshold) * 100, 100) : 0;
+      var remaining = Math.max(threshold - total, 0).toFixed(2);
       var msg =
         pct >= 100
-          ? m.reached || "Free shipping unlocked!"
+          ? (m.reached || "Free shipping unlocked!")
           : (m.below || "You're {{amount}} away from free shipping!").replace("{{amount}}", currencySymbol + remaining);
 
       var el = document.createElement("div");
       el.id = "badgehq-freeship-" + bar.id;
-      el.style.cssText = "padding:12px 16px;text-align:center;margin:8px 0;width:100%;box-sizing:border-box;";
+      el.style.cssText = "padding:12px 16px;text-align:center;margin:8px 0;width:100%;box-sizing:border-box;display:block;flex-shrink:0;";
 
       el.innerHTML =
         '<p style="color:' + (c.text || "#333") + ';margin:0 0 8px;font-size:14px;font-weight:500;">' + msg + "</p>" +
-        '<div style="background:' + (c.barBg || "#f0f0f0") + ';border-radius:10px;height:20px;overflow:hidden;">' +
-        '<div style="background:' + (c.progressBg || "#4caf50") + ";height:100%;width:" + pct + '%;border-radius:10px;transition:width 0.3s;"></div></div>';
+        '<div style="background:' + (c.barBg || "#f0f0f0") + ';border-radius:10px;height:20px;overflow:hidden;width:100%;display:block;">' +
+        '<div style="background:' + (c.progressBg || "#4caf50") + ";height:100%;width:" + pct + '%;border-radius:10px;transition:width 0.3s;display:block;"></div></div>';
 
       insertBar(el, page);
     }
