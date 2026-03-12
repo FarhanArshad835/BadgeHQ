@@ -22,11 +22,13 @@ import prisma from "../db.server";
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = session.shop;
+  const formData = await request.formData();
+  const enable = formData.get("enable") !== "false";
 
   await prisma.appSettings.upsert({
     where: { shop },
-    update: { isEnabled: true },
-    create: { shop, isEnabled: true },
+    update: { isEnabled: enable },
+    create: { shop, isEnabled: enable },
   });
 
   return json({ ok: true });
@@ -206,9 +208,31 @@ export default function Dashboard() {
                       Welcome to BadgeHQ
                     </Text>
                     <Box>
-                      <Badge tone={isEnabled ? "success" : "warning"}>
-                        {isEnabled ? "Widget Active" : "Setup Required"}
-                      </Badge>
+                      <InlineGrid columns="1fr auto" gap="200" alignItems="center">
+                        <Badge tone={isEnabled ? "success" : "warning"}>
+                          {isEnabled ? "Widget Active" : "Setup Required"}
+                        </Badge>
+                        {isEnabled && (
+                          <fetcher.Form method="post">
+                            <input type="hidden" name="enable" value="false" />
+                            <button
+                              type="submit"
+                              style={{
+                                background: "none",
+                                border: "none",
+                                color: "var(--p-color-text-subdued)",
+                                cursor: "pointer",
+                                fontSize: "0.75rem",
+                                textDecoration: "underline",
+                                padding: 0,
+                                font: "inherit",
+                              }}
+                            >
+                              Widget disabled?
+                            </button>
+                          </fetcher.Form>
+                        )}
+                      </InlineGrid>
                     </Box>
                   </InlineGrid>
                   <Text as="p" variant="bodyMd" tone="subdued">
