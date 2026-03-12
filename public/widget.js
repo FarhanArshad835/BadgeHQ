@@ -74,10 +74,12 @@
         renderTrustBadge(badge, page, gs);
       });
     if (w.productBadges) renderProductBadges(w.productBadges, page);
-    if (w.freeShippingBars)
+    if (w.freeShippingBars) {
       w.freeShippingBars.forEach(function (bar) {
         renderFreeShippingBar(bar, page, currencySymbol);
       });
+      setupCartChangeListener(w.freeShippingBars, page, currencySymbol);
+    }
     if (w.stickyCarts)
       w.stickyCarts.forEach(function (cart) {
         renderStickyCart(cart);
@@ -747,6 +749,72 @@
   }
 
   /* ===================== FREE SHIPPING BAR ===================== */
+
+  // Update bar content in-place (no DOM re-insertion) with a new cart total
+  function updateFreeShippingBarContent(bar, total, currencySymbol) {
+    var el = document.getElementById("badgehq-freeship-" + bar.id);
+    if (!el) return;
+    var c = bar.colors || {};
+    var m = bar.messages || {};
+    var threshold = parseFloat(bar.threshold) || 50;
+    var pct = threshold > 0 ? Math.min((total / threshold) * 100, 100) : 0;
+    var remaining = Math.max(threshold - total, 0).toFixed(2);
+    var msg = pct >= 100
+      ? (m.reached || "Free shipping unlocked!")
+      : (m.below || "You're {{amount}} away from free shipping!").replace("{{amount}}", currencySymbol + remaining);
+    el.innerHTML =
+      '<p style="color:' + (c.text || "#333") + ';margin:0 0 8px;font-size:14px;font-weight:500;">' + msg + "</p>" +
+      '<div style="background:' + (c.barBg || "#f0f0f0") + ';border-radius:10px;height:20px;overflow:hidden;width:100%;display:block;">' +
+      '<div style="background:' + (c.progressBg || "#4caf50") + ";height:100%;width:" + pct + '%;border-radius:10px;transition:width 0.3s;display:block;"></div></div>';
+  }
+
+  // Listen for cart mutations and refresh all free shipping bars live
+  function setupCartChangeListener(bars, page, currencySymbol) {
+    var cartMutationPattern = /\/cart\/(change|add|update|clear)(\.js)?/;
+    var refreshScheduled = false;
+
+    function scheduleRefresh() {
+      if (refreshScheduled) return;
+      refreshScheduled = true;
+      setTimeout(function () {
+        refreshScheduled = false;
+        fetch("/cart.js")
+          .then(function (r) { return r.json(); })
+          .then(function (cart) {
+            var total = cart.total_price / 100;
+            bars.forEach(function (bar) {
+              updateFreeShippingBarContent(bar, total, currencySymbol);
+            });
+          })
+          .catch(function () {});
+      }, 300);
+    }
+
+    // Intercept fetch (Dawn theme uses fetch for cart updates)
+    var origFetch = window.fetch;
+    window.fetch = function (url) {
+      var result = origFetch.apply(this, arguments);
+      if (typeof url === "string" && cartMutationPattern.test(url)) {
+        result.then(scheduleRefresh).catch(function () {});
+      }
+      return result;
+    };
+
+    // Intercept XHR (older themes use XHR)
+    var origOpen = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function (method, url) {
+      if (typeof url === "string" && cartMutationPattern.test(url)) {
+        this.addEventListener("load", scheduleRefresh);
+      }
+      return origOpen.apply(this, arguments);
+    };
+
+    // Listen for custom cart events fired by some themes
+    document.addEventListener("cart:updated", scheduleRefresh);
+    document.addEventListener("cart:refresh", scheduleRefresh);
+    document.addEventListener("sections:rendered", scheduleRefresh); // Dawn sections API
+  }
+
   function renderFreeShippingBar(bar, page, currencySymbol) {
     currencySymbol = currencySymbol || "$";
     if (!shouldShowOnPage(bar.pages, page)) return;
