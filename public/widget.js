@@ -929,9 +929,23 @@
     if (!cart.showMobile && window.innerWidth < 768) return;
     if (!cart.showDesktop && window.innerWidth >= 768) return;
 
-    var atcBtn = document.querySelector(
-      'form[action*="/cart/add"] button[type="submit"], .product-form__submit, [name="add"]'
-    );
+    // Dawn mounts <product-form> as a web component after initial parse —
+    // delay DOM lookup so the ATC button is available.
+    setTimeout(function () { mountStickyCart(cart); }, 800);
+    setTimeout(function () {
+      if (!document.getElementById("badgehq-sticky-cart")) mountStickyCart(cart);
+    }, 2000);
+  }
+
+  function mountStickyCart(cart) {
+    if (document.getElementById("badgehq-sticky-cart")) return; // already mounted
+
+    var ATC_SELECTORS =
+      'product-form button[type="submit"], ' +
+      'form[action*="/cart/add"] button[type="submit"], ' +
+      '.product-form__submit, button[name="add"], [data-add-to-cart]';
+
+    var atcBtn = document.querySelector(ATC_SELECTORS);
     if (!atcBtn) return;
 
     var el = document.createElement("div");
@@ -939,40 +953,25 @@
     el.style.cssText =
       "position:fixed;left:0;right:0;z-index:9998;display:none;" +
       (cart.position === "top" ? "top:0;" : "bottom:0;") +
-      "background:" +
-      cart.bgColor +
-      ";padding:10px 16px;" +
-      "box-shadow:0 " +
-      (cart.position === "top" ? "2px" : "-2px") +
-      " 8px rgba(0,0,0,0.15);";
+      "background:" + cart.bgColor + ";padding:10px 16px;" +
+      "box-shadow:0 " + (cart.position === "top" ? "2px" : "-2px") + " 8px rgba(0,0,0,0.15);";
 
     el.innerHTML =
       '<div style="max-width:1200px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:12px;">' +
-      "<div>" +
-      '<div style="color:' +
-      cart.buttonColor +
-      ';font-size:14px;font-weight:600;" id="badgehq-sticky-title">Product</div>' +
-      "</div>" +
-      '<button style="background:' +
-      cart.buttonColor +
-      ";color:" +
-      cart.bgColor +
+      '<div><div style="color:' + cart.buttonColor + ';font-size:14px;font-weight:600;" id="badgehq-sticky-title">Product</div></div>' +
+      '<button style="background:' + cart.buttonColor + ";color:" + cart.bgColor +
       ';border:none;padding:10px 24px;border-radius:6px;font-size:14px;font-weight:600;cursor:pointer;">' +
-      cart.buttonText +
-      "</button></div>";
+      cart.buttonText + "</button></div>";
 
-    // Try to get the product title
     var productTitle = document.querySelector(
-      ".product__title, .product-single__title, h1"
+      ".product__title, .product-single__title, h1.title, h1"
     );
     if (productTitle) {
       var titleEl = el.querySelector("#badgehq-sticky-title");
       if (titleEl) titleEl.textContent = productTitle.textContent.trim();
     }
 
-    el.querySelector("button").onclick = function () {
-      atcBtn.click();
-    };
+    el.querySelector("button").onclick = function () { atcBtn.click(); };
 
     document.body.appendChild(el);
 
