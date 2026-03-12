@@ -996,7 +996,7 @@
       '<div style="max-width:1200px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:10px;">' +
       '<div style="flex:1;min-width:0;">' +
       '<div style="color:' + textColor + ';font-size:14px;font-weight:600;line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" id="badgehq-sticky-title">Product</div>' +
-      (priceText ? '<div style="color:' + textColor + ';font-size:12px;opacity:0.8;margin-top:2px;">' + priceText + "</div>" : "") +
+      (priceText ? '<div id="badgehq-sticky-price" style="color:' + textColor + ';font-size:12px;opacity:0.8;margin-top:2px;">' + priceText + "</div>" : "") +
       "</div>" +
       qtyHtml +
       '<button id="badgehq-atc-btn" style="background:' + btnBg + ";color:" + btnColor + ";border:" + btnBorder +
@@ -1020,17 +1020,46 @@
     var qtyVal = el.querySelector("#badgehq-qty-val");
     var qtyMinus = el.querySelector("#badgehq-qty-minus");
     var qtyPlus = el.querySelector("#badgehq-qty-plus");
+    var priceDisplay = el.querySelector("#badgehq-sticky-price");
+
+    // Parse a raw unit price from the DOM price text (strips currency symbols/formatting)
+    function parseUnitPrice(text) {
+      if (!text) return 0;
+      var cleaned = text.replace(/[^\d.,]/g, "").replace(/,(\d{2})$/, ".$1").replace(/,/g, "");
+      return parseFloat(cleaned) || 0;
+    }
+
+    // Extract currency prefix (everything before the first digit)
+    function parseCurrencyPrefix(text) {
+      if (!text) return "";
+      var m = text.match(/^([^\d]*)/);
+      return m ? m[1] : "";
+    }
+
+    var unitPrice = parseUnitPrice(priceText);
+    var currencyPrefix = parseCurrencyPrefix(priceText);
+
+    function updatePriceDisplay(qty) {
+      if (!priceDisplay || unitPrice <= 0) return;
+      var total = (unitPrice * qty).toFixed(2);
+      priceDisplay.textContent = currencyPrefix + total;
+    }
+
     if (qtyMinus && qtyPlus && qtyVal) {
       qtyMinus.onclick = function () {
         var cur = parseInt(qtyVal.textContent) || 1;
         if (cur <= 1) return;
-        qtyVal.textContent = String(cur - 1);
-        if (qtyInput) { qtyInput.value = String(cur - 1); qtyInput.dispatchEvent(new Event("change", { bubbles: true })); }
+        var next = cur - 1;
+        qtyVal.textContent = String(next);
+        updatePriceDisplay(next);
+        if (qtyInput) { qtyInput.value = String(next); qtyInput.dispatchEvent(new Event("change", { bubbles: true })); }
       };
       qtyPlus.onclick = function () {
         var cur = parseInt(qtyVal.textContent) || 1;
-        qtyVal.textContent = String(cur + 1);
-        if (qtyInput) { qtyInput.value = String(cur + 1); qtyInput.dispatchEvent(new Event("change", { bubbles: true })); }
+        var next = cur + 1;
+        qtyVal.textContent = String(next);
+        updatePriceDisplay(next);
+        if (qtyInput) { qtyInput.value = String(next); qtyInput.dispatchEvent(new Event("change", { bubbles: true })); }
       };
     }
 
