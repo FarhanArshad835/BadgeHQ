@@ -29,16 +29,18 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
     if (!content) return json({ error: "No settings_data.json found", assetData });
 
-    const settings = JSON.parse(content) as {
-      current?: { blocks?: Record<string, unknown> };
-    };
-    const blocks = settings?.current?.blocks ?? {};
+    const settings = JSON.parse(content) as Record<string, unknown>;
+    const current = (settings?.current ?? {}) as Record<string, unknown>;
 
+    // Show top-level keys and any blocks/sections that might contain app embeds
     return json({
       themeId: theme.id,
       themeName: theme.name,
-      allBlockKeys: Object.keys(blocks),
-      badgehqBlocks: Object.entries(blocks).filter(([key]) => key.includes("badgehq")),
+      topLevelKeys: Object.keys(settings),
+      currentKeys: Object.keys(current),
+      blocks: current.blocks ?? null,
+      // Some themes store app embeds under sections or other keys
+      fullCurrent: current,
     });
   } catch (e) {
     return json({ error: String(e) });
