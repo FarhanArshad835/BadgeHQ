@@ -47,6 +47,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       buttonStyle: data.buttonStyle,
       buttonRadius: data.buttonRadius,
       showPrice: data.showPrice,
+      showQuantity: data.showQuantity,
+      alwaysShow: data.alwaysShow,
       showMobile: data.showMobile,
       showDesktop: data.showDesktop,
       position: data.position,
@@ -76,15 +78,18 @@ export default function StickyCartSettings() {
   const [buttonStyle, setButtonStyle] = useState(cart?.buttonStyle || "solid");
   const [buttonRadius, setButtonRadius] = useState(cart?.buttonRadius || "6");
   const [showPrice, setShowPrice] = useState(cart?.showPrice ?? true);
+  const [showQuantity, setShowQuantity] = useState(cart?.showQuantity ?? true);
+  const [alwaysShow, setAlwaysShow] = useState(cart?.alwaysShow ?? false);
   const [showMobile, setShowMobile] = useState(cart?.showMobile ?? true);
   const [showDesktop, setShowDesktop] = useState(cart?.showDesktop ?? true);
   const [position, setPosition] = useState(cart?.position || "bottom");
   const [isActive, setIsActive] = useState(cart?.isActive ?? true);
+  const [previewQty, setPreviewQty] = useState(1);
 
   const handleSave = () => {
     const data = {
       buttonText, buttonColor, bgColor, textColor,
-      buttonStyle, buttonRadius, showPrice,
+      buttonStyle, buttonRadius, showPrice, showQuantity, alwaysShow,
       showMobile, showDesktop, position, isActive,
     };
     submit({ data: JSON.stringify(data) }, { method: "POST" });
@@ -116,6 +121,10 @@ export default function StickyCartSettings() {
                   helpText="Text shown on the add to cart button"
                 />
                 <Checkbox label="Show product price" checked={showPrice} onChange={setShowPrice} />
+                <Checkbox label="Show quantity selector" checked={showQuantity} onChange={setShowQuantity}
+                  helpText="Native-style +/- quantity picker next to the button" />
+                <Checkbox label="Always visible" checked={alwaysShow} onChange={setAlwaysShow}
+                  helpText="Keep the bar on screen at all times, not just when the Add to Cart button scrolls out of view" />
               </BlockStack>
             </Card>
 
@@ -217,22 +226,35 @@ export default function StickyCartSettings() {
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "space-between",
-                    gap: 12,
+                    gap: 8,
                     boxShadow: position === "top" ? "0 2px 8px rgba(0,0,0,0.15)" : "0 -2px 8px rgba(0,0,0,0.15)",
                   }}>
-                    <div>
-                      <div style={{ color: textColor, fontSize: 12, fontWeight: 600 }}>Product Name</div>
-                      {showPrice && <div style={{ color: textColor, fontSize: 11, opacity: 0.7 }}>$29.99</div>}
+                    {/* Left: title + price */}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ color: textColor, fontSize: 11, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Product Name</div>
+                      {showPrice && <div style={{ color: textColor, fontSize: 10, opacity: 0.75 }}>₹599.00</div>}
                     </div>
+
+                    {/* Quantity selector */}
+                    {showQuantity && (
+                      <div style={{ display: "flex", alignItems: "center", border: `1px solid ${textColor}`, borderRadius: radiusPx, overflow: "hidden", flexShrink: 0 }}>
+                        <button onClick={() => setPreviewQty(q => Math.max(1, q - 1))} style={{ background: "transparent", border: "none", color: textColor, padding: "6px 8px", cursor: "pointer", fontSize: 14, fontWeight: 700 }}>−</button>
+                        <span style={{ color: textColor, fontSize: 12, fontWeight: 600, minWidth: 20, textAlign: "center" }}>{previewQty}</span>
+                        <button onClick={() => setPreviewQty(q => q + 1)} style={{ background: "transparent", border: "none", color: textColor, padding: "6px 8px", cursor: "pointer", fontSize: 14, fontWeight: 700 }}>+</button>
+                      </div>
+                    )}
+
+                    {/* ATC button */}
                     <div style={{
                       backgroundColor: isOutline ? "transparent" : buttonColor,
                       color: isOutline ? buttonColor : bgColor,
                       border: isOutline ? `2px solid ${buttonColor}` : "none",
-                      padding: "8px 16px",
+                      padding: "7px 12px",
                       borderRadius: radiusPx,
-                      fontSize: 13,
+                      fontSize: 11,
                       fontWeight: 600,
                       whiteSpace: "nowrap",
+                      flexShrink: 0,
                     }}>
                       {buttonText}
                     </div>

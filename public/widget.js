@@ -965,27 +965,46 @@
       "background:" + bgColor + ";padding:10px 16px;" +
       "box-shadow:0 " + (cart.position === "top" ? "2px" : "-2px") + " 8px rgba(0,0,0,0.15);";
 
-    // Get product price from DOM
+    // Get product price — use .price-item--regular (the value span, not the wrapper div)
     var priceText = "";
     if (cart.showPrice !== false) {
       var priceEl = document.querySelector(
-        ".price-item--regular, .product__price .money, [data-product-price], .price .money, .price__regular"
+        ".price-item--regular:not(.price__compare), .price-item--sale, [data-product-price], .product__price .money"
       );
-      if (priceEl) priceText = (priceEl.innerText || priceEl.textContent || "").trim().split(/[\n\r]+/)[0].trim();
+      if (priceEl) {
+        var rawPrice = (priceEl.innerText !== undefined ? priceEl.innerText : priceEl.textContent) || "";
+        priceText = rawPrice.trim().split(/[\n\r]+/).filter(function(l){ return l.trim(); })[0] || "";
+      }
+    }
+
+    // Quantity selector HTML (syncs with product form's native qty input)
+    var qtyHtml = "";
+    if (cart.showQuantity !== false) {
+      qtyHtml =
+        '<div id="badgehq-qty-wrap" style="display:flex;align-items:center;border:1px solid ' + textColor +
+        ';border-radius:' + radius + 'px;overflow:hidden;flex-shrink:0;">' +
+        '<button id="badgehq-qty-minus" style="background:transparent;border:none;color:' + textColor +
+        ';padding:8px 12px;cursor:pointer;font-size:16px;font-weight:700;line-height:1;">−</button>' +
+        '<span id="badgehq-qty-val" style="color:' + textColor +
+        ';font-size:13px;font-weight:600;min-width:24px;text-align:center;">1</span>' +
+        '<button id="badgehq-qty-plus" style="background:transparent;border:none;color:' + textColor +
+        ';padding:8px 12px;cursor:pointer;font-size:16px;font-weight:700;line-height:1;">+</button>' +
+        "</div>";
     }
 
     el.innerHTML =
-      '<div style="max-width:1200px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:12px;">' +
-      '<div>' +
-      '<div style="color:' + textColor + ';font-size:14px;font-weight:600;line-height:1.3;" id="badgehq-sticky-title">Product</div>' +
+      '<div style="max-width:1200px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:10px;">' +
+      '<div style="flex:1;min-width:0;">' +
+      '<div style="color:' + textColor + ';font-size:14px;font-weight:600;line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" id="badgehq-sticky-title">Product</div>' +
       (priceText ? '<div style="color:' + textColor + ';font-size:12px;opacity:0.8;margin-top:2px;">' + priceText + "</div>" : "") +
       "</div>" +
-      '<button style="background:' + btnBg + ";color:" + btnColor + ";border:" + btnBorder +
+      qtyHtml +
+      '<button id="badgehq-atc-btn" style="background:' + btnBg + ";color:" + btnColor + ";border:" + btnBorder +
       ";border-radius:" + radius + "px;" +
-      'padding:10px 24px;font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap;flex-shrink:0;">' +
+      'padding:10px 20px;font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap;flex-shrink:0;">' +
       cart.buttonText + "</button></div>";
 
-    // Set product title from DOM
+    // Set product title
     var productTitle = document.querySelector(".product__title, .product-single__title, h1.title, h1");
     if (productTitle) {
       var titleEl = el.querySelector("#badgehq-sticky-title");
@@ -996,17 +1015,44 @@
       }
     }
 
-    el.querySelector("button").onclick = function () { atcBtn.click(); };
+    // Wire quantity selector to product form's qty input
+    var qtyInput = document.querySelector('input[name="quantity"], .quantity__input, input.qty');
+    var qtyVal = el.querySelector("#badgehq-qty-val");
+    var qtyMinus = el.querySelector("#badgehq-qty-minus");
+    var qtyPlus = el.querySelector("#badgehq-qty-plus");
+    if (qtyMinus && qtyPlus && qtyVal) {
+      qtyMinus.onclick = function () {
+        var cur = parseInt(qtyVal.textContent) || 1;
+        if (cur <= 1) return;
+        qtyVal.textContent = String(cur - 1);
+        if (qtyInput) { qtyInput.value = String(cur - 1); qtyInput.dispatchEvent(new Event("change", { bubbles: true })); }
+      };
+      qtyPlus.onclick = function () {
+        var cur = parseInt(qtyVal.textContent) || 1;
+        qtyVal.textContent = String(cur + 1);
+        if (qtyInput) { qtyInput.value = String(cur + 1); qtyInput.dispatchEvent(new Event("change", { bubbles: true })); }
+      };
+    }
+
+    el.querySelector("#badgehq-atc-btn").onclick = function () {
+      // Sync qty to form before submitting
+      if (qtyInput && qtyVal) qtyInput.value = qtyVal.textContent;
+      atcBtn.click();
+    };
 
     document.body.appendChild(el);
 
-    var observer = new IntersectionObserver(
-      function (entries) {
-        el.style.display = entries[0].isIntersecting ? "none" : "block";
-      },
-      { threshold: 0 }
-    );
-    observer.observe(atcBtn);
+    if (cart.alwaysShow) {
+      el.style.display = "block";
+    } else {
+      var observer = new IntersectionObserver(
+        function (entries) {
+          el.style.display = entries[0].isIntersecting ? "none" : "block";
+        },
+        { threshold: 0 }
+      );
+      observer.observe(atcBtn);
+    }
   }
 
   /* ===================== COUNTDOWN TIMER ===================== */

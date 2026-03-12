@@ -113,6 +113,8 @@ model StickyCart {
   buttonStyle    String  @default("solid")
   buttonRadius   String  @default("6")
   showPrice      Boolean @default(true)
+  showQuantity   Boolean @default(true)
+  alwaysShow     Boolean @default(false)
   showMobile     Boolean @default(true)
   showDesktop    Boolean @default(true)
   position       String  @default("bottom")

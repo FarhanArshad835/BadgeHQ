@@ -125,6 +125,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       buttonStyle: b.buttonStyle ?? "solid",
       buttonRadius: b.buttonRadius ?? "6",
       showPrice: b.showPrice ?? true,
+      showQuantity: b.showQuantity ?? true,
+      alwaysShow: b.alwaysShow ?? false,
       showMobile: b.showMobile,
       showDesktop: b.showDesktop,
       position: b.position,
