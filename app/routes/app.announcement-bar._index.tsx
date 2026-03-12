@@ -113,6 +113,16 @@ export default function AnnouncementBarSettings() {
   const [endDate, setEndDate] = useState(initial.endDate);
   const [showSuccess, setShowSuccess] = useState(false);
 
+  const isDirty =
+    JSON.stringify(messages) !== JSON.stringify(initial.messages) ||
+    bgColor !== initial.bgColor ||
+    textColor !== initial.textColor ||
+    isActive !== initial.isActive ||
+    showClose !== initial.showClose ||
+    JSON.stringify(pages) !== JSON.stringify(initial.pages) ||
+    startDate !== initial.startDate ||
+    endDate !== initial.endDate;
+
   useEffect(() => {
     if (actionData?.success) {
       setShowSuccess(true);
@@ -163,7 +173,7 @@ export default function AnnouncementBarSettings() {
     <Page>
       <TitleBar title="Announcement Bar">
         <button onClick={handleDiscard}>Discard</button>
-        <button variant="primary" onClick={handleSave}>Save</button>
+        <button variant="primary" onClick={handleSave} disabled={!isDirty}>Save</button>
       </TitleBar>
       <Layout>
         <Layout.Section>

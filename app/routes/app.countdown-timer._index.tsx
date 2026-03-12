@@ -101,6 +101,17 @@ export default function CountdownTimerSettings() {
   const [pages, setPages] = useState<string[]>(initial.pages);
   const [showSuccess, setShowSuccess] = useState(false);
 
+  const isDirty =
+    endDate !== initial.endDate ||
+    style !== initial.style ||
+    aboveMsg !== initial.aboveMsg ||
+    belowMsg !== initial.belowMsg ||
+    bgColor !== initial.bgColor ||
+    textColor !== initial.textColor ||
+    accentColor !== initial.accentColor ||
+    isActive !== initial.isActive ||
+    JSON.stringify(pages) !== JSON.stringify(initial.pages);
+
   useEffect(() => {
     if (actionData?.success) {
       setShowSuccess(true);
@@ -137,7 +148,7 @@ export default function CountdownTimerSettings() {
     <Page>
       <TitleBar title="Countdown Timer">
         <button onClick={handleDiscard}>Discard</button>
-        <button variant="primary" onClick={handleSave}>Save</button>
+        <button variant="primary" onClick={handleSave} disabled={!isDirty}>Save</button>
       </TitleBar>
       <Layout>
         <Layout.Section>

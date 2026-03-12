@@ -70,6 +70,11 @@ export default function GlobalSettings() {
   const [colorScheme, setColorScheme] = useState(initial.colorScheme);
   const [showSuccess, setShowSuccess] = useState(false);
 
+  const isDirty =
+    enabled !== initial.enabled ||
+    fontFamily !== initial.fontFamily ||
+    colorScheme !== initial.colorScheme;
+
   useEffect(() => {
     if (actionData?.success) {
       setShowSuccess(true);
@@ -96,7 +101,7 @@ export default function GlobalSettings() {
     <Page>
       <TitleBar title="Global Settings">
         <button onClick={handleDiscard}>Discard</button>
-        <button variant="primary" onClick={handleSave}>Save</button>
+        <button variant="primary" onClick={handleSave} disabled={!isDirty}>Save</button>
       </TitleBar>
       <Layout>
         <Layout.Section>

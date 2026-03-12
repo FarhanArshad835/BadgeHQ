@@ -98,6 +98,16 @@ export default function FreeShippingBarSettings() {
   const [pages, setPages] = useState<string[]>(initial.pages);
   const [showSuccess, setShowSuccess] = useState(false);
 
+  const isDirty =
+    threshold !== initial.threshold ||
+    belowMsg !== initial.belowMsg ||
+    reachedMsg !== initial.reachedMsg ||
+    barBg !== initial.barBg ||
+    progressBg !== initial.progressBg ||
+    textCol !== initial.textCol ||
+    isActive !== initial.isActive ||
+    JSON.stringify(pages) !== JSON.stringify(initial.pages);
+
   useEffect(() => {
     if (actionData?.success) {
       setShowSuccess(true);
@@ -134,7 +144,7 @@ export default function FreeShippingBarSettings() {
     <Page>
       <TitleBar title="Free Shipping Bar">
         <button onClick={handleDiscard}>Discard</button>
-        <button variant="primary" onClick={handleSave}>Save</button>
+        <button variant="primary" onClick={handleSave} disabled={!isDirty}>Save</button>
       </TitleBar>
       <Layout>
         <Layout.Section>

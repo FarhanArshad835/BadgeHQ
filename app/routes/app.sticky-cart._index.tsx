@@ -103,6 +103,21 @@ export default function StickyCartSettings() {
   const [previewQty, setPreviewQty] = useState(1);
   const [showSuccess, setShowSuccess] = useState(false);
 
+  const isDirty =
+    buttonText !== initial.buttonText ||
+    buttonColor !== initial.buttonColor ||
+    bgColor !== initial.bgColor ||
+    textColor !== initial.textColor ||
+    buttonStyle !== initial.buttonStyle ||
+    buttonRadius !== initial.buttonRadius ||
+    showPrice !== initial.showPrice ||
+    showQuantity !== initial.showQuantity ||
+    alwaysShow !== initial.alwaysShow ||
+    showMobile !== initial.showMobile ||
+    showDesktop !== initial.showDesktop ||
+    position !== initial.position ||
+    isActive !== initial.isActive;
+
   useEffect(() => {
     if (actionData?.success) {
       setShowSuccess(true);
@@ -143,7 +158,7 @@ export default function StickyCartSettings() {
     <Page>
       <TitleBar title="Sticky Add to Cart">
         <button onClick={handleDiscard}>Discard</button>
-        <button variant="primary" onClick={handleSave}>Save</button>
+        <button variant="primary" onClick={handleSave} disabled={!isDirty}>Save</button>
       </TitleBar>
       <Layout>
         <Layout.Section>
