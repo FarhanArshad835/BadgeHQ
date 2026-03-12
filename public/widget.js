@@ -62,6 +62,7 @@
   function initBadgeHQ(data) {
     var gs = data.globalSettings || {};
     var w = data.widgets || {};
+    var currencySymbol = data.currencySymbol || "$";
     var page = detectPage();
 
     if (w.announcementBars)
@@ -75,7 +76,7 @@
     if (w.productBadges) renderProductBadges(w.productBadges, page);
     if (w.freeShippingBars)
       w.freeShippingBars.forEach(function (bar) {
-        renderFreeShippingBar(bar, page);
+        renderFreeShippingBar(bar, page, currencySymbol);
       });
     if (w.stickyCarts)
       w.stickyCarts.forEach(function (cart) {
@@ -746,7 +747,8 @@
   }
 
   /* ===================== FREE SHIPPING BAR ===================== */
-  function renderFreeShippingBar(bar, page) {
+  function renderFreeShippingBar(bar, page, currencySymbol) {
+    currencySymbol = currencySymbol || "$";
     if (!shouldShowOnPage(bar.pages, page)) return;
 
     fetch("/cart.js")
@@ -768,7 +770,7 @@
       var msg =
         pct >= 100
           ? m.reached || "Free shipping!"
-          : (m.below || "").replace("{{amount}}", "$" + remaining);
+          : (m.below || "").replace("{{amount}}", currencySymbol + remaining);
 
       var el = document.createElement("div");
       el.id = "badgehq-freeship-" + bar.id;

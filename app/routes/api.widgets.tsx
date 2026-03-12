@@ -6,6 +6,7 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import prisma from "../db.server";
+import { getStoreCurrency } from "../utils/currency.server";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -38,17 +39,17 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     where: { shop },
   });
 
-  if (appSettings && !appSettings.isEnabled) {
-    return json(
-      { enabled: false, widgets: {} },
-      {
-        headers: {
-          ...CORS_HEADERS,
-          "Cache-Control": "no-store, no-cache, must-revalidate",
-        },
-      },
-    );
-  }
+  // Note: isEnabled DB flag is no longer used as a gate here.
+  // The Theme App Extension itself controls whether widget.js runs on the storefront.
+
+  // Get stored session to fetch store currency
+  const session = await prisma.session.findFirst({
+    where: { shop },
+    orderBy: { expires: "desc" },
+  });
+  const { currencySymbol } = session?.accessToken
+    ? await getStoreCurrency(shop, session.accessToken)
+    : { currencySymbol: "$" };
 
   const [
     trustBadges,
@@ -135,7 +136,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   };
 
   return json(
-    { enabled: true, globalSettings, widgets },
+    { enabled: true, currencySymbol, globalSettings, widgets },
     {
       headers: {
         ...CORS_HEADERS,
