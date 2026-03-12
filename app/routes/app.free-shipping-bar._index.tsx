@@ -21,13 +21,13 @@ import prisma from "../db.server";
 import { getStoreCurrency } from "../utils/currency.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { session, admin } = await authenticate.admin(request);
   const [bar, { currencyCode, currencySymbol }] = await Promise.all([
     prisma.freeShippingBar.findFirst({
       where: { shop: session.shop },
       orderBy: { createdAt: "desc" },
     }),
-    getStoreCurrency(request),
+    getStoreCurrency(admin),
   ]);
   return json({
     currencyCode,

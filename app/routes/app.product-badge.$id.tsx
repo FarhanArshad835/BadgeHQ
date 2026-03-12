@@ -38,10 +38,10 @@ const DYNAMIC_TEXT_PRESETS = [
 ];
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { session, admin } = await authenticate.admin(request);
   const [badge, { currencyCode, currencySymbol }] = await Promise.all([
     prisma.productBadge.findFirst({ where: { id: params.id, shop: session.shop } }),
-    getStoreCurrency(request),
+    getStoreCurrency(admin),
   ]);
   if (!badge) throw new Response("Not found", { status: 404 });
   return json({

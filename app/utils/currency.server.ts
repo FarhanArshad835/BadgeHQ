@@ -1,5 +1,3 @@
-import { authenticate } from "../shopify.server";
-
 const CURRENCY_QUERY = `#graphql
   query {
     shop {
@@ -9,17 +7,21 @@ const CURRENCY_QUERY = `#graphql
   }
 `;
 
+type AdminContext = { graphql: (query: string) => Promise<{ json: () => Promise<unknown> }> };
+
 /**
  * Fetches the store's currency code and symbol.
- * moneyFormat from Shopify looks like "${{amount}}" or "€{{amount}}" etc.
+ * Pass the admin object from authenticate.admin(request) directly
+ * to avoid double-authenticating the same request.
+ *
+ * moneyFormat from Shopify looks like "₹{{amount}}", "${{amount}}", "€{{amount}}" etc.
  * We strip "{{amount}}" to get just the symbol/prefix.
  */
-export async function getStoreCurrency(request: Request): Promise<{
+export async function getStoreCurrency(admin: AdminContext): Promise<{
   currencyCode: string;
   currencySymbol: string;
 }> {
   try {
-    const { admin } = await authenticate.admin(request);
     const response = await admin.graphql(CURRENCY_QUERY);
     const data = await response.json() as {
       data?: { shop?: { currencyCode?: string; moneyFormat?: string } };

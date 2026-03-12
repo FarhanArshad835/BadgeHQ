@@ -39,7 +39,8 @@ const DYNAMIC_TEXT_PRESETS = [
 ];
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { currencyCode, currencySymbol } = await getStoreCurrency(request);
+  const { admin } = await authenticate.admin(request);
+  const { currencyCode, currencySymbol } = await getStoreCurrency(admin);
   return json({ currencyCode, currencySymbol });
 };
 
