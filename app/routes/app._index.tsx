@@ -41,13 +41,13 @@ async function checkThemeExtensionEnabled(shop: string, accessToken: string): Pr
     if (!content) return false;
 
     const settings = JSON.parse(content) as {
-      current?: { blocks?: Record<string, { disabled?: boolean }> };
+      current?: { blocks?: Record<string, { type?: string; disabled?: boolean }> };
     };
     const blocks = settings?.current?.blocks ?? {};
 
-    // Check if any block key contains "badgehq" and the block is not disabled
-    return Object.entries(blocks).some(
-      ([key, block]) => key.includes("badgehq") && block.disabled !== true
+    // Block keys are numeric IDs — match on the block's type field which contains the app handle
+    return Object.values(blocks).some(
+      (block) => block.type?.includes("badgehq") && block.disabled !== true
     );
   } catch {
     return false;
@@ -78,7 +78,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   ]);
 
   const shopHandle = shop.replace(".myshopify.com", "");
-  const themeEditorUrl = `https://admin.shopify.com/store/${shopHandle}/themes/current/editor?context=apps`;
+  // Deep link directly to BadgeHQ Widget in App Embeds and auto-activate it
+  const themeEditorUrl = `https://admin.shopify.com/store/${shopHandle}/themes/current/editor?context=apps&activateAppId=019cdd10-586c-7dc0-93a3-dc55c3f1c3fb/badgehq-widget`;
 
   return json({
     stats: {

@@ -1,7 +1,7 @@
 api_version = "2025-01"
 
 [[extensions]]
-uid = "64179c3a-f72c-f91e-1d3f-fb2e1cbc0cc757fe7572"
+uid = "019cdd10-586c-7dc0-93a3-dc55c3f1c3fb"
 type = "theme"
 name = "BadgeHQ Widget"
 handle = "badgehq-widget"
