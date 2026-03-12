@@ -751,16 +751,14 @@
     currencySymbol = currencySymbol || "$";
     if (!shouldShowOnPage(bar.pages, page)) return;
 
+    // Remove any existing bar first to avoid duplicates
+    var existing = document.getElementById("badgehq-freeship-" + bar.id);
+    if (existing) existing.remove();
+
     fetch("/cart.js")
-      .then(function (r) {
-        return r.json();
-      })
-      .then(function (cart) {
-        render(cart.total_price / 100);
-      })
-      .catch(function () {
-        render(0);
-      });
+      .then(function (r) { return r.json(); })
+      .then(function (cart) { render(cart.total_price / 100); })
+      .catch(function () { render(0); });
 
     function render(total) {
       var c = bar.colors || {};
@@ -769,37 +767,71 @@
       var remaining = Math.max(bar.threshold - total, 0).toFixed(2);
       var msg =
         pct >= 100
-          ? m.reached || "Free shipping!"
-          : (m.below || "").replace("{{amount}}", currencySymbol + remaining);
+          ? m.reached || "Free shipping unlocked!"
+          : (m.below || "You're {{amount}} away from free shipping!").replace("{{amount}}", currencySymbol + remaining);
 
       var el = document.createElement("div");
       el.id = "badgehq-freeship-" + bar.id;
-      el.style.cssText = "padding:12px 16px;text-align:center;margin:8px 0;";
+      el.style.cssText = "padding:12px 16px;text-align:center;margin:8px 0;width:100%;box-sizing:border-box;";
 
       el.innerHTML =
-        '<p style="color:' +
-        (c.text || "#333") +
-        ';margin:0 0 8px;font-size:14px;">' +
-        msg +
-        "</p>" +
-        '<div style="background:' +
-        (c.barBg || "#f0f0f0") +
-        ';border-radius:10px;height:20px;overflow:hidden;">' +
-        '<div style="background:' +
-        (c.progressBg || "#4caf50") +
-        ";height:100%;width:" +
-        pct +
-        '%;border-radius:10px;transition:width 0.3s;"></div></div>';
+        '<p style="color:' + (c.text || "#333") + ';margin:0 0 8px;font-size:14px;font-weight:500;">' + msg + "</p>" +
+        '<div style="background:' + (c.barBg || "#f0f0f0") + ';border-radius:10px;height:20px;overflow:hidden;">' +
+        '<div style="background:' + (c.progressBg || "#4caf50") + ";height:100%;width:" + pct + '%;border-radius:10px;transition:width 0.3s;"></div></div>';
 
-      var target = document.querySelector(
-        ".cart__footer, .cart-footer, [class*='cart'] form"
-      );
-      if (target) target.parentNode.insertBefore(el, target);
-      else {
-        var main = document.querySelector(
-          "main, #MainContent, .main-content"
-        );
-        if (main) main.prepend(el);
+      insertBar(el, page);
+    }
+
+    function insertBar(el, pg) {
+      var inserted = false;
+
+      if (pg === "cart") {
+        // Dawn uses <cart-footer> web component; also try class-based selectors
+        var cartSelectors = [
+          "cart-footer",
+          ".cart__footer",
+          ".cart-footer",
+          "cart-items",
+          ".cart__items",
+          'form[action="/cart"]'
+        ];
+        for (var i = 0; i < cartSelectors.length; i++) {
+          var t = document.querySelector(cartSelectors[i]);
+          if (t) {
+            t.parentNode.insertBefore(el, t);
+            inserted = true;
+            break;
+          }
+        }
+      }
+
+      if (!inserted && pg === "product") {
+        // On product page, insert above the add-to-cart form
+        var prodSelectors = [
+          ".product-form__buttons",
+          ".product__info-container",
+          'form[action*="/cart/add"]',
+          ".product-form",
+          ".product__info"
+        ];
+        for (var j = 0; j < prodSelectors.length; j++) {
+          var p = document.querySelector(prodSelectors[j]);
+          if (p) {
+            p.parentNode.insertBefore(el, p);
+            inserted = true;
+            break;
+          }
+        }
+      }
+
+      // Final fallback: prepend to main content
+      if (!inserted) {
+        var main = document.querySelector("main, #MainContent, .main-content, #main-content");
+        if (main) {
+          main.prepend(el);
+        } else {
+          document.body.prepend(el);
+        }
       }
     }
   }
