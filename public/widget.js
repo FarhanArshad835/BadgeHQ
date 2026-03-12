@@ -968,7 +968,13 @@
     );
     if (productTitle) {
       var titleEl = el.querySelector("#badgehq-sticky-title");
-      if (titleEl) titleEl.textContent = productTitle.textContent.trim();
+      if (titleEl) {
+        // Use innerText (respects CSS visibility) to avoid hidden accessibility
+        // duplicate spans that some themes add. Take only the first non-empty line.
+        var rawTitle = (productTitle.innerText !== undefined ? productTitle.innerText : productTitle.textContent) || "";
+        var titleText = rawTitle.trim().split(/[\n\r]+/)[0].trim();
+        if (titleText) titleEl.textContent = titleText;
+      }
     }
 
     el.querySelector("button").onclick = function () { atcBtn.click(); };
