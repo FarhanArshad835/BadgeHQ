@@ -1092,8 +1092,24 @@
     }
 
     el.querySelector("#badgehq-atc-btn").onclick = function () {
-      if (qtyInput && qtyVal) qtyInput.value = qtyVal.textContent;
-      atcBtn.click();
+      // Re-query fresh — Dawn re-renders product-form on variant change,
+      // which replaces the original button; stale reference does nothing.
+      var freshBtn = document.querySelector(ATC_SELECTORS);
+      var freshQtyInput = document.querySelector('input[name="quantity"], .quantity__input, input.qty');
+
+      if (freshQtyInput && qtyVal) {
+        freshQtyInput.value = qtyVal.textContent;
+        freshQtyInput.dispatchEvent(new Event("input", { bubbles: true }));
+        freshQtyInput.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+
+      if (freshBtn && !freshBtn.disabled) {
+        freshBtn.click();
+      } else {
+        // Last resort: submit the form directly
+        var form = document.querySelector('form[action*="/cart/add"]');
+        if (form) form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      }
     };
 
     document.body.appendChild(el);
