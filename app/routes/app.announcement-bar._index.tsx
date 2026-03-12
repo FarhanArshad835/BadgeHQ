@@ -96,7 +96,7 @@ export default function AnnouncementBarSettings() {
     messages: bar?.messages || [{ text: "Welcome to our store!", emoji: "" }],
     bgColor: bar?.bgColor || "#000000",
     textColor: bar?.textColor || "#ffffff",
-    isActive: bar?.isActive ?? true,
+    isActive: bar?.isActive ?? false,
     showClose: bar?.showClose ?? true,
     pages: bar?.pages || ["all"],
     startDate: bar?.schedule?.startDate || "",

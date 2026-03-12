@@ -95,7 +95,7 @@ export default function NewProductBadge() {
   const [badgeColor, setBadgeColor] = useState("#e74c3c");
   const [textColor, setTextColor] = useState("#ffffff");
   const [position, setPosition] = useState("top-left");
-  const [isActive, setIsActive] = useState(true);
+  const [isActive, setIsActive] = useState(false);
 
   // Targeting
   const [targetType, setTargetType] = useState("all");

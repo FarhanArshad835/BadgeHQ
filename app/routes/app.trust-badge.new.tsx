@@ -48,7 +48,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       data: {
         shop: session.shop,
         name: data.name,
-        isEnabled: true,
+        isEnabled: false,
         badgeIds: JSON.stringify(data.badgeIds),
         settings: JSON.stringify(data.settings),
       },

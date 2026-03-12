@@ -86,7 +86,7 @@ export default function CountdownTimerSettings() {
     bgColor: timer?.colors?.bg || "#000000",
     textColor: timer?.colors?.text || "#ffffff",
     accentColor: timer?.colors?.accent || "#e74c3c",
-    isActive: timer?.isActive ?? true,
+    isActive: timer?.isActive ?? false,
     pages: timer?.pages || ["product"],
   };
 

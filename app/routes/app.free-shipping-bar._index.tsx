@@ -84,7 +84,7 @@ export default function FreeShippingBarSettings() {
     barBg: bar?.colors?.barBg || "#f0f0f0",
     progressBg: bar?.colors?.progressBg || "#4caf50",
     textCol: bar?.colors?.text || "#333333",
-    isActive: bar?.isActive ?? true,
+    isActive: bar?.isActive ?? false,
     pages: bar?.pages || ["cart", "product"],
   };
 

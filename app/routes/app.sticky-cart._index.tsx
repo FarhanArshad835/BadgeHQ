@@ -84,7 +84,7 @@ export default function StickyCartSettings() {
     showMobile: cart?.showMobile ?? true,
     showDesktop: cart?.showDesktop ?? true,
     position: cart?.position || "bottom",
-    isActive: cart?.isActive ?? true,
+    isActive: cart?.isActive ?? false,
   };
 
   const [buttonText, setButtonText] = useState(initial.buttonText);
