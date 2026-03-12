@@ -3,14 +3,12 @@ import { json } from "@remix-run/node";
 import { useLoaderData, useNavigate } from "@remix-run/react";
 import {
   Page,
-  Layout,
   Card,
   BlockStack,
   Text,
   InlineGrid,
   Box,
   Badge,
-  Banner,
   List,
 } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
@@ -142,87 +140,65 @@ export default function Dashboard() {
     <Page>
       <TitleBar title="BadgeHQ" />
       <BlockStack gap="500">
-        <Layout>
-          <Layout.Section>
-            <BlockStack gap="400">
-              {/* Setup instructions banner — auto-hidden when widget is detected as active */}
-              {!isEnabled && (
-                <Banner
-                  title="Activate BadgeHQ on your storefront"
-                  tone="warning"
-                >
-                  <BlockStack gap="200">
-                    <Text as="p" variant="bodyMd">
-                      BadgeHQ uses a Theme App Extension to display widgets on your storefront. Follow these steps to get started:
-                    </Text>
-                    <List type="number">
-                      <List.Item>
-                        Click <strong>Open Theme Editor</strong> below to go directly to the App Embeds section.
-                      </List.Item>
-                      <List.Item>
-                        Find <strong>BadgeHQ Widget</strong> in the App Embeds list and toggle it on.
-                      </List.Item>
-                      <List.Item>
-                        Click <strong>Save</strong> in the Theme Editor to activate the widget on your store.
-                      </List.Item>
-                      <List.Item>
-                        Return here — the banner will disappear automatically once detected as active.
-                      </List.Item>
-                    </List>
-                    <Box paddingBlockStart="200">
-                      {/*
-                        target="_top" navigates the top-level browser frame to the URL,
-                        escaping the embedded iframe. App Bridge cannot intercept this.
-                        Polaris Button / window.open both fail inside cross-origin iframes.
-                      */}
-                      <a
-                        href={themeEditorUrl}
-                        target="_top"
-                        rel="noopener noreferrer"
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: "4px",
-                          padding: "6px 12px",
-                          border: "1px solid #8c9196",
-                          borderRadius: "6px",
-                          background: "#ffffff",
-                          color: "#202223",
-                          fontSize: "0.875rem",
-                          fontWeight: 500,
-                          textDecoration: "none",
-                          cursor: "pointer",
-                          lineHeight: 1.5,
-                        }}
-                      >
-                        Open Theme Editor ↗
-                      </a>
-                    </Box>
-                  </BlockStack>
-                </Banner>
-              )}
+        <Card>
+          <BlockStack gap="400">
+            {/* Header row */}
+            <InlineGrid columns="1fr auto" alignItems="center">
+              <BlockStack gap="100">
+                <Text as="h2" variant="headingLg">Welcome to BadgeHQ</Text>
+                <Text as="p" variant="bodyMd" tone="subdued">
+                  Boost your store&apos;s trust and conversions with badges, banners, and conversion tools.
+                </Text>
+              </BlockStack>
+              <Badge tone={isEnabled ? "success" : "warning"}>
+                {isEnabled ? "Widget Active" : "Setup Required"}
+              </Badge>
+            </InlineGrid>
 
-              <Card>
-                <BlockStack gap="400">
-                  <InlineGrid columns={2} alignItems="center">
-                    <Text as="h2" variant="headingLg">
-                      Welcome to BadgeHQ
-                    </Text>
-                    <Box>
-                      <Badge tone={isEnabled ? "success" : "warning"}>
-                        {isEnabled ? "Widget Active" : "Setup Required"}
-                      </Badge>
-                    </Box>
-                  </InlineGrid>
-                  <Text as="p" variant="bodyMd" tone="subdued">
-                    Boost your store's trust and conversions with badges, banners,
-                    and conversion tools.
+            {/* Setup steps — only shown when widget is not yet active */}
+            {!isEnabled && (
+              <>
+                <div style={{ borderTop: "1px solid #e1e3e5" }} />
+                <BlockStack gap="300">
+                  <Text as="p" variant="bodyMd" fontWeight="semibold">
+                    One-time setup required to display widgets on your storefront:
                   </Text>
+                  <List type="number">
+                    <List.Item>Click <strong>Open Theme Editor</strong> — it will open the App Embeds section directly.</List.Item>
+                    <List.Item>Find <strong>BadgeHQ Widget</strong> and toggle it on.</List.Item>
+                    <List.Item>Click <strong>Save</strong> in the Theme Editor.</List.Item>
+                    <List.Item>Return here — this notice disappears automatically once active.</List.Item>
+                  </List>
+                  {/* target="_top" escapes the Shopify iframe — required for cross-origin navigation */}
+                  <Box>
+                    <a
+                      href={themeEditorUrl}
+                      target="_top"
+                      rel="noopener noreferrer"
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "6px",
+                        padding: "8px 16px",
+                        border: "1px solid #8c9196",
+                        borderRadius: "6px",
+                        background: "#ffffff",
+                        color: "#202223",
+                        fontSize: "0.875rem",
+                        fontWeight: 500,
+                        textDecoration: "none",
+                        cursor: "pointer",
+                        lineHeight: 1.5,
+                      }}
+                    >
+                      Open Theme Editor ↗
+                    </a>
+                  </Box>
                 </BlockStack>
-              </Card>
-            </BlockStack>
-          </Layout.Section>
-        </Layout>
+              </>
+            )}
+          </BlockStack>
+        </Card>
 
         <InlineGrid columns={{ xs: 1, sm: 2, md: 3 }} gap="400">
           {features.map((feature) => (
