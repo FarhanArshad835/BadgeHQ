@@ -6,7 +6,7 @@ import {
   useNavigate,
   useSubmit,
 } from "@remix-run/react";
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import {
   Page,
   Layout,
@@ -181,6 +181,35 @@ export default function EditTrustBadge() {
     setBadgeSizePreset(preset);
     setBadgeSize(preset === "small" ? 40 : preset === "medium" ? 60 : 90);
   }, []);
+
+  const [showSuccess, setShowSuccess] = useState(false);
+
+  const isDirty =
+    name !== badge.name ||
+    isEnabled !== badge.isEnabled ||
+    JSON.stringify(selectedBadgeIds) !== JSON.stringify(badge.badgeIds) ||
+    showHeader !== (s.showHeader ?? true) ||
+    headerText !== (s.headerText || "Guaranteed Safe Checkout") ||
+    fontFamily !== (s.fontFamily || "'DM Sans', sans-serif") ||
+    textColor !== (s.textColor || "#242D35") ||
+    fontWeight !== (s.fontWeight || "600") ||
+    fontSize !== String(s.fontSize ?? 16) ||
+    colorScheme !== (s.colorScheme || "light") ||
+    align !== (s.align || "center") ||
+    animation !== (s.animation || "none") ||
+    badgeSize !== (s.badgeSize ?? 60) ||
+    showBorder !== (s.showBorder ?? false) ||
+    showSpacing !== (s.showSpacing ?? true) ||
+    showPadding !== (s.showPadding ?? true) ||
+    position !== (s.position || "below-atc");
+
+  useEffect(() => {
+    if (actionData?.success) {
+      setShowSuccess(true);
+      const t = setTimeout(() => setShowSuccess(false), 3000);
+      return () => clearTimeout(t);
+    }
+  }, [actionData]);
 
   const handleSave = () => {
     const data = {
@@ -458,12 +487,12 @@ export default function EditTrustBadge() {
         ) : (
           <>
             <button onClick={() => setStep(0)}>Edit Badges</button>
-            <button variant="primary" onClick={handleSave}>Save</button>
+            <button variant="primary" onClick={handleSave} disabled={!isDirty}>Save</button>
           </>
         )}
       </TitleBar>
       <BlockStack gap="400">
-        {actionData?.success && <Banner tone="success">Trust badge saved successfully.</Banner>}
+        {showSuccess && <Banner tone="success">Trust badge saved successfully.</Banner>}
         {actionData?.error && <Banner tone="critical">{actionData.error}</Banner>}
 
         <Card>

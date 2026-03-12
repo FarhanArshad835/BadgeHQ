@@ -1,7 +1,7 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useActionData, useLoaderData, useNavigate, useSubmit } from "@remix-run/react";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import {
   Page,
   Layout,
@@ -147,6 +147,44 @@ export default function EditProductBadge() {
     }
   }, [shopify]);
 
+  const [showSuccess, setShowSuccess] = useState(false);
+
+  const isDirty =
+    text !== badge.text ||
+    badgeType !== badge.badgeType ||
+    shape !== badge.shape ||
+    badgeColor !== badge.badgeColor ||
+    textColor !== badge.textColor ||
+    position !== badge.position ||
+    isActive !== badge.isActive ||
+    targetType !== badge.targeting.type ||
+    targetValue !== (badge.targeting.value || "") ||
+    JSON.stringify(targetLabels) !== JSON.stringify(badge.targeting.labels || []) ||
+    conditionType !== badge.condition.type ||
+    conditionValue !== (badge.condition.value || "") ||
+    conditionOperator !== (badge.condition.operator || "less_than") ||
+    JSON.stringify(pages) !== JSON.stringify(badge.pages) ||
+    scheduleEnabled !== (!!badge.schedule.startDate || !!badge.schedule.endDate) ||
+    scheduleStart !== (badge.schedule.startDate || "") ||
+    scheduleEnd !== (badge.schedule.endDate || "") ||
+    priority !== badge.priority ||
+    imageUrl !== badge.imageUrl ||
+    fontSize !== badge.fontSize ||
+    opacity !== badge.opacity ||
+    rotation !== badge.rotation ||
+    gradient !== badge.gradient ||
+    borderColor !== badge.borderColor ||
+    borderWidth !== badge.borderWidth ||
+    customCSS !== badge.customCSS;
+
+  useEffect(() => {
+    if (actionData?.success) {
+      setShowSuccess(true);
+      const t = setTimeout(() => setShowSuccess(false), 3000);
+      return () => clearTimeout(t);
+    }
+  }, [actionData]);
+
   const handleSave = () => {
     const data = {
       text, badgeType, shape, badgeColor, textColor, position,
@@ -185,12 +223,12 @@ export default function EditProductBadge() {
     <Page>
       <TitleBar title="Edit Product Badge">
         <button onClick={() => navigate("/app/product-badge")}>Back</button>
-        <button variant="primary" onClick={handleSave}>Save</button>
+        <button variant="primary" onClick={handleSave} disabled={!isDirty}>Save</button>
       </TitleBar>
       <Layout>
         <Layout.Section>
           <BlockStack gap="400">
-            {actionData?.success && <Banner tone="success">Product badge saved successfully.</Banner>}
+            {showSuccess && <Banner tone="success">Product badge saved successfully.</Banner>}
             {actionData?.error && <Banner tone="critical">{actionData.error}</Banner>}
 
             {/* Badge Type */}
