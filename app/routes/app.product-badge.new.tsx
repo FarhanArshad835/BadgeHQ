@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { useActionData, useNavigate, useSubmit } from "@remix-run/react";
+import { useActionData, useLoaderData, useNavigate, useSubmit } from "@remix-run/react";
 import { useState, useCallback } from "react";
 import {
   Page,
@@ -24,6 +24,7 @@ import {
 import { TitleBar, useAppBridge } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { getStoreCurrency } from "../utils/currency.server";
 
 const PRESET_BADGES = [
   "Sale %", "New", "Best Seller", "Hot", "Low Stock",
@@ -38,8 +39,8 @@ const DYNAMIC_TEXT_PRESETS = [
 ];
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  await authenticate.admin(request);
-  return json({});
+  const { currencyCode, currencySymbol } = await getStoreCurrency(request);
+  return json({ currencyCode, currencySymbol });
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -80,6 +81,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function NewProductBadge() {
+  const { currencyCode, currencySymbol } = useLoaderData<typeof loader>();
   const actionData = useActionData<{ success?: boolean; error?: string }>();
   const navigate = useNavigate();
   const submit = useSubmit();
@@ -352,7 +354,7 @@ export default function NewProductBadge() {
                     value={conditionValue}
                     onChange={setConditionValue}
                     autoComplete="off"
-                    helpText="Enter min-max (e.g., 0-25 for products under $25, or 100-999 for premium)"
+                    helpText={`Enter min-max (e.g., 0-25 for products under ${currencySymbol}25, or 100-999 for premium)`}
                   />
                 )}
 
@@ -669,7 +671,7 @@ export default function NewProductBadge() {
                     />
                   ) : (
                     <div style={previewStyle}>
-                      {badgeType === "dynamic" ? text.replace(/\{\{discount\}\}/g, "25").replace(/\{\{inventory\}\}/g, "3").replace(/\{\{sold\}\}/g, "142").replace(/\{\{price\}\}/g, "$29.99").replace(/\{\{compare_price\}\}/g, "$39.99") : text}
+                      {badgeType === "dynamic" ? text.replace(/\{\{discount\}\}/g, "25").replace(/\{\{inventory\}\}/g, "3").replace(/\{\{sold\}\}/g, "142").replace(/\{\{price\}\}/g, `${currencySymbol}29.99`).replace(/\{\{compare_price\}\}/g, `${currencySymbol}39.99`) : text}
                     </div>
                   )}
                 </div>

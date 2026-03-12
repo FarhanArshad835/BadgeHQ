@@ -18,14 +18,20 @@ import {
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { getStoreCurrency } from "../utils/currency.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
-  const bar = await prisma.freeShippingBar.findFirst({
-    where: { shop: session.shop },
-    orderBy: { createdAt: "desc" },
-  });
+  const [bar, { currencyCode, currencySymbol }] = await Promise.all([
+    prisma.freeShippingBar.findFirst({
+      where: { shop: session.shop },
+      orderBy: { createdAt: "desc" },
+    }),
+    getStoreCurrency(request),
+  ]);
   return json({
+    currencyCode,
+    currencySymbol,
     bar: bar
       ? {
           ...bar,
@@ -67,7 +73,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function FreeShippingBarSettings() {
-  const { bar } = useLoaderData<typeof loader>();
+  const { bar, currencyCode, currencySymbol } = useLoaderData<typeof loader>();
   const actionData = useActionData<{ success?: boolean; error?: string }>();
   const submit = useSubmit();
 
@@ -113,11 +119,12 @@ export default function FreeShippingBarSettings() {
                 <Text as="h2" variant="headingMd">General</Text>
                 <Checkbox label="Enable free shipping bar" checked={isActive} onChange={setIsActive} />
                 <TextField
-                  label="Free Shipping Threshold ($)"
+                  label={`Free Shipping Threshold (${currencyCode})`}
                   type="number"
                   value={threshold}
                   onChange={setThreshold}
                   autoComplete="off"
+                  prefix={currencySymbol}
                   helpText="The cart total needed for free shipping"
                 />
               </BlockStack>
@@ -198,7 +205,7 @@ export default function FreeShippingBarSettings() {
               <Box padding="400" background="bg-surface" borderWidth="025" borderRadius="200" borderColor="border">
                 <div style={{ textAlign: "center" }}>
                   <p style={{ color: textCol, margin: "0 0 8px", fontSize: "14px" }}>
-                    {belowMsg.replace("{{amount}}", `$${(parseFloat(threshold) * (1 - previewProgress / 100)).toFixed(2)}`)}
+                    {belowMsg.replace("{{amount}}", `${currencySymbol}${(parseFloat(threshold) * (1 - previewProgress / 100)).toFixed(2)}`)}
                   </p>
                   <div style={{
                     backgroundColor: barBg,
@@ -215,7 +222,7 @@ export default function FreeShippingBarSettings() {
                     }} />
                   </div>
                   <p style={{ color: textCol, margin: "4px 0 0", fontSize: "12px", opacity: 0.7 }}>
-                    ${(parseFloat(threshold) * previewProgress / 100).toFixed(2)} / ${parseFloat(threshold).toFixed(2)}
+                    {currencySymbol}{(parseFloat(threshold) * previewProgress / 100).toFixed(2)} / {currencySymbol}{parseFloat(threshold).toFixed(2)}
                   </p>
                 </div>
               </Box>

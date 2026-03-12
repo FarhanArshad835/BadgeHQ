@@ -23,6 +23,7 @@ import {
 import { TitleBar, useAppBridge } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { getStoreCurrency } from "../utils/currency.server";
 
 const PRESET_BADGES = [
   "Sale %", "New", "Best Seller", "Hot", "Low Stock",
@@ -38,11 +39,14 @@ const DYNAMIC_TEXT_PRESETS = [
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
-  const badge = await prisma.productBadge.findFirst({
-    where: { id: params.id, shop: session.shop },
-  });
+  const [badge, { currencyCode, currencySymbol }] = await Promise.all([
+    prisma.productBadge.findFirst({ where: { id: params.id, shop: session.shop } }),
+    getStoreCurrency(request),
+  ]);
   if (!badge) throw new Response("Not found", { status: 404 });
   return json({
+    currencyCode,
+    currencySymbol,
     badge: {
       ...badge,
       targeting: JSON.parse(badge.targeting) as { type: string; value: string; labels?: string[] },
@@ -91,7 +95,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 };
 
 export default function EditProductBadge() {
-  const { badge } = useLoaderData<typeof loader>();
+  const { badge, currencyCode, currencySymbol } = useLoaderData<typeof loader>();
   const actionData = useActionData<{ success?: boolean; error?: string }>();
   const navigate = useNavigate();
   const submit = useSubmit();
@@ -274,7 +278,7 @@ export default function EditProductBadge() {
                 )}
                 {conditionType === "price_range" && (
                   <TextField label="Price range" value={conditionValue} onChange={setConditionValue} autoComplete="off"
-                    helpText="Enter min-max (e.g., 0-25 for products under $25)" />
+                    helpText={`Enter min-max (e.g., 0-25 for products under ${currencySymbol}25)`} />
                 )}
                 {conditionType === "inventory_count" && (
                   <InlineGrid columns={2} gap="400">
@@ -464,7 +468,7 @@ export default function EditProductBadge() {
                     }} />
                   ) : (
                     <div style={previewStyle}>
-                      {badgeType === "dynamic" ? text.replace(/\{\{discount\}\}/g, "25").replace(/\{\{inventory\}\}/g, "3").replace(/\{\{sold\}\}/g, "142").replace(/\{\{price\}\}/g, "$29.99").replace(/\{\{compare_price\}\}/g, "$39.99") : text}
+                      {badgeType === "dynamic" ? text.replace(/\{\{discount\}\}/g, "25").replace(/\{\{inventory\}\}/g, "3").replace(/\{\{sold\}\}/g, "142").replace(/\{\{price\}\}/g, `${currencySymbol}29.99`).replace(/\{\{compare_price\}\}/g, `${currencySymbol}39.99`) : text}
                     </div>
                   )}
                 </div>
