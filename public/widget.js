@@ -948,29 +948,48 @@
     var atcBtn = document.querySelector(ATC_SELECTORS);
     if (!atcBtn) return;
 
+    var textColor   = cart.textColor   || "#ffffff";
+    var buttonColor = cart.buttonColor || "#ffffff";
+    var bgColor     = cart.bgColor     || "#000000";
+    var radius      = cart.buttonRadius || "6";
+    var isOutline   = cart.buttonStyle === "outline";
+    var btnBg       = isOutline ? "transparent" : buttonColor;
+    var btnColor    = isOutline ? buttonColor : bgColor;
+    var btnBorder   = isOutline ? "2px solid " + buttonColor : "none";
+
     var el = document.createElement("div");
     el.id = "badgehq-sticky-cart";
     el.style.cssText =
       "position:fixed;left:0;right:0;z-index:9998;display:none;" +
       (cart.position === "top" ? "top:0;" : "bottom:0;") +
-      "background:" + cart.bgColor + ";padding:10px 16px;" +
+      "background:" + bgColor + ";padding:10px 16px;" +
       "box-shadow:0 " + (cart.position === "top" ? "2px" : "-2px") + " 8px rgba(0,0,0,0.15);";
+
+    // Get product price from DOM
+    var priceText = "";
+    if (cart.showPrice !== false) {
+      var priceEl = document.querySelector(
+        ".price-item--regular, .product__price .money, [data-product-price], .price .money, .price__regular"
+      );
+      if (priceEl) priceText = (priceEl.innerText || priceEl.textContent || "").trim().split(/[\n\r]+/)[0].trim();
+    }
 
     el.innerHTML =
       '<div style="max-width:1200px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:12px;">' +
-      '<div><div style="color:' + cart.buttonColor + ';font-size:14px;font-weight:600;" id="badgehq-sticky-title">Product</div></div>' +
-      '<button style="background:' + cart.buttonColor + ";color:" + cart.bgColor +
-      ';border:none;padding:10px 24px;border-radius:6px;font-size:14px;font-weight:600;cursor:pointer;">' +
+      '<div>' +
+      '<div style="color:' + textColor + ';font-size:14px;font-weight:600;line-height:1.3;" id="badgehq-sticky-title">Product</div>' +
+      (priceText ? '<div style="color:' + textColor + ';font-size:12px;opacity:0.8;margin-top:2px;">' + priceText + "</div>" : "") +
+      "</div>" +
+      '<button style="background:' + btnBg + ";color:" + btnColor + ";border:" + btnBorder +
+      ";border-radius:" + radius + "px;" +
+      'padding:10px 24px;font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap;flex-shrink:0;">' +
       cart.buttonText + "</button></div>";
 
-    var productTitle = document.querySelector(
-      ".product__title, .product-single__title, h1.title, h1"
-    );
+    // Set product title from DOM
+    var productTitle = document.querySelector(".product__title, .product-single__title, h1.title, h1");
     if (productTitle) {
       var titleEl = el.querySelector("#badgehq-sticky-title");
       if (titleEl) {
-        // Use innerText (respects CSS visibility) to avoid hidden accessibility
-        // duplicate spans that some themes add. Take only the first non-empty line.
         var rawTitle = (productTitle.innerText !== undefined ? productTitle.innerText : productTitle.textContent) || "";
         var titleText = rawTitle.trim().split(/[\n\r]+/)[0].trim();
         if (titleText) titleEl.textContent = titleText;

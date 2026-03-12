@@ -14,6 +14,7 @@ import {
   Box,
   Checkbox,
   Banner,
+  ChoiceList,
 } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
@@ -42,6 +43,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       buttonText: data.buttonText,
       buttonColor: data.buttonColor,
       bgColor: data.bgColor,
+      textColor: data.textColor,
+      buttonStyle: data.buttonStyle,
+      buttonRadius: data.buttonRadius,
+      showPrice: data.showPrice,
       showMobile: data.showMobile,
       showDesktop: data.showDesktop,
       position: data.position,
@@ -67,15 +72,26 @@ export default function StickyCartSettings() {
   const [buttonText, setButtonText] = useState(cart?.buttonText || "Add to Cart");
   const [buttonColor, setButtonColor] = useState(cart?.buttonColor || "#ffffff");
   const [bgColor, setBgColor] = useState(cart?.bgColor || "#000000");
+  const [textColor, setTextColor] = useState(cart?.textColor || "#ffffff");
+  const [buttonStyle, setButtonStyle] = useState(cart?.buttonStyle || "solid");
+  const [buttonRadius, setButtonRadius] = useState(cart?.buttonRadius || "6");
+  const [showPrice, setShowPrice] = useState(cart?.showPrice ?? true);
   const [showMobile, setShowMobile] = useState(cart?.showMobile ?? true);
   const [showDesktop, setShowDesktop] = useState(cart?.showDesktop ?? true);
   const [position, setPosition] = useState(cart?.position || "bottom");
   const [isActive, setIsActive] = useState(cart?.isActive ?? true);
 
   const handleSave = () => {
-    const data = { buttonText, buttonColor, bgColor, showMobile, showDesktop, position, isActive };
+    const data = {
+      buttonText, buttonColor, bgColor, textColor,
+      buttonStyle, buttonRadius, showPrice,
+      showMobile, showDesktop, position, isActive,
+    };
     submit({ data: JSON.stringify(data) }, { method: "POST" });
   };
+
+  const radiusPx = parseInt(buttonRadius) || 6;
+  const isOutline = buttonStyle === "outline";
 
   return (
     <Page>
@@ -97,29 +113,70 @@ export default function StickyCartSettings() {
                   value={buttonText}
                   onChange={setButtonText}
                   autoComplete="off"
+                  helpText="Text shown on the add to cart button"
                 />
+                <Checkbox label="Show product price" checked={showPrice} onChange={setShowPrice} />
               </BlockStack>
             </Card>
 
             <Card>
               <BlockStack gap="400">
-                <Text as="h2" variant="headingMd">Appearance</Text>
+                <Text as="h2" variant="headingMd">Colors</Text>
                 <InlineGrid columns={2} gap="400">
                   <TextField
-                    label="Button Text Color"
-                    value={buttonColor}
-                    onChange={setButtonColor}
-                    autoComplete="off"
-                    prefix={<div style={{ width: 20, height: 20, backgroundColor: buttonColor, borderRadius: 4, border: "1px solid #ccc" }} />}
-                  />
-                  <TextField
-                    label="Background Color"
+                    label="Bar Background"
                     value={bgColor}
                     onChange={setBgColor}
                     autoComplete="off"
                     prefix={<div style={{ width: 20, height: 20, backgroundColor: bgColor, borderRadius: 4, border: "1px solid #ccc" }} />}
+                    helpText="Background of the sticky bar"
+                  />
+                  <TextField
+                    label="Title & Price Color"
+                    value={textColor}
+                    onChange={setTextColor}
+                    autoComplete="off"
+                    prefix={<div style={{ width: 20, height: 20, backgroundColor: textColor, borderRadius: 4, border: "1px solid #ccc" }} />}
+                    helpText="Product name and price text"
                   />
                 </InlineGrid>
+                <InlineGrid columns={2} gap="400">
+                  <TextField
+                    label="Button Color"
+                    value={buttonColor}
+                    onChange={setButtonColor}
+                    autoComplete="off"
+                    prefix={<div style={{ width: 20, height: 20, backgroundColor: buttonColor, borderRadius: 4, border: "1px solid #ccc" }} />}
+                    helpText={isOutline ? "Border & text color" : "Button background color"}
+                  />
+                </InlineGrid>
+              </BlockStack>
+            </Card>
+
+            <Card>
+              <BlockStack gap="400">
+                <Text as="h2" variant="headingMd">Button Style</Text>
+                <ChoiceList
+                  title="Style"
+                  choices={[
+                    { label: "Solid", value: "solid" },
+                    { label: "Outline", value: "outline" },
+                  ]}
+                  selected={[buttonStyle]}
+                  onChange={(val) => setButtonStyle(val[0])}
+                />
+                <Select
+                  label="Corner Radius"
+                  options={[
+                    { label: "Square (0px)", value: "0" },
+                    { label: "Slight (4px)", value: "4" },
+                    { label: "Rounded (8px)", value: "8" },
+                    { label: "Large (16px)", value: "16" },
+                    { label: "Pill (50px)", value: "50" },
+                  ]}
+                  value={buttonRadius}
+                  onChange={setButtonRadius}
+                />
                 <Select
                   label="Position"
                   options={[
@@ -161,16 +218,18 @@ export default function StickyCartSettings() {
                     alignItems: "center",
                     justifyContent: "space-between",
                     gap: 12,
+                    boxShadow: position === "top" ? "0 2px 8px rgba(0,0,0,0.15)" : "0 -2px 8px rgba(0,0,0,0.15)",
                   }}>
                     <div>
-                      <div style={{ color: buttonColor, fontSize: 12, fontWeight: 600 }}>Product Name</div>
-                      <div style={{ color: buttonColor, fontSize: 11, opacity: 0.7 }}>$29.99</div>
+                      <div style={{ color: textColor, fontSize: 12, fontWeight: 600 }}>Product Name</div>
+                      {showPrice && <div style={{ color: textColor, fontSize: 11, opacity: 0.7 }}>$29.99</div>}
                     </div>
                     <div style={{
-                      backgroundColor: buttonColor,
-                      color: bgColor,
+                      backgroundColor: isOutline ? "transparent" : buttonColor,
+                      color: isOutline ? buttonColor : bgColor,
+                      border: isOutline ? `2px solid ${buttonColor}` : "none",
                       padding: "8px 16px",
-                      borderRadius: 6,
+                      borderRadius: radiusPx,
                       fontSize: 13,
                       fontWeight: 600,
                       whiteSpace: "nowrap",

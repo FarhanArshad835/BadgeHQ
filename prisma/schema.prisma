@@ -104,17 +104,21 @@ model FreeShippingBar {
 }
 
 model StickyCart {
-  id          String  @id @default(cuid())
-  shop        String
-  buttonText  String  @default("Add to Cart")
-  buttonColor String  @default("#ffffff")
-  bgColor     String  @default("#000000")
-  showMobile  Boolean @default(true)
-  showDesktop Boolean @default(true)
-  position    String  @default("bottom")
-  isActive    Boolean @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id             String  @id @default(cuid())
+  shop           String
+  buttonText     String  @default("Add to Cart")
+  buttonColor    String  @default("#ffffff")
+  bgColor        String  @default("#000000")
+  textColor      String  @default("#ffffff")
+  buttonStyle    String  @default("solid")
+  buttonRadius   String  @default("6")
+  showPrice      Boolean @default(true)
+  showMobile     Boolean @default(true)
+  showDesktop    Boolean @default(true)
+  position       String  @default("bottom")
+  isActive       Boolean @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   @@index([shop])
 }
