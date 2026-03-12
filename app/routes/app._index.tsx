@@ -1,6 +1,6 @@
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useLoaderData, useNavigate } from "@remix-run/react";
+import { useLoaderData, useNavigate, useFetcher } from "@remix-run/react";
 import {
   Page,
   Layout,
@@ -12,11 +12,25 @@ import {
   Badge,
   Banner,
   List,
+  Button,
 } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 
+
+export const action = async ({ request }: ActionFunctionArgs) => {
+  const { session } = await authenticate.admin(request);
+  const shop = session.shop;
+
+  await prisma.appSettings.upsert({
+    where: { shop },
+    update: { isEnabled: true },
+    create: { shop, isEnabled: true },
+  });
+
+  return json({ ok: true });
+};
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -56,7 +70,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       stickyCarts: stickyCartCount,
       countdownTimers: countdownTimerCount,
     },
-    isEnabled: appSettings?.isEnabled ?? true,
+    isEnabled: appSettings?.isEnabled ?? false,
     themeEditorUrl,
   });
 };
@@ -103,6 +117,9 @@ const features = [
 export default function Dashboard() {
   const { stats, isEnabled, themeEditorUrl } = useLoaderData<typeof loader>();
   const navigate = useNavigate();
+  const fetcher = useFetcher();
+
+  const markingEnabled = fetcher.state !== "idle";
 
   return (
     <Page>
@@ -111,60 +128,76 @@ export default function Dashboard() {
         <Layout>
           <Layout.Section>
             <BlockStack gap="400">
-              {/* Setup instructions banner */}
-              <Banner
-                title="Activate BadgeHQ on your storefront"
-                tone="warning"
-              >
-                <BlockStack gap="200">
-                  <Text as="p" variant="bodyMd">
-                    BadgeHQ uses a Theme App Extension to display widgets on your storefront. Follow these steps to get started:
-                  </Text>
-                  <List type="number">
-                    <List.Item>
-                      Click <strong>Open Theme Editor</strong> above to go directly to the App Embeds section.
-                    </List.Item>
-                    <List.Item>
-                      Find <strong>BadgeHQ Widget</strong> in the App Embeds list and toggle it on.
-                    </List.Item>
-                    <List.Item>
-                      Click <strong>Save</strong> in the Theme Editor to activate the widget on your store.
-                    </List.Item>
-                    <List.Item>
-                      Return here to create and manage your badges and widgets.
-                    </List.Item>
-                  </List>
-                  <Box paddingBlockStart="200">
-                    {/*
-                      target="_top" navigates the top-level browser frame to the URL,
-                      escaping the embedded iframe. App Bridge cannot intercept this.
-                      Polaris Button / window.open both fail inside cross-origin iframes.
-                    */}
-                    <a
-                      href={themeEditorUrl}
-                      target="_top"
-                      rel="noopener noreferrer"
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: "4px",
-                        padding: "6px 12px",
-                        border: "1px solid #8c9196",
-                        borderRadius: "6px",
-                        background: "#ffffff",
-                        color: "#202223",
-                        fontSize: "0.875rem",
-                        fontWeight: 500,
-                        textDecoration: "none",
-                        cursor: "pointer",
-                        lineHeight: 1.5,
-                      }}
-                    >
-                      Open Theme Editor ↗
-                    </a>
-                  </Box>
-                </BlockStack>
-              </Banner>
+              {/* Setup instructions banner — only shown until user confirms widget is enabled */}
+              {!isEnabled && (
+                <Banner
+                  title="Activate BadgeHQ on your storefront"
+                  tone="warning"
+                >
+                  <BlockStack gap="200">
+                    <Text as="p" variant="bodyMd">
+                      BadgeHQ uses a Theme App Extension to display widgets on your storefront. Follow these steps to get started:
+                    </Text>
+                    <List type="number">
+                      <List.Item>
+                        Click <strong>Open Theme Editor</strong> below to go directly to the App Embeds section.
+                      </List.Item>
+                      <List.Item>
+                        Find <strong>BadgeHQ Widget</strong> in the App Embeds list and toggle it on.
+                      </List.Item>
+                      <List.Item>
+                        Click <strong>Save</strong> in the Theme Editor to activate the widget on your store.
+                      </List.Item>
+                      <List.Item>
+                        Return here and click <strong>I&apos;ve Enabled the Widget</strong> below.
+                      </List.Item>
+                    </List>
+                    <InlineGrid columns="1fr 1fr" gap="300" alignItems="center">
+                      <Box paddingBlockStart="200">
+                        {/*
+                          target="_top" navigates the top-level browser frame to the URL,
+                          escaping the embedded iframe. App Bridge cannot intercept this.
+                          Polaris Button / window.open both fail inside cross-origin iframes.
+                        */}
+                        <a
+                          href={themeEditorUrl}
+                          target="_top"
+                          rel="noopener noreferrer"
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "4px",
+                            padding: "6px 12px",
+                            border: "1px solid #8c9196",
+                            borderRadius: "6px",
+                            background: "#ffffff",
+                            color: "#202223",
+                            fontSize: "0.875rem",
+                            fontWeight: 500,
+                            textDecoration: "none",
+                            cursor: "pointer",
+                            lineHeight: 1.5,
+                          }}
+                        >
+                          Open Theme Editor ↗
+                        </a>
+                      </Box>
+                      <Box paddingBlockStart="200">
+                        <fetcher.Form method="post">
+                          <Button
+                            submit
+                            variant="primary"
+                            loading={markingEnabled}
+                            tone="success"
+                          >
+                            I&apos;ve Enabled the Widget ✓
+                          </Button>
+                        </fetcher.Form>
+                      </Box>
+                    </InlineGrid>
+                  </BlockStack>
+                </Banner>
+              )}
 
               <Card>
                 <BlockStack gap="400">
@@ -173,8 +206,8 @@ export default function Dashboard() {
                       Welcome to BadgeHQ
                     </Text>
                     <Box>
-                      <Badge tone={isEnabled ? "success" : "critical"}>
-                        {isEnabled ? "App Enabled" : "App Disabled"}
+                      <Badge tone={isEnabled ? "success" : "warning"}>
+                        {isEnabled ? "Widget Active" : "Setup Required"}
                       </Badge>
                     </Box>
                   </InlineGrid>
