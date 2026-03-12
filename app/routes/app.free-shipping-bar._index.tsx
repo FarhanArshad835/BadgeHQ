@@ -1,7 +1,7 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useActionData, useLoaderData, useSubmit } from "@remix-run/react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Page,
   Layout,
@@ -77,18 +77,45 @@ export default function FreeShippingBarSettings() {
   const actionData = useActionData<{ success?: boolean; error?: string }>();
   const submit = useSubmit();
 
-  const [threshold, setThreshold] = useState(String(bar?.threshold || 50));
-  const [belowMsg, setBelowMsg] = useState(
-    bar?.messages?.below || "You're {{amount}} away from free shipping!"
-  );
-  const [reachedMsg, setReachedMsg] = useState(
-    bar?.messages?.reached || "Congratulations! You've earned free shipping!"
-  );
-  const [barBg, setBarBg] = useState(bar?.colors?.barBg || "#f0f0f0");
-  const [progressBg, setProgressBg] = useState(bar?.colors?.progressBg || "#4caf50");
-  const [textCol, setTextCol] = useState(bar?.colors?.text || "#333333");
-  const [isActive, setIsActive] = useState(bar?.isActive ?? true);
-  const [pages, setPages] = useState<string[]>(bar?.pages || ["cart", "product"]);
+  const initial = {
+    threshold: String(bar?.threshold || 50),
+    belowMsg: bar?.messages?.below || "You're {{amount}} away from free shipping!",
+    reachedMsg: bar?.messages?.reached || "Congratulations! You've earned free shipping!",
+    barBg: bar?.colors?.barBg || "#f0f0f0",
+    progressBg: bar?.colors?.progressBg || "#4caf50",
+    textCol: bar?.colors?.text || "#333333",
+    isActive: bar?.isActive ?? true,
+    pages: bar?.pages || ["cart", "product"],
+  };
+
+  const [threshold, setThreshold] = useState(initial.threshold);
+  const [belowMsg, setBelowMsg] = useState(initial.belowMsg);
+  const [reachedMsg, setReachedMsg] = useState(initial.reachedMsg);
+  const [barBg, setBarBg] = useState(initial.barBg);
+  const [progressBg, setProgressBg] = useState(initial.progressBg);
+  const [textCol, setTextCol] = useState(initial.textCol);
+  const [isActive, setIsActive] = useState(initial.isActive);
+  const [pages, setPages] = useState<string[]>(initial.pages);
+  const [showSuccess, setShowSuccess] = useState(false);
+
+  useEffect(() => {
+    if (actionData?.success) {
+      setShowSuccess(true);
+      const t = setTimeout(() => setShowSuccess(false), 3000);
+      return () => clearTimeout(t);
+    }
+  }, [actionData]);
+
+  const handleDiscard = () => {
+    setThreshold(initial.threshold);
+    setBelowMsg(initial.belowMsg);
+    setReachedMsg(initial.reachedMsg);
+    setBarBg(initial.barBg);
+    setProgressBg(initial.progressBg);
+    setTextCol(initial.textCol);
+    setIsActive(initial.isActive);
+    setPages(initial.pages);
+  };
 
   const handleSave = () => {
     const data = {
@@ -106,12 +133,13 @@ export default function FreeShippingBarSettings() {
   return (
     <Page>
       <TitleBar title="Free Shipping Bar">
+        <button onClick={handleDiscard}>Discard</button>
         <button variant="primary" onClick={handleSave}>Save</button>
       </TitleBar>
       <Layout>
         <Layout.Section>
           <BlockStack gap="400">
-            {actionData?.success && <Banner tone="success">Free shipping bar saved successfully.</Banner>}
+            {showSuccess && <Banner tone="success">Free shipping bar saved successfully.</Banner>}
             {actionData?.error && <Banner tone="critical">{actionData.error}</Banner>}
 
             <Card>

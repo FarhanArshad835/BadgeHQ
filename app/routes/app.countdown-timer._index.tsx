@@ -1,7 +1,7 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useActionData, useLoaderData, useSubmit } from "@remix-run/react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Page,
   Layout,
@@ -78,15 +78,48 @@ export default function CountdownTimerSettings() {
   defaultEnd.setDate(defaultEnd.getDate() + 7);
   const defaultEndStr = defaultEnd.toISOString().slice(0, 16);
 
-  const [endDate, setEndDate] = useState(timer?.endDate || defaultEndStr);
-  const [style, setStyle] = useState(timer?.style || "full");
-  const [aboveMsg, setAboveMsg] = useState(timer?.messages?.above || "Hurry! Sale ends in:");
-  const [belowMsg, setBelowMsg] = useState(timer?.messages?.below || "Don't miss out!");
-  const [bgColor, setBgColor] = useState(timer?.colors?.bg || "#000000");
-  const [textColor, setTextColor] = useState(timer?.colors?.text || "#ffffff");
-  const [accentColor, setAccentColor] = useState(timer?.colors?.accent || "#e74c3c");
-  const [isActive, setIsActive] = useState(timer?.isActive ?? true);
-  const [pages, setPages] = useState<string[]>(timer?.pages || ["product"]);
+  const initial = {
+    endDate: timer?.endDate || defaultEndStr,
+    style: timer?.style || "full",
+    aboveMsg: timer?.messages?.above || "Hurry! Sale ends in:",
+    belowMsg: timer?.messages?.below || "Don't miss out!",
+    bgColor: timer?.colors?.bg || "#000000",
+    textColor: timer?.colors?.text || "#ffffff",
+    accentColor: timer?.colors?.accent || "#e74c3c",
+    isActive: timer?.isActive ?? true,
+    pages: timer?.pages || ["product"],
+  };
+
+  const [endDate, setEndDate] = useState(initial.endDate);
+  const [style, setStyle] = useState(initial.style);
+  const [aboveMsg, setAboveMsg] = useState(initial.aboveMsg);
+  const [belowMsg, setBelowMsg] = useState(initial.belowMsg);
+  const [bgColor, setBgColor] = useState(initial.bgColor);
+  const [textColor, setTextColor] = useState(initial.textColor);
+  const [accentColor, setAccentColor] = useState(initial.accentColor);
+  const [isActive, setIsActive] = useState(initial.isActive);
+  const [pages, setPages] = useState<string[]>(initial.pages);
+  const [showSuccess, setShowSuccess] = useState(false);
+
+  useEffect(() => {
+    if (actionData?.success) {
+      setShowSuccess(true);
+      const t = setTimeout(() => setShowSuccess(false), 3000);
+      return () => clearTimeout(t);
+    }
+  }, [actionData]);
+
+  const handleDiscard = () => {
+    setEndDate(initial.endDate);
+    setStyle(initial.style);
+    setAboveMsg(initial.aboveMsg);
+    setBelowMsg(initial.belowMsg);
+    setBgColor(initial.bgColor);
+    setTextColor(initial.textColor);
+    setAccentColor(initial.accentColor);
+    setIsActive(initial.isActive);
+    setPages(initial.pages);
+  };
 
   const handleSave = () => {
     const data = {
@@ -103,12 +136,13 @@ export default function CountdownTimerSettings() {
   return (
     <Page>
       <TitleBar title="Countdown Timer">
+        <button onClick={handleDiscard}>Discard</button>
         <button variant="primary" onClick={handleSave}>Save</button>
       </TitleBar>
       <Layout>
         <Layout.Section>
           <BlockStack gap="400">
-            {actionData?.success && <Banner tone="success">Countdown timer saved successfully.</Banner>}
+            {showSuccess && <Banner tone="success">Countdown timer saved successfully.</Banner>}
             {actionData?.error && <Banner tone="critical">{actionData.error}</Banner>}
 
             <Card>

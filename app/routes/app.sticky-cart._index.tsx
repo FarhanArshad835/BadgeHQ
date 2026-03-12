@@ -1,7 +1,7 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useActionData, useLoaderData, useSubmit } from "@remix-run/react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Page,
   Layout,
@@ -71,20 +71,61 @@ export default function StickyCartSettings() {
   const actionData = useActionData<{ success?: boolean; error?: string }>();
   const submit = useSubmit();
 
-  const [buttonText, setButtonText] = useState(cart?.buttonText || "Add to Cart");
-  const [buttonColor, setButtonColor] = useState(cart?.buttonColor || "#ffffff");
-  const [bgColor, setBgColor] = useState(cart?.bgColor || "#000000");
-  const [textColor, setTextColor] = useState(cart?.textColor || "#ffffff");
-  const [buttonStyle, setButtonStyle] = useState(cart?.buttonStyle || "solid");
-  const [buttonRadius, setButtonRadius] = useState(cart?.buttonRadius || "6");
-  const [showPrice, setShowPrice] = useState(cart?.showPrice ?? true);
-  const [showQuantity, setShowQuantity] = useState(cart?.showQuantity ?? true);
-  const [alwaysShow, setAlwaysShow] = useState(cart?.alwaysShow ?? false);
-  const [showMobile, setShowMobile] = useState(cart?.showMobile ?? true);
-  const [showDesktop, setShowDesktop] = useState(cart?.showDesktop ?? true);
-  const [position, setPosition] = useState(cart?.position || "bottom");
-  const [isActive, setIsActive] = useState(cart?.isActive ?? true);
+  const initial = {
+    buttonText: cart?.buttonText || "Add to Cart",
+    buttonColor: cart?.buttonColor || "#ffffff",
+    bgColor: cart?.bgColor || "#000000",
+    textColor: cart?.textColor || "#ffffff",
+    buttonStyle: cart?.buttonStyle || "solid",
+    buttonRadius: cart?.buttonRadius || "6",
+    showPrice: cart?.showPrice ?? true,
+    showQuantity: cart?.showQuantity ?? true,
+    alwaysShow: cart?.alwaysShow ?? false,
+    showMobile: cart?.showMobile ?? true,
+    showDesktop: cart?.showDesktop ?? true,
+    position: cart?.position || "bottom",
+    isActive: cart?.isActive ?? true,
+  };
+
+  const [buttonText, setButtonText] = useState(initial.buttonText);
+  const [buttonColor, setButtonColor] = useState(initial.buttonColor);
+  const [bgColor, setBgColor] = useState(initial.bgColor);
+  const [textColor, setTextColor] = useState(initial.textColor);
+  const [buttonStyle, setButtonStyle] = useState(initial.buttonStyle);
+  const [buttonRadius, setButtonRadius] = useState(initial.buttonRadius);
+  const [showPrice, setShowPrice] = useState(initial.showPrice);
+  const [showQuantity, setShowQuantity] = useState(initial.showQuantity);
+  const [alwaysShow, setAlwaysShow] = useState(initial.alwaysShow);
+  const [showMobile, setShowMobile] = useState(initial.showMobile);
+  const [showDesktop, setShowDesktop] = useState(initial.showDesktop);
+  const [position, setPosition] = useState(initial.position);
+  const [isActive, setIsActive] = useState(initial.isActive);
   const [previewQty, setPreviewQty] = useState(1);
+  const [showSuccess, setShowSuccess] = useState(false);
+
+  useEffect(() => {
+    if (actionData?.success) {
+      setShowSuccess(true);
+      const t = setTimeout(() => setShowSuccess(false), 3000);
+      return () => clearTimeout(t);
+    }
+  }, [actionData]);
+
+  const handleDiscard = () => {
+    setButtonText(initial.buttonText);
+    setButtonColor(initial.buttonColor);
+    setBgColor(initial.bgColor);
+    setTextColor(initial.textColor);
+    setButtonStyle(initial.buttonStyle);
+    setButtonRadius(initial.buttonRadius);
+    setShowPrice(initial.showPrice);
+    setShowQuantity(initial.showQuantity);
+    setAlwaysShow(initial.alwaysShow);
+    setShowMobile(initial.showMobile);
+    setShowDesktop(initial.showDesktop);
+    setPosition(initial.position);
+    setIsActive(initial.isActive);
+  };
 
   const handleSave = () => {
     const data = {
@@ -101,12 +142,13 @@ export default function StickyCartSettings() {
   return (
     <Page>
       <TitleBar title="Sticky Add to Cart">
+        <button onClick={handleDiscard}>Discard</button>
         <button variant="primary" onClick={handleSave}>Save</button>
       </TitleBar>
       <Layout>
         <Layout.Section>
           <BlockStack gap="400">
-            {actionData?.success && <Banner tone="success">Sticky cart settings saved successfully.</Banner>}
+            {showSuccess && <Banner tone="success">Sticky cart settings saved successfully.</Banner>}
             {actionData?.error && <Banner tone="critical">{actionData.error}</Banner>}
 
             <Card>

@@ -1,7 +1,7 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useActionData, useLoaderData, useSubmit } from "@remix-run/react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Page,
   Layout,
@@ -92,16 +92,45 @@ export default function AnnouncementBarSettings() {
   const actionData = useActionData<{ success?: boolean; error?: string }>();
   const submit = useSubmit();
 
-  const [messages, setMessages] = useState<BarMessage[]>(
-    bar?.messages || [{ text: "Welcome to our store!", emoji: "" }]
-  );
-  const [bgColor, setBgColor] = useState(bar?.bgColor || "#000000");
-  const [textColor, setTextColor] = useState(bar?.textColor || "#ffffff");
-  const [isActive, setIsActive] = useState(bar?.isActive ?? true);
-  const [showClose, setShowClose] = useState(bar?.showClose ?? true);
-  const [pages, setPages] = useState<string[]>(bar?.pages || ["all"]);
-  const [startDate, setStartDate] = useState(bar?.schedule?.startDate || "");
-  const [endDate, setEndDate] = useState(bar?.schedule?.endDate || "");
+  const initial = {
+    messages: bar?.messages || [{ text: "Welcome to our store!", emoji: "" }],
+    bgColor: bar?.bgColor || "#000000",
+    textColor: bar?.textColor || "#ffffff",
+    isActive: bar?.isActive ?? true,
+    showClose: bar?.showClose ?? true,
+    pages: bar?.pages || ["all"],
+    startDate: bar?.schedule?.startDate || "",
+    endDate: bar?.schedule?.endDate || "",
+  };
+
+  const [messages, setMessages] = useState<BarMessage[]>(initial.messages);
+  const [bgColor, setBgColor] = useState(initial.bgColor);
+  const [textColor, setTextColor] = useState(initial.textColor);
+  const [isActive, setIsActive] = useState(initial.isActive);
+  const [showClose, setShowClose] = useState(initial.showClose);
+  const [pages, setPages] = useState<string[]>(initial.pages);
+  const [startDate, setStartDate] = useState(initial.startDate);
+  const [endDate, setEndDate] = useState(initial.endDate);
+  const [showSuccess, setShowSuccess] = useState(false);
+
+  useEffect(() => {
+    if (actionData?.success) {
+      setShowSuccess(true);
+      const t = setTimeout(() => setShowSuccess(false), 3000);
+      return () => clearTimeout(t);
+    }
+  }, [actionData]);
+
+  const handleDiscard = () => {
+    setMessages(initial.messages);
+    setBgColor(initial.bgColor);
+    setTextColor(initial.textColor);
+    setIsActive(initial.isActive);
+    setShowClose(initial.showClose);
+    setPages(initial.pages);
+    setStartDate(initial.startDate);
+    setEndDate(initial.endDate);
+  };
 
   const handleSave = () => {
     const data = {
@@ -133,12 +162,13 @@ export default function AnnouncementBarSettings() {
   return (
     <Page>
       <TitleBar title="Announcement Bar">
+        <button onClick={handleDiscard}>Discard</button>
         <button variant="primary" onClick={handleSave}>Save</button>
       </TitleBar>
       <Layout>
         <Layout.Section>
           <BlockStack gap="400">
-            {actionData?.success && <Banner tone="success">Announcement bar saved successfully.</Banner>}
+            {showSuccess && <Banner tone="success">Announcement bar saved successfully.</Banner>}
             {actionData?.error && <Banner tone="critical">{actionData.error}</Banner>}
 
             <Card>

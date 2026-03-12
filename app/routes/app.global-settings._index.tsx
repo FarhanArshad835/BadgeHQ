@@ -1,7 +1,7 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useActionData, useLoaderData, useSubmit } from "@remix-run/react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Page,
   Layout,
@@ -59,9 +59,30 @@ export default function GlobalSettings() {
   const actionData = useActionData<{ success?: boolean; error?: string }>();
   const submit = useSubmit();
 
-  const [enabled, setEnabled] = useState(isEnabled);
-  const [fontFamily, setFontFamily] = useState(settings.fontFamily || "inherit");
-  const [colorScheme, setColorScheme] = useState(settings.colorScheme || "light");
+  const initial = {
+    enabled: isEnabled,
+    fontFamily: settings.fontFamily || "inherit",
+    colorScheme: settings.colorScheme || "light",
+  };
+
+  const [enabled, setEnabled] = useState(initial.enabled);
+  const [fontFamily, setFontFamily] = useState(initial.fontFamily);
+  const [colorScheme, setColorScheme] = useState(initial.colorScheme);
+  const [showSuccess, setShowSuccess] = useState(false);
+
+  useEffect(() => {
+    if (actionData?.success) {
+      setShowSuccess(true);
+      const t = setTimeout(() => setShowSuccess(false), 3000);
+      return () => clearTimeout(t);
+    }
+  }, [actionData]);
+
+  const handleDiscard = () => {
+    setEnabled(initial.enabled);
+    setFontFamily(initial.fontFamily);
+    setColorScheme(initial.colorScheme);
+  };
 
   const handleSave = () => {
     const data = {
@@ -74,12 +95,13 @@ export default function GlobalSettings() {
   return (
     <Page>
       <TitleBar title="Global Settings">
+        <button onClick={handleDiscard}>Discard</button>
         <button variant="primary" onClick={handleSave}>Save</button>
       </TitleBar>
       <Layout>
         <Layout.Section>
           <BlockStack gap="400">
-            {actionData?.success && <Banner tone="success">Settings saved successfully.</Banner>}
+            {showSuccess && <Banner tone="success">Settings saved successfully.</Banner>}
             {actionData?.error && <Banner tone="critical">{actionData.error}</Banner>}
 
             <Card>
