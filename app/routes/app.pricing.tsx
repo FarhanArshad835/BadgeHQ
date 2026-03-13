@@ -21,6 +21,9 @@ import {
   extractReauthorizeUrl,
 } from "../billing.server";
 
+// true = test charges (dev stores / testing); false = real charges (production)
+const IS_BILLING_TEST = process.env.BILLING_TEST_MODE !== "false";
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, billing } = await authenticate.admin(request);
   const shop = session.shop;
@@ -32,7 +35,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   try {
     const { appSubscriptions } = await billing.check({
       plans: [PLANS.GROWTH, PLANS.PRO],
-      isTest: false,
+      isTest: IS_BILLING_TEST,
     });
     if (appSubscriptions.length > 0) {
       const sub = appSubscriptions[0];
@@ -61,7 +64,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     try {
       const { confirmationUrl } = await billing.request({
         plan,
-        isTest: false,
+        isTest: IS_BILLING_TEST,
         returnUrl: `${process.env.SHOPIFY_APP_URL}/app/pricing`,
       });
       return json({ confirmationUrl, error: null });
@@ -82,12 +85,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     try {
       const { appSubscriptions } = await billing.check({
         plans: [PLANS.GROWTH, PLANS.PRO],
-        isTest: false,
+        isTest: IS_BILLING_TEST,
       });
       if (appSubscriptions.length > 0) {
         await billing.cancel({
           subscriptionId: appSubscriptions[0].id,
-          isTest: false,
+          isTest: IS_BILLING_TEST,
           prorate: true,
         });
       }
