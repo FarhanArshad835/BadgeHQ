@@ -3,5 +3,5 @@ api_version = "2025-01"
 [[extensions]]
 uid = "019cdd10-586c-7dc0-93a3-dc55c3f1c3fb"
 type = "theme"
-name = "SaleKit Widget"
+name = "BadgeHQ Widget"
 handle = "badgehq-widget"

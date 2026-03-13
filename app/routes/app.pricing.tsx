@@ -206,7 +206,7 @@ export default function PricingPage() {
         <BlockStack gap="200">
           <Text as="h2" variant="headingLg">Choose your plan</Text>
           <Text as="p" variant="bodyMd" tone="subdued">
-            All plans include access to SaleKit features. Upgrade anytime to unlock more.
+            All plans include access to BadgeHQ features. Upgrade anytime to unlock more.
           </Text>
         </BlockStack>
 
