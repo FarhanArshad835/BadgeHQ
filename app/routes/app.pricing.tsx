@@ -21,12 +21,25 @@ import {
   extractReauthorizeUrl,
 } from "../billing.server";
 
-// true = test charges (dev stores / testing); false = real charges (production)
-const IS_BILLING_TEST = process.env.BILLING_TEST_MODE !== "false";
+/** Returns true if the shop is a development/partner store (test charges required). */
+async function isTestStore(shop: string, accessToken: string): Promise<boolean> {
+  try {
+    const resp = await fetch(
+      `https://${shop}/admin/api/2025-01/shop.json`,
+      { headers: { "X-Shopify-Access-Token": accessToken } }
+    );
+    const data = await resp.json() as { shop?: { plan_name?: string } };
+    const plan = data.shop?.plan_name ?? "";
+    return ["developer", "affiliate", "staff", "staff_business", "partner_test"].includes(plan);
+  } catch {
+    return false;
+  }
+}
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, billing } = await authenticate.admin(request);
   const shop = session.shop;
+  const isTest = await isTestStore(shop, session.accessToken!);
 
   // Check active subscriptions
   let activePlan: Plan = PLANS.FREE;
@@ -35,7 +48,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   try {
     const { appSubscriptions } = await billing.check({
       plans: [PLANS.GROWTH, PLANS.PRO],
-      isTest: IS_BILLING_TEST,
+      isTest,
     });
     if (appSubscriptions.length > 0) {
       const sub = appSubscriptions[0];
@@ -56,6 +69,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { session, billing } = await authenticate.admin(request);
   const shop = session.shop;
+  const isTest = await isTestStore(shop, session.accessToken!);
   const form = await request.formData();
   const intent = form.get("intent") as string;
   const plan = form.get("plan") as Plan;
@@ -64,7 +78,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     try {
       const { confirmationUrl } = await billing.request({
         plan,
-        isTest: IS_BILLING_TEST,
+        isTest,
         returnUrl: `${process.env.SHOPIFY_APP_URL}/app/pricing`,
       });
       return json({ confirmationUrl, error: null });
@@ -85,12 +99,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     try {
       const { appSubscriptions } = await billing.check({
         plans: [PLANS.GROWTH, PLANS.PRO],
-        isTest: IS_BILLING_TEST,
+        isTest,
       });
       if (appSubscriptions.length > 0) {
         await billing.cancel({
           subscriptionId: appSubscriptions[0].id,
-          isTest: IS_BILLING_TEST,
+          isTest,
           prorate: true,
         });
       }
