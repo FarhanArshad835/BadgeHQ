@@ -15,13 +15,11 @@ import {
 import { TitleBar } from "@shopify/app-bridge-react";
 import { useEffect, useRef } from "react";
 import { authenticate } from "../shopify.server";
+import { PLANS, PLAN_DETAILS, type Plan } from "../billing.shared";
 import {
-  PLANS,
-  PLAN_DETAILS,
   getShopPlan,
   upsertShopPlan,
   extractReauthorizeUrl,
-  type Plan,
 } from "../billing.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
