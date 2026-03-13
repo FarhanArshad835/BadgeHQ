@@ -67,7 +67,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { session, billing } = await authenticate.admin(request);
+  const { session, admin, billing } = await authenticate.admin(request);
   const shop = session.shop;
   const isTest = await isTestStore(shop, session.accessToken!);
   const form = await request.formData();
@@ -76,21 +76,38 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   if (intent === "upgrade" && (plan === PLANS.GROWTH || plan === PLANS.PRO)) {
     try {
-      const { confirmationUrl } = await billing.request({
-        plan,
-        isTest,
-        returnUrl: `${process.env.SHOPIFY_APP_URL}/app/pricing`,
-      });
+      // Use direct GraphQL instead of billing.request() so we don't send lineItems —
+      // managed pricing plans have Shopify-controlled pricing; adding lineItems conflicts.
+      const returnUrl = `${process.env.SHOPIFY_APP_URL}/app/pricing`;
+      const resp = await admin.graphql(
+        `#graphql
+        mutation AppSubscriptionCreate($name: String!, $returnUrl: URL!, $test: Boolean) {
+          appSubscriptionCreate(name: $name, returnUrl: $returnUrl, test: $test) {
+            userErrors { field message }
+            confirmationUrl
+          }
+        }`,
+        { variables: { name: plan, returnUrl, test: isTest } }
+      );
+      const { data } = await resp.json() as {
+        data: {
+          appSubscriptionCreate: {
+            confirmationUrl: string | null;
+            userErrors: { field: string; message: string }[];
+          };
+        };
+      };
+      const { confirmationUrl, userErrors } = data.appSubscriptionCreate;
+      if (userErrors?.length) {
+        const msg = userErrors.map((e) => e.message).join(", ");
+        console.error("[BadgeHQ billing] userErrors:", msg);
+        return json({ confirmationUrl: null, error: `Billing error: ${msg}` });
+      }
       return json({ confirmationUrl, error: null });
     } catch (error) {
-      // Re-throw Response objects (e.g. billing redirects) so Remix can handle them
       if (error instanceof Response) throw error;
-      const reauthorizeUrl = extractReauthorizeUrl(error);
-      if (reauthorizeUrl) {
-        return json({ confirmationUrl: reauthorizeUrl, error: null });
-      }
       const msg = (error as Error)?.message ?? JSON.stringify(error);
-      console.error("[BadgeHQ billing] billing.request failed:", msg);
+      console.error("[BadgeHQ billing] GraphQL billing failed:", msg);
       return json({ confirmationUrl: null, error: `Billing error: ${msg}` });
     }
   }
