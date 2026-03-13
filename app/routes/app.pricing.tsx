@@ -66,6 +66,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       });
       return json({ confirmationUrl, error: null });
     } catch (error) {
+      // Re-throw Response objects (e.g. billing redirects) so Remix can handle them
+      if (error instanceof Response) throw error;
       const reauthorizeUrl = extractReauthorizeUrl(error);
       if (reauthorizeUrl) {
         return json({ confirmationUrl: reauthorizeUrl, error: null });
@@ -108,17 +110,19 @@ export default function PricingPage() {
 
   // Handle reauthorize redirect on load
   useEffect(() => {
-    if (reauthorizeUrl) {
-      window.open(reauthorizeUrl, "_top");
+    if (reauthorizeUrl && window.top) {
+      window.top.location.href = reauthorizeUrl;
     }
   }, [reauthorizeUrl]);
 
-  // Handle confirmationUrl from action — must break out of iframe
+  // Handle confirmationUrl from action — navigate top frame to break out of iframe
   useEffect(() => {
     const url = actionData?.confirmationUrl;
     if (url && url !== confirmationUrlRef.current) {
       confirmationUrlRef.current = url;
-      window.open(url, "_top");
+      if (window.top) {
+        window.top.location.href = url;
+      }
     }
   }, [actionData]);
 
