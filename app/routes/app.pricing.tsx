@@ -59,7 +59,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   if (intent === "upgrade" && (plan === PLANS.GROWTH || plan === PLANS.PRO)) {
     try {
-      const confirmationUrl = await billing.request({
+      const { confirmationUrl } = await billing.request({
         plan,
         isTest: false,
         returnUrl: `${process.env.SHOPIFY_APP_URL}/app/pricing`,
