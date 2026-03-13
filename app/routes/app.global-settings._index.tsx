@@ -113,7 +113,7 @@ export default function GlobalSettings() {
               <BlockStack gap="400">
                 <Text as="h2" variant="headingMd">App Control</Text>
                 <Checkbox
-                  label="Enable BadgeHQ"
+                  label="Enable SaleKit"
                   helpText="When disabled, no widgets will render on your storefront"
                   checked={enabled}
                   onChange={setEnabled}

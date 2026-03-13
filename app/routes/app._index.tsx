@@ -143,14 +143,14 @@ export default function Dashboard() {
 
   return (
     <Page>
-      <TitleBar title="BadgeHQ" />
+      <TitleBar title="SaleKit" />
       <BlockStack gap="500">
         <Card>
           <BlockStack gap="400">
             {/* Header row */}
             <InlineGrid columns="1fr auto" alignItems="center">
               <BlockStack gap="100">
-                <Text as="h2" variant="headingLg">Welcome to BadgeHQ</Text>
+                <Text as="h2" variant="headingLg">Welcome to SaleKit</Text>
                 <Text as="p" variant="bodyMd" tone="subdued">
                   Boost your store&apos;s trust and conversions with badges, banners, and conversion tools.
                 </Text>
@@ -175,7 +175,7 @@ export default function Dashboard() {
                   </Text>
                   <List type="number">
                     <List.Item>Click <strong>Open Theme Editor</strong> — it will open the App Embeds section directly.</List.Item>
-                    <List.Item>Find <strong>BadgeHQ Widget</strong> and toggle it on.</List.Item>
+                    <List.Item>Find <strong>SaleKit Widget</strong> and toggle it on.</List.Item>
                     <List.Item>Click <strong>Save</strong> in the Theme Editor.</List.Item>
                     <List.Item>Return here — this notice disappears automatically once active.</List.Item>
                   </List>

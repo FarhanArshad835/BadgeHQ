@@ -1,7 +1,7 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
 client_id = "c0b446fd459bce47c1aecaa461d8ac19"
-name = "BadgeHQ"
+name = "SaleKit"
 handle = "badgehq"
 application_url = "https://badge-hq.vercel.app"
 embedded = true
