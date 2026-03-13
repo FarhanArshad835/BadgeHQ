@@ -34,14 +34,22 @@ const shopify = shopifyApp({
   isEmbeddedApp: true,
   billing: {
     growth: {
-      amount: 9.99,
-      currencyCode: "USD",
-      interval: BillingInterval.Every30Days,
+      lineItems: [
+        {
+          amount: 9.99,
+          currencyCode: "USD",
+          interval: BillingInterval.Every30Days,
+        },
+      ],
     },
     pro: {
-      amount: 19.99,
-      currencyCode: "USD",
-      interval: BillingInterval.Every30Days,
+      lineItems: [
+        {
+          amount: 19.99,
+          currencyCode: "USD",
+          interval: BillingInterval.Every30Days,
+        },
+      ],
     },
   },
   future: {
