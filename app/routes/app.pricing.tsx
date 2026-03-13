@@ -76,38 +76,53 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   if (intent === "upgrade" && (plan === PLANS.GROWTH || plan === PLANS.PRO)) {
     try {
-      // Use direct GraphQL instead of billing.request() so we don't send lineItems —
-      // managed pricing plans have Shopify-controlled pricing; adding lineItems conflicts.
       const returnUrl = `${process.env.SHOPIFY_APP_URL}/app/pricing`;
+      const price = String(PLAN_DETAILS[plan].price);
       const resp = await admin.graphql(
         `#graphql
-        mutation AppSubscriptionCreate($name: String!, $returnUrl: URL!, $test: Boolean) {
-          appSubscriptionCreate(name: $name, returnUrl: $returnUrl, test: $test) {
+        mutation AppSubscriptionCreate($name: String!, $returnUrl: URL!, $test: Boolean, $price: Decimal!) {
+          appSubscriptionCreate(
+            name: $name
+            returnUrl: $returnUrl
+            test: $test
+            lineItems: [{
+              plan: {
+                appRecurringPricingDetails: {
+                  price: { amount: $price, currencyCode: USD }
+                  interval: EVERY_30_DAYS
+                }
+              }
+            }]
+          ) {
             userErrors { field message }
             confirmationUrl
           }
         }`,
-        { variables: { name: plan, returnUrl, test: isTest } }
+        { variables: { name: plan, returnUrl, test: isTest, price } }
       );
-      const { data } = await resp.json() as {
-        data: {
-          appSubscriptionCreate: {
+      const body = await resp.json() as {
+        data?: {
+          appSubscriptionCreate?: {
             confirmationUrl: string | null;
             userErrors: { field: string; message: string }[];
           };
         };
+        errors?: unknown;
       };
-      const { confirmationUrl, userErrors } = data.appSubscriptionCreate;
-      if (userErrors?.length) {
-        const msg = userErrors.map((e) => e.message).join(", ");
-        console.error("[BadgeHQ billing] userErrors:", msg);
+      console.error("[BadgeHQ billing] GraphQL response:", JSON.stringify(body));
+      const result = body.data?.appSubscriptionCreate;
+      if (body.errors) {
+        return json({ confirmationUrl: null, error: `GraphQL error: ${JSON.stringify(body.errors)}` });
+      }
+      if (result?.userErrors?.length) {
+        const msg = result.userErrors.map((e) => e.message).join(", ");
         return json({ confirmationUrl: null, error: `Billing error: ${msg}` });
       }
-      return json({ confirmationUrl, error: null });
+      return json({ confirmationUrl: result?.confirmationUrl ?? null, error: null });
     } catch (error) {
       if (error instanceof Response) throw error;
       const msg = (error as Error)?.message ?? JSON.stringify(error);
-      console.error("[BadgeHQ billing] GraphQL billing failed:", msg);
+      console.error("[BadgeHQ billing] exception:", msg);
       return json({ confirmationUrl: null, error: `Billing error: ${msg}` });
     }
   }
