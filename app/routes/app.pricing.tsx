@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useLoaderData, useSubmit, useNavigation } from "@remix-run/react";
+import { useLoaderData, useActionData, useSubmit, useNavigation } from "@remix-run/react";
 import {
   Page,
   Card,
@@ -17,7 +17,6 @@ import { useEffect, useRef } from "react";
 import { authenticate } from "../shopify.server";
 import { PLANS, PLAN_DETAILS, type Plan } from "../billing.shared";
 import {
-  getShopPlan,
   upsertShopPlan,
   extractReauthorizeUrl,
 } from "../billing.server";
@@ -100,11 +99,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
 export default function PricingPage() {
   const { currentPlan, reauthorizeUrl } = useLoaderData<typeof loader>();
+  const actionData = useActionData<typeof action>();
   const submit = useSubmit();
   const navigation = useNavigation();
   const isLoading = navigation.state !== "idle";
 
-  // Store action data in a ref to handle confirmationUrl redirect
   const confirmationUrlRef = useRef<string | null>(null);
 
   // Handle reauthorize redirect on load
@@ -114,13 +113,14 @@ export default function PricingPage() {
     }
   }, [reauthorizeUrl]);
 
-  // Poll for action data to handle confirmationUrl
-  const actionDataScript = `
-    window.__badgehqPricingSubmit = function(plan) {
-      document.getElementById('pricing-plan-input').value = plan;
-      document.getElementById('pricing-form').submit();
-    };
-  `;
+  // Handle confirmationUrl from action — must break out of iframe
+  useEffect(() => {
+    const url = actionData?.confirmationUrl;
+    if (url && url !== confirmationUrlRef.current) {
+      confirmationUrlRef.current = url;
+      window.open(url, "_top");
+    }
+  }, [actionData]);
 
   function handleUpgrade(plan: Plan) {
     const form = new FormData();
@@ -136,27 +136,15 @@ export default function PricingPage() {
     submit(form, { method: "post" });
   }
 
-  // Handle confirmationUrl from action — must break out of iframe
-  const loaderData = useLoaderData<typeof loader>();
-  const actionData = (loaderData as unknown as { confirmationUrl?: string; error?: string });
-
-  useEffect(() => {
-    const url = (actionData as Record<string, unknown>)?.confirmationUrl as string | undefined;
-    if (url && url !== confirmationUrlRef.current) {
-      confirmationUrlRef.current = url;
-      window.open(url, "_top");
-    }
-  }, [actionData]);
-
   const plans: Plan[] = [PLANS.FREE, PLANS.GROWTH, PLANS.PRO];
 
   return (
     <Page>
       <TitleBar title="Pricing" />
       <BlockStack gap="500">
-        {(actionData as Record<string, unknown>)?.error && (
+        {actionData?.error && (
           <Banner tone="critical">
-            <p>{(actionData as Record<string, unknown>).error as string}</p>
+            <p>{actionData.error}</p>
           </Banner>
         )}
 
