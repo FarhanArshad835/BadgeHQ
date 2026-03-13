@@ -56,6 +56,7 @@ export default function App() {
         <Link to="/app/sticky-cart">Sticky Add to Cart</Link>
         <Link to="/app/countdown-timer">Countdown Timer</Link>
         <Link to="/app/global-settings">Settings</Link>
+        <Link to="/app/pricing">Pricing</Link>
       </NavMenu>
       <Outlet />
     </AppProvider>
