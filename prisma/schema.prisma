@@ -148,3 +148,13 @@ model AppSettings {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
+
+model ShopPlan {
+  id        String   @id @default(cuid())
+  shop      String   @unique
+  plan      String   @default("free")
+  billingId String?
+  status    String   @default("active")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

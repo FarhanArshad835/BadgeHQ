@@ -14,6 +14,7 @@ import {
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { getShopPlan, PLAN_DETAILS } from "../billing.server";
 
 
 async function checkThemeExtensionEnabled(shop: string, accessToken: string): Promise<boolean> {
@@ -65,6 +66,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     stickyCartCount,
     countdownTimerCount,
     themeExtensionEnabled,
+    currentPlan,
   ] = await Promise.all([
     prisma.trustBadge.count({ where: { shop } }),
     prisma.productBadge.count({ where: { shop } }),
@@ -73,6 +75,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     prisma.stickyCart.count({ where: { shop } }),
     prisma.countdownTimer.count({ where: { shop } }),
     checkThemeExtensionEnabled(shop, accessToken),
+    getShopPlan(shop),
   ]);
 
   const shopHandle = shop.replace(".myshopify.com", "");
@@ -90,6 +93,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     },
     isEnabled: themeExtensionEnabled,
     themeEditorUrl,
+    currentPlan,
+    planName: PLAN_DETAILS[currentPlan].name,
   });
 };
 
@@ -133,7 +138,7 @@ const features = [
 ];
 
 export default function Dashboard() {
-  const { stats, isEnabled, themeEditorUrl } = useLoaderData<typeof loader>();
+  const { stats, isEnabled, themeEditorUrl, currentPlan, planName } = useLoaderData<typeof loader>();
   const navigate = useNavigate();
 
   return (
@@ -150,9 +155,14 @@ export default function Dashboard() {
                   Boost your store&apos;s trust and conversions with badges, banners, and conversion tools.
                 </Text>
               </BlockStack>
-              <Badge tone={isEnabled ? "success" : "warning"}>
-                {isEnabled ? "Widget Active" : "Setup Required"}
-              </Badge>
+              <BlockStack gap="200" inlineAlign="end">
+                <Badge tone={isEnabled ? "success" : "warning"}>
+                  {isEnabled ? "Widget Active" : "Setup Required"}
+                </Badge>
+                <Badge tone={currentPlan === "free" ? "info" : "success"}>
+                  {planName} Plan
+                </Badge>
+              </BlockStack>
             </InlineGrid>
 
             {/* Setup steps — only shown when widget is not yet active */}
@@ -199,6 +209,37 @@ export default function Dashboard() {
             )}
           </BlockStack>
         </Card>
+
+        {currentPlan === "free" && (
+          <Card>
+            <InlineGrid columns="1fr auto" alignItems="center">
+              <BlockStack gap="100">
+                <Text as="p" variant="bodyMd" fontWeight="semibold">
+                  You&apos;re on the Free plan
+                </Text>
+                <Text as="p" variant="bodyMd" tone="subdued">
+                  Upgrade to Growth ($9.99/mo) to unlock all 6 features with unlimited badges.
+                </Text>
+              </BlockStack>
+              <button
+                onClick={() => navigate("/app/pricing")}
+                style={{
+                  padding: "8px 16px",
+                  background: "#008060",
+                  border: "none",
+                  borderRadius: "6px",
+                  color: "#fff",
+                  fontSize: "0.875rem",
+                  fontWeight: 500,
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                Upgrade
+              </button>
+            </InlineGrid>
+          </Card>
+        )}
 
         <InlineGrid columns={{ xs: 1, sm: 2, md: 3 }} gap="400">
           {features.map((feature) => (
