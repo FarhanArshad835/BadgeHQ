@@ -72,7 +72,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       if (reauthorizeUrl) {
         return json({ confirmationUrl: reauthorizeUrl, error: null });
       }
-      return json({ confirmationUrl: null, error: "Billing request failed. Please try again." });
+      const msg = (error as Error)?.message ?? JSON.stringify(error);
+      console.error("[BadgeHQ billing] billing.request failed:", msg);
+      return json({ confirmationUrl: null, error: `Billing error: ${msg}` });
     }
   }
 
