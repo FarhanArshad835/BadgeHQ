@@ -80,7 +80,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const shopHandle = shop.replace(".myshopify.com", "");
   // Deep link directly to BadgeHQ Widget in App Embeds and auto-activate it
-  const themeEditorUrl = `https://admin.shopify.com/store/${shopHandle}/themes/current/editor?context=apps&activateAppId=019cdd10-586c-7dc0-93a3-dc55c3f1c3fb/badgehq-widget`;
+  const themeEditorUrl = `https://admin.shopify.com/store/${shopHandle}/themes/current/editor?context=apps&activateAppId=019cdd10-586c-7dc0-93a3-dc55c3f1c3fb/app-embed`;
 
   return json({
     stats: {
