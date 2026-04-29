@@ -510,6 +510,97 @@
     };
   }
 
+  // Parse one product from /products.json bulk feed (slightly different shape
+  // from the per-product endpoint — variants[].price is already a string).
+  function _parseBulkProduct(p) {
+    var v = (p.variants && p.variants[0]) || {};
+    return {
+      id: p.id,
+      price: parseFloat(v.price) || 0,
+      compare_at_price: parseFloat(v.compare_at_price) || 0,
+      inventory_quantity: v.inventory_quantity,
+      created_at: p.created_at,
+      tags: Array.isArray(p.tags) ? p.tags : (p.tags || "").split(",").map(function (t) { return t.trim(); }),
+      type: p.product_type || "",
+      vendor: p.vendor || "",
+      sold: 0,
+      collections: [],
+    };
+  }
+
+  // Bulk-prefetch up to ~1000 products in 4 paginated calls to /products.json.
+  // Pre-populates _productDataCache so subsequent per-card lookups (including
+  // dynamic loads detected by the MutationObserver) are O(1) with no network.
+  // Falls back gracefully — per-card fetch path still works for any handle
+  // not in the bulk cache.
+  //
+  // Cached in sessionStorage with a 5-minute TTL so navigating between
+  // collection pages doesn't re-fetch.
+  var _bulkLoading = false;
+  function bulkPrefetchProducts(onComplete) {
+    if (window.__badgehq_bulk_done || _bulkLoading) {
+      if (onComplete) onComplete();
+      return;
+    }
+    _bulkLoading = true;
+
+    // sessionStorage hot path
+    try {
+      var cached = sessionStorage.getItem("__badgehq_bulk");
+      if (cached) {
+        var parsed = JSON.parse(cached);
+        if (parsed && parsed.t && Date.now() - parsed.t < 5 * 60 * 1000 && parsed.d) {
+          for (var h in parsed.d) {
+            if (!_productDataCache[h]) _productDataCache[h] = parsed.d[h];
+          }
+          window.__badgehq_bulk_done = true;
+          _bulkLoading = false;
+          if (onComplete) onComplete();
+          return;
+        }
+      }
+    } catch (e) {}
+
+    var collected = {};
+    var page = 1;
+    var MAX_PAGES = 4; // 4 × 250 = 1000 products covered
+
+    function fetchPage() {
+      fetch("/products.json?limit=250&page=" + page, { credentials: "same-origin" })
+        .then(function (r) { return r.ok ? r.json() : { products: [] }; })
+        .then(function (data) {
+          var products = (data && data.products) || [];
+          for (var i = 0; i < products.length; i++) {
+            var p = products[i];
+            if (!p.handle) continue;
+            var parsed = _parseBulkProduct(p);
+            collected[p.handle] = parsed;
+            // Don't overwrite a richer per-card fetch result if one happened to land first
+            if (!_productDataCache[p.handle]) _productDataCache[p.handle] = parsed;
+          }
+          if (products.length === 250 && page < MAX_PAGES) {
+            page++;
+            fetchPage();
+            return;
+          }
+          // Done — persist + notify
+          try {
+            sessionStorage.setItem("__badgehq_bulk", JSON.stringify({ t: Date.now(), d: collected }));
+          } catch (e) {}
+          window.__badgehq_bulk_done = true;
+          _bulkLoading = false;
+          if (onComplete) onComplete();
+        })
+        .catch(function () {
+          // /products.json may be disabled on some stores. Per-card fetches still work.
+          _bulkLoading = false;
+          if (onComplete) onComplete();
+        });
+    }
+
+    fetchPage();
+  }
+
   // Fetch /products/{handle}.json with per-handle caching and in-flight deduplication.
   // Multiple simultaneous calls for the same handle queue up and all resolve together.
   function fetchProductDataByHandle(handle, callback) {
@@ -978,6 +1069,15 @@
         observer.observe(document.body, { childList: true, subtree: true });
         window.__badgehq_observer = observer;
       }
+
+      // Kick off bulk product prefetch in parallel — pre-populates the per-handle
+      // cache so dynamically-loaded cards (and the retries below) get instant
+      // data lookups instead of one /products/{handle}.json fetch per card.
+      bulkPrefetchProducts(function () {
+        // After bulk completes, sweep the DOM once more — any cards that were
+        // detected before the cache was warm now have data available.
+        findAndAttach();
+      });
 
       // Initial pass on whatever's already in the DOM, plus a few short retries
       // for theme JS (lazy-loaders, image reveal animations) that mutates after
