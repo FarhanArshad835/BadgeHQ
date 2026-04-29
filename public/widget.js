@@ -692,25 +692,46 @@
       });
   }
 
-  // Find the product handle from the nearest product link relative to an img element
+  // Find the product handle for a given product image.
+  //
+  // The naive approach is `img.closest('[class*="product-card"]')` then look
+  // inside, but that breaks on themes whose IMAGE WRAPPER also has a class
+  // matching the selector (e.g. AI grid blocks with `sp-product-card-media`
+  // on the image container). closest() stops at the image wrapper, the
+  // querySelector finds nothing inside, returns null. The actual title link
+  // lives in `.ai-product-info`, a SIBLING of the image wrapper.
+  //
+  // Robust approach: walk up the tree level by level. At each ancestor, check
+  // whether its subtree contains a /products/ link. The first ancestor whose
+  // subtree contains one is the card root, and that link gives us the handle.
   function getHandleFromImg(img) {
-    // Direct ancestor link
-    var link = img.closest('a[href*="/products/"]');
-    if (!link) {
-      // Look within the card container for any product link
-      var card = img.closest(
-        'li, article, [class*="product-card"], [class*="ProductCard"], ' +
-        '[class*="product-item"], [class*="grid-product"], .card-wrapper'
-      );
-      if (card) link = card.querySelector('a[href*="/products/"]');
+    // Fast path: img is itself wrapped in a product link
+    var direct = img.closest('a[href*="/products/"]');
+    if (direct) {
+      var m0 = (direct.getAttribute("href") || "").match(/\/products\/([^/?#]+)/);
+      if (m0) return m0[1];
     }
-    if (link) {
-      var m = (link.getAttribute("href") || "").match(/\/products\/([^/?#]+)/);
-      if (m) return m[1];
+
+    // Walk up looking for an ancestor whose SUBTREE contains a product link.
+    // Stop at page boundaries so we don't inadvertently match a related-products
+    // link in a totally different section.
+    var STOP = { MAIN: 1, HEADER: 1, FOOTER: 1, NAV: 1, BODY: 1, HTML: 1 };
+    var node = img.parentElement;
+    for (var i = 0; i < 12 && node && !STOP[node.tagName]; i++) {
+      var found = node.querySelector('a[href*="/products/"]');
+      // Make sure the link is actually for THIS card and not a nested unrelated
+      // product link (e.g. a "you may also like" inside another card).
+      if (found && !found.contains(img)) {
+        var href = found.getAttribute("href") || "";
+        var m = href.match(/\/products\/([^/?#]+)/);
+        if (m) return m[1];
+      }
+      node = node.parentElement;
     }
-    // PDP fallback — the main product image gallery on a PDP isn't wrapped in a
-    // /products/{handle} link (you're already on that product), so the walks
-    // above return null. Use the page's own URL as the source of truth.
+
+    // PDP fallback — the main product image gallery on a PDP isn't wrapped in
+    // a /products/{handle} link (you're already on that product). Use the
+    // page's own URL.
     var pathMatch = window.location.pathname.match(/\/products\/([^/?#]+)/);
     return pathMatch ? pathMatch[1] : null;
   }
