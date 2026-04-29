@@ -654,41 +654,14 @@
         });
       }
 
-      // Find the info-area insertion point inside the product card containing `img`.
-      // Returns { target, mode } where mode is 'before' | 'after' | 'append', or null
-      // if no card-like ancestor exists. Three-tier fallback: price → title → card root.
+      // Find the info-area insertion point for the product card containing `img`.
+      // Returns { target, mode } where mode is 'before' | 'after' | 'append', or null.
+      //
+      // Strategy: don't trust class-name heuristics — they trip on BEM children like
+      // `card__media`. Instead, walk up and ask each ancestor "do you contain a
+      // price element?". The smallest ancestor that says yes IS the card root.
       function findInfoInsertionPoint(img) {
-        // Walk up to find a card-like ancestor. Wide net so we cover Dawn, Debut,
-        // Impulse, Broadcast, Refresh, custom themes, and generic <li>/<article> grids.
-        var cardRoot = null;
-        var node = img.parentElement;
-        for (var i = 0; i < 12 && node && node !== document.body; i++) {
-          var cls = (node.className && node.className.toString()) || "";
-          var tag = node.tagName;
-          if (
-            /product-card|product[-_]?item|card-product|grid-product|productcard|card-wrapper|card__|grid__item|collection-item|product-block|product__/i.test(cls) ||
-            node.hasAttribute("data-product-card") ||
-            node.hasAttribute("data-product-id") ||
-            node.hasAttribute("data-product-handle") ||
-            tag === "ARTICLE"
-          ) {
-            cardRoot = node;
-            break;
-          }
-          // <li> only counts if its parent looks like a product list
-          if (tag === "LI") {
-            var parentCls = (node.parentElement && node.parentElement.className && node.parentElement.className.toString()) || "";
-            if (/grid|collection|product|list--products|cards/i.test(parentCls)) {
-              cardRoot = node;
-              break;
-            }
-          }
-          node = node.parentElement;
-        }
-        if (!cardRoot) return null;
-
-        // Tier 1: price element. Try specific theme classes first, then generic.
-        var priceSelectors = [
+        var PRICE_SELECTORS = [
           ".price__regular",
           ".price-item--regular",
           ".product-card__price",
@@ -702,13 +675,7 @@
           ".money:not([class*='compare'])",
           "[class*='price']:not([class*='compare']):not([class*='label'])",
         ];
-        for (var j = 0; j < priceSelectors.length; j++) {
-          var p = cardRoot.querySelector(priceSelectors[j]);
-          if (p && p.offsetWidth > 0) return { target: p, mode: "before" };
-        }
-
-        // Tier 2: title / heading link. Insert badge AFTER it.
-        var titleSelectors = [
+        var TITLE_SELECTORS = [
           ".card__heading",
           ".product-card__title",
           ".product-item__title",
@@ -721,13 +688,39 @@
           "h3 a[href*='/products/']",
           "a[href*='/products/']",
         ];
-        for (var k = 0; k < titleSelectors.length; k++) {
-          var t = cardRoot.querySelector(titleSelectors[k]);
-          if (t && t.offsetWidth > 0) return { target: t, mode: "after" };
+        // Stop walking up at major page boundaries — we don't want to find the
+        // PDP main price or some unrelated price in a header/footer.
+        var STOP_TAGS = { MAIN: 1, HEADER: 1, FOOTER: 1, NAV: 1, FORM: 1, BODY: 1, HTML: 1 };
+
+        function findIn(root, selectors) {
+          for (var i = 0; i < selectors.length; i++) {
+            var el = root.querySelector(selectors[i]);
+            if (el && el.offsetWidth > 0 && el !== img && !el.contains(img)) return el;
+          }
+          return null;
         }
 
-        // Tier 3: nothing found inside card — append at end of card root.
-        return { target: cardRoot, mode: "append" };
+        // Pass 1: walk up looking for an ancestor that contains a price.
+        var node = img.parentElement;
+        var lastSafe = null;
+        for (var i = 0; i < 12 && node && !STOP_TAGS[node.tagName]; i++) {
+          var p = findIn(node, PRICE_SELECTORS);
+          if (p) return { target: p, mode: "before" };
+          lastSafe = node;
+          node = node.parentElement;
+        }
+
+        // Pass 2: same walk, looking for a title — insert badge AFTER it.
+        node = img.parentElement;
+        for (var j = 0; j < 12 && node && !STOP_TAGS[node.tagName]; j++) {
+          var t = findIn(node, TITLE_SELECTORS);
+          if (t) return { target: t, mode: "after" };
+          node = node.parentElement;
+        }
+
+        // Pass 3: append at the last safe ancestor (just inside any page boundary).
+        if (lastSafe) return { target: lastSafe, mode: "append" };
+        return null;
       }
 
       function renderBadgesOnImg(img, productData) {
