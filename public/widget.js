@@ -826,6 +826,38 @@
     return true;
   }
 
+  // Emit one <style> tag carrying @media (max-width: 749px) rules so that
+  // each badge gets its mobile font size at small viewports. The badge's
+  // inline `font-size` style still applies on desktop; this rule overrides
+  // on mobile via a higher-specificity class selector + !important.
+  // Idempotent — replaces the existing block on every call.
+  function injectMobileFontSizeStyles(badges) {
+    var rules = [];
+    for (var i = 0; i < badges.length; i++) {
+      var b = badges[i];
+      var desk = parseInt(b.fontSize, 10) || 11;
+      var mob = parseInt(b.fontSizeMobile, 10);
+      if (!isFinite(mob)) mob = desk;
+      // Skip when mobile size matches desktop — no rule needed
+      if (mob === desk) continue;
+      rules.push(".badgehq-pb-" + b.id + "{font-size:" + mob + "px !important;}");
+    }
+    var existing = document.getElementById("badgehq-mobile-font-styles");
+    if (rules.length === 0) {
+      if (existing) existing.remove();
+      return;
+    }
+    var css = "@media (max-width: 749px) {" + rules.join("") + "}";
+    if (existing) {
+      existing.textContent = css;
+    } else {
+      var style = document.createElement("style");
+      style.id = "badgehq-mobile-font-styles";
+      style.textContent = css;
+      document.head.appendChild(style);
+    }
+  }
+
   // Main product badges orchestrator — handles multi-badge, conditions, scheduling, pages
   function renderProductBadges(badges, currentPage) {
     // Filter badges by page and schedule first
@@ -833,6 +865,11 @@
       return badgeShowOnPage(b, currentPage) && badgeInSchedule(b);
     });
     if (eligible.length === 0) return;
+
+    // Emit a <style> block with mobile font-size overrides per badge.
+    // Inline styles can't carry media queries, so per-badge mobile sizing
+    // requires a real stylesheet rule keyed by the badge's class.
+    injectMobileFontSizeStyles(eligible);
 
     // Kick off prefetch for every collection any eligible badge targets OR
     // excludes, then re-run findAndAttach once each one lands so badges that

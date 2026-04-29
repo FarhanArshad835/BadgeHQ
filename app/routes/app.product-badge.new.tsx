@@ -68,6 +68,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         priority: data.priority,
         imageUrl: data.imageUrl,
         fontSize: data.fontSize,
+        fontSizeMobile: data.fontSizeMobile ?? data.fontSize,
         opacity: data.opacity,
         rotation: data.rotation,
         gradient: data.gradient,
@@ -129,6 +130,7 @@ export default function NewProductBadge() {
 
   // Advanced styling
   const [fontSize, setFontSize] = useState(11);
+  const [fontSizeMobile, setFontSizeMobile] = useState(11);
   const [opacity, setOpacity] = useState(1.0);
   const [rotation, setRotation] = useState(0);
   const [gradient, setGradient] = useState("");
@@ -192,6 +194,7 @@ export default function NewProductBadge() {
       priority,
       imageUrl,
       fontSize,
+      fontSizeMobile,
       opacity,
       rotation,
       gradient,
@@ -488,21 +491,29 @@ export default function NewProductBadge() {
 
                 <InlineGrid columns={2} gap="400">
                   <TextField
-                    label="Font Size (px)"
+                    label="Font Size — Desktop (px)"
                     type="number"
                     value={String(fontSize)}
                     onChange={(v) => setFontSize(Number(v) || 11)}
                     autoComplete="off"
                   />
                   <TextField
-                    label="Priority"
+                    label="Font Size — Mobile (px)"
                     type="number"
-                    value={String(priority)}
-                    onChange={(v) => setPriority(Number(v) || 0)}
+                    value={String(fontSizeMobile)}
+                    onChange={(v) => setFontSizeMobile(Number(v) || 11)}
                     autoComplete="off"
-                    helpText="Higher = shown first. Badges with same priority all display."
+                    helpText="Applied at viewports ≤ 749px"
                   />
                 </InlineGrid>
+                <TextField
+                  label="Priority"
+                  type="number"
+                  value={String(priority)}
+                  onChange={(v) => setPriority(Number(v) || 0)}
+                  autoComplete="off"
+                  helpText="Higher = shown first. Badges with same priority all display."
+                />
 
                 <RangeSlider
                   label={`Opacity: ${opacity}`}

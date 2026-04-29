@@ -94,6 +94,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       priority: b.priority,
       imageUrl: b.imageUrl,
       fontSize: b.fontSize,
+      fontSizeMobile: (b as any).fontSizeMobile ?? b.fontSize,
       opacity: b.opacity,
       rotation: b.rotation,
       gradient: b.gradient,

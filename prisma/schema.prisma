@@ -61,6 +61,7 @@ model ProductBadge {
   priority   Int      @default(0)
   imageUrl   String   @default("")
   fontSize   Int      @default(11)
+  fontSizeMobile Int  @default(11)
   opacity    Float    @default(1.0)
   rotation   Int      @default(0)
   gradient   String   @default("")

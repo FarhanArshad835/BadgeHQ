@@ -83,6 +83,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         priority: data.priority,
         imageUrl: data.imageUrl,
         fontSize: data.fontSize,
+        fontSizeMobile: data.fontSizeMobile ?? data.fontSize,
         opacity: data.opacity,
         rotation: data.rotation,
         gradient: data.gradient,
@@ -140,6 +141,7 @@ function EditProductBadgeForm() {
   const [priority, setPriority] = useState(badge.priority);
   const [imageUrl, setImageUrl] = useState(badge.imageUrl);
   const [fontSize, setFontSize] = useState(badge.fontSize);
+  const [fontSizeMobile, setFontSizeMobile] = useState<number>((badge as any).fontSizeMobile ?? badge.fontSize);
   const [opacity, setOpacity] = useState(badge.opacity);
   const [rotation, setRotation] = useState(badge.rotation);
   const [gradient, setGradient] = useState(badge.gradient);
@@ -199,6 +201,7 @@ function EditProductBadgeForm() {
     priority !== badge.priority ||
     imageUrl !== badge.imageUrl ||
     fontSize !== badge.fontSize ||
+    fontSizeMobile !== ((badge as any).fontSizeMobile ?? badge.fontSize) ||
     opacity !== badge.opacity ||
     rotation !== badge.rotation ||
     gradient !== badge.gradient ||
@@ -229,7 +232,7 @@ function EditProductBadgeForm() {
       condition: { type: conditionType, value: conditionValue, operator: conditionOperator },
       pages,
       schedule: scheduleEnabled ? { startDate: scheduleStart, endDate: scheduleEnd } : {},
-      priority, imageUrl, fontSize, opacity, rotation, gradient, borderColor, borderWidth, customCSS,
+      priority, imageUrl, fontSize, fontSizeMobile, opacity, rotation, gradient, borderColor, borderWidth, customCSS,
     };
     submit({ data: JSON.stringify(data) }, { method: "POST" });
   };
@@ -410,10 +413,12 @@ function EditProductBadgeForm() {
                 <TextField label="Gradient Background" value={gradient} onChange={setGradient} autoComplete="off"
                   placeholder="linear-gradient(135deg, #ff6b6b, #ee5a24)" helpText="CSS gradient. Overrides badge color when set." />
                 <InlineGrid columns={2} gap="400">
-                  <TextField label="Font Size (px)" type="number" value={String(fontSize)} onChange={(v) => setFontSize(Number(v) || 11)} autoComplete="off" />
-                  <TextField label="Priority" type="number" value={String(priority)} onChange={(v) => setPriority(Number(v) || 0)} autoComplete="off"
-                    helpText="Higher = shown first." />
+                  <TextField label="Font Size — Desktop (px)" type="number" value={String(fontSize)} onChange={(v) => setFontSize(Number(v) || 11)} autoComplete="off" />
+                  <TextField label="Font Size — Mobile (px)" type="number" value={String(fontSizeMobile)} onChange={(v) => setFontSizeMobile(Number(v) || 11)} autoComplete="off"
+                    helpText="Applied at viewports ≤ 749px" />
                 </InlineGrid>
+                <TextField label="Priority" type="number" value={String(priority)} onChange={(v) => setPriority(Number(v) || 0)} autoComplete="off"
+                  helpText="Higher = shown first." />
                 <RangeSlider label={`Opacity: ${opacity}`} value={opacity * 100}
                   onChange={useCallback((val: number) => setOpacity(Math.round(val) / 100), [])} min={10} max={100} output />
                 <RangeSlider label={`Rotation: ${rotation}°`} value={rotation}
