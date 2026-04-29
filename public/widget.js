@@ -1082,11 +1082,22 @@
           // NEVER modify existing element CSS — setting position:relative on a
           // static ancestor resets Dawn's padding-bottom aspect-ratio layout,
           // making images collapse to height:0 (the "images disappear" bug).
+          //
+          // Skip carousel-internal containers (Swiper, Slick, Owl, Glide).
+          // Themes that wrap each product image in a swiper-slide would have
+          // us anchor the badge to a single slide — when the user swipes to
+          // another image, the badge disappears with the off-screen slide.
+          // Walking past these lands us on the broader image-area container
+          // which the carousel itself sits inside, so the badge stays visible
+          // across slide changes.
+          var CAROUSEL_INTERNAL_RE = /(^|\s)(swiper(-(slide|wrapper|container))?|slick-(slide|track|list|slider)|owl-(item|stage|stage-outer|carousel)|glide__(slide|slides|track))(\s|$)/i;
           var container = null;
           var node = img.parentElement;
-          for (var i = 0; i < 8; i++) {
+          for (var i = 0; i < 10; i++) {
             if (!node || node === document.body) break;
             if (node.tagName === "PICTURE") { node = node.parentElement; continue; }
+            var nodeCls = (node.className && node.className.toString()) || "";
+            if (CAROUSEL_INTERNAL_RE.test(nodeCls)) { node = node.parentElement; continue; }
             if (window.getComputedStyle(node).position !== "static") { container = node; break; }
             node = node.parentElement;
           }
