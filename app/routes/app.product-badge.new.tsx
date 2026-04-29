@@ -104,6 +104,10 @@ export default function NewProductBadge() {
   const [targetValue, setTargetValue] = useState("");
   const [targetLabels, setTargetLabels] = useState<string[]>([]);
 
+  // Exclude (parallel filter — applies AFTER the include rule above)
+  const [excludeCollectionValue, setExcludeCollectionValue] = useState("");
+  const [excludeCollectionLabel, setExcludeCollectionLabel] = useState("");
+
   // Automated conditions (ShineTrust-level)
   const [conditionType, setConditionType] = useState("none");
   const [conditionValue, setConditionValue] = useState("");
@@ -149,6 +153,15 @@ export default function NewProductBadge() {
     }
   }, [shopify]);
 
+  const openExcludeCollectionPicker = useCallback(async () => {
+    const selected = await shopify.resourcePicker({ type: "collection", multiple: false });
+    if (selected && selected[0]) {
+      const col = selected[0] as any;
+      setExcludeCollectionValue(col.handle || col.id.replace("gid://shopify/Collection/", ""));
+      setExcludeCollectionLabel(col.title);
+    }
+  }, [shopify]);
+
   const handleSave = () => {
     const data = {
       text,
@@ -158,7 +171,14 @@ export default function NewProductBadge() {
       textColor,
       position,
       placement,
-      targeting: { type: targetType, value: targetValue, labels: targetLabels },
+      targeting: {
+        type: targetType,
+        value: targetValue,
+        labels: targetLabels,
+        excludeCollection: excludeCollectionValue
+          ? { value: excludeCollectionValue, label: excludeCollectionLabel }
+          : undefined,
+      },
       isActive,
       condition: {
         type: conditionType,
@@ -596,6 +616,23 @@ export default function NewProductBadge() {
                     }
                   />
                 )}
+
+                <BlockStack gap="200">
+                  <Text as="h3" variant="headingSm">Exclude collection (optional)</Text>
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    Hide this badge on products that are in the chosen collection — applied on top of the rule above.
+                  </Text>
+                  <InlineStack gap="200" align="start">
+                    <Button onClick={openExcludeCollectionPicker}>
+                      {excludeCollectionValue ? "Change collection" : "Browse collections"}
+                    </Button>
+                    {excludeCollectionLabel && (
+                      <Tag onRemove={() => { setExcludeCollectionValue(""); setExcludeCollectionLabel(""); }}>
+                        {excludeCollectionLabel}
+                      </Tag>
+                    )}
+                  </InlineStack>
+                </BlockStack>
               </BlockStack>
             </Card>
 

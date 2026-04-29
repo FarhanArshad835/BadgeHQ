@@ -125,6 +125,9 @@ function EditProductBadgeForm() {
   const [targetType, setTargetType] = useState(badge.targeting.type);
   const [targetValue, setTargetValue] = useState(badge.targeting.value || "");
   const [targetLabels, setTargetLabels] = useState<string[]>(badge.targeting.labels || []);
+  const initialExclude = (badge.targeting as any).excludeCollection || {};
+  const [excludeCollectionValue, setExcludeCollectionValue] = useState<string>(initialExclude.value || "");
+  const [excludeCollectionLabel, setExcludeCollectionLabel] = useState<string>(initialExclude.label || "");
 
   const [conditionType, setConditionType] = useState(badge.condition.type);
   const [conditionValue, setConditionValue] = useState(badge.condition.value || "");
@@ -161,6 +164,15 @@ function EditProductBadgeForm() {
     }
   }, [shopify]);
 
+  const openExcludeCollectionPicker = useCallback(async () => {
+    const selected = await shopify.resourcePicker({ type: "collection", multiple: false });
+    if (selected && selected[0]) {
+      const col = selected[0] as any;
+      setExcludeCollectionValue(col.handle || col.id.replace("gid://shopify/Collection/", ""));
+      setExcludeCollectionLabel(col.title);
+    }
+  }, [shopify]);
+
   const [showSuccess, setShowSuccess] = useState(false);
 
   const isDirty =
@@ -175,6 +187,8 @@ function EditProductBadgeForm() {
     targetType !== badge.targeting.type ||
     targetValue !== (badge.targeting.value || "") ||
     JSON.stringify(targetLabels) !== JSON.stringify(badge.targeting.labels || []) ||
+    excludeCollectionValue !== (initialExclude.value || "") ||
+    excludeCollectionLabel !== (initialExclude.label || "") ||
     conditionType !== badge.condition.type ||
     conditionValue !== (badge.condition.value || "") ||
     conditionOperator !== (badge.condition.operator || "less_than") ||
@@ -203,7 +217,14 @@ function EditProductBadgeForm() {
   const handleSave = () => {
     const data = {
       text, badgeType, shape, badgeColor, textColor, position, placement,
-      targeting: { type: targetType, value: targetValue, labels: targetLabels },
+      targeting: {
+        type: targetType,
+        value: targetValue,
+        labels: targetLabels,
+        excludeCollection: excludeCollectionValue
+          ? { value: excludeCollectionValue, label: excludeCollectionLabel }
+          : undefined,
+      },
       isActive,
       condition: { type: conditionType, value: conditionValue, operator: conditionOperator },
       pages,
@@ -479,6 +500,23 @@ function EditProductBadgeForm() {
                     }
                   />
                 )}
+
+                <BlockStack gap="200">
+                  <Text as="h3" variant="headingSm">Exclude collection (optional)</Text>
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    Hide this badge on products that are in the chosen collection — applied on top of the rule above.
+                  </Text>
+                  <InlineStack gap="200" align="start">
+                    <Button onClick={openExcludeCollectionPicker}>
+                      {excludeCollectionValue ? "Change collection" : "Browse collections"}
+                    </Button>
+                    {excludeCollectionLabel && (
+                      <Tag onRemove={() => { setExcludeCollectionValue(""); setExcludeCollectionLabel(""); }}>
+                        {excludeCollectionLabel}
+                      </Tag>
+                    )}
+                  </InlineStack>
+                </BlockStack>
               </BlockStack>
             </Card>
 

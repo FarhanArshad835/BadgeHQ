@@ -729,10 +729,27 @@
     callback(null);
   }
 
-  // Check targeting using fetched product data (works on all page types)
+  // Check targeting using fetched product data (works on all page types).
+  // Returns true if the product matches the include rule AND is not excluded.
   function badgeTargetMatch(badge, img, productData) {
     var t = badge.targeting;
-    if (!t || t.type === "all") return true;
+    if (!t) return true;
+
+    // Exclusion check first: if the product is in the excluded collection, hide.
+    if (t.excludeCollection && t.excludeCollection.value) {
+      var exMembers = _collectionMembers[t.excludeCollection.value];
+      var handleForExclude = (productData && productData.handle) || getHandleFromImg(img);
+      if (exMembers && exMembers.loaded) {
+        if (handleForExclude && exMembers.products[handleForExclude]) return false;
+      } else {
+        // Excluded-collection list still loading — withhold the badge until we
+        // know for sure, so we don't briefly flash on products that should be
+        // hidden. A retry pass after the prefetch lands will pick it up.
+        return false;
+      }
+    }
+
+    if (t.type === "all") return true;
 
     // Use fetched product data when available (reliable on all pages)
     if (productData) {
@@ -788,14 +805,17 @@
     });
     if (eligible.length === 0) return;
 
-    // Kick off prefetch for every collection any eligible badge targets, then
-    // re-run findAndAttach once each one lands so badges that were "waiting"
-    // for membership data render in place.
+    // Kick off prefetch for every collection any eligible badge targets OR
+    // excludes, then re-run findAndAttach once each one lands so badges that
+    // were "waiting" for membership data render (or get hidden) in place.
     var collectionsToPrefetch = {};
     for (var ei = 0; ei < eligible.length; ei++) {
       var et = eligible[ei].targeting;
       if (et && et.type === "collection" && et.value) {
         collectionsToPrefetch[et.value] = true;
+      }
+      if (et && et.excludeCollection && et.excludeCollection.value) {
+        collectionsToPrefetch[et.excludeCollection.value] = true;
       }
     }
     Object.keys(collectionsToPrefetch).forEach(function (collectionHandle) {
