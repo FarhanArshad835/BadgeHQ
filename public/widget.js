@@ -513,6 +513,50 @@
     return anyTracked ? total : undefined;
   }
 
+  // DOM fallback for inventory. Shopify's public /products/{handle}.json
+  // hides inventory_quantity on most stores (variant.inventory_quantity =
+  // undefined). However the theme often renders inventory totals into the
+  // DOM via Liquid — themes like the AI grid block expose `data-inventory`
+  // on the card root, ShineTrust embeds a `data-variants` JSON containing
+  // per-variant inventory, etc. Walk up from the img to find any of these
+  // hints.
+  function getInventoryFromDOM(img) {
+    if (!img) return undefined;
+    // Walk up looking for the card-level container
+    var card = img.closest(
+      '[data-inventory], [data-product-card], [data-product-id], [data-product-handle], ' +
+      '[class*="product-card"], [class*="ProductCard"], .card-wrapper, li, article'
+    );
+    if (!card) return undefined;
+
+    // 1. card has data-inventory directly (AI grid block, some custom themes)
+    var direct = card.getAttribute && card.getAttribute("data-inventory");
+    if (direct != null && direct !== "" && !isNaN(parseInt(direct, 10))) {
+      return parseInt(direct, 10);
+    }
+
+    // 2. ShineTrust pattern — JSON of variants with inventory_quantity
+    var stEl = card.querySelector("[data-variants]");
+    if (stEl) {
+      try {
+        var variantsObj = JSON.parse(stEl.getAttribute("data-variants") || "{}");
+        var total = 0;
+        var found = false;
+        for (var k in variantsObj) {
+          if (!Object.prototype.hasOwnProperty.call(variantsObj, k)) continue;
+          var q = variantsObj[k] && variantsObj[k].inventory_quantity;
+          if (q !== null && q !== undefined && !isNaN(q)) {
+            total += q;
+            found = true;
+          }
+        }
+        if (found) return total;
+      } catch (e) {}
+    }
+
+    return undefined;
+  }
+
   function _parseProductJson(data) {
     var p = data.product || {};
     var v = (p.variants && p.variants[0]) || {};
@@ -1105,6 +1149,15 @@
       }
 
       function renderBadgesOnImg(img, productData) {
+        // If the API didn't expose inventory (Shopify hides it on many
+        // stores' /products/{handle}.json), pull it from the DOM. The
+        // theme often renders inventory server-side via Liquid into a
+        // data-inventory attribute or data-variants JSON.
+        if (productData && (productData.inventory_quantity === undefined || productData.inventory_quantity === null)) {
+          var domInv = getInventoryFromDOM(img);
+          if (domInv !== undefined) productData.inventory_quantity = domInv;
+        }
+
         eligible.forEach(function (badge) {
           // Targeting + condition checks run BEFORE any stack creation so we
           // don't pollute the DOM with empty wrappers for non-matching products.
