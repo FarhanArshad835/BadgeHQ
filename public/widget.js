@@ -661,9 +661,12 @@
       // `card__media`. Instead, walk up and ask each ancestor "do you contain a
       // price element?". The smallest ancestor that says yes IS the card root.
       function findInfoInsertionPoint(img) {
+        // Outer-wrapper-first ordering: insert badge BEFORE the entire price
+        // block, not inside it. Inserting before .price__regular (a child of
+        // .price__container) would land the badge between flex siblings and
+        // misalign the regular/sale price layout in Dawn-derived themes.
         var PRICE_SELECTORS = [
-          ".price__regular",
-          ".price-item--regular",
+          // Theme-specific outer wrappers
           ".product-card__price",
           ".product-item__price",
           ".grid-product__price",
@@ -671,8 +674,13 @@
           "[class*='ProductPrice']",
           "[class*='product-price']",
           "[data-product-price]",
-          ".price:not([class*='compare']):not([class*='regular-label'])",
-          ".money:not([class*='compare'])",
+          // Dawn outer .price — exclude its BEM children so we don't grab the inner ones first
+          ".price:not(.price__container):not(.price__regular):not(.price__sale):not(.price-item):not([class*='regular-label'])",
+          ".money:not(.money__compare):not([class*='compare'])",
+          // Inner Dawn price elements — fallback if outer wrapper isn't matched
+          ".price__regular",
+          ".price-item--regular",
+          // Last-resort generic
           "[class*='price']:not([class*='compare']):not([class*='label'])",
         ];
         var TITLE_SELECTORS = [
