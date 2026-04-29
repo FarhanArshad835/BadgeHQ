@@ -493,6 +493,26 @@
   var _productFetchQueue = {};
 
   // Parse a raw Shopify product API response into a normalized object
+  // Sum inventory across all tracked variants. For multi-variant products
+  // (e.g. sizes × colors) variant[0]'s count is usually much smaller than
+  // the total — using only the first variant made conditions like
+  // "inventory > 300" fail on products that actually have plenty of stock.
+  // Returns undefined when no variant exposes inventory data, so condition
+  // checks can distinguish "untracked" from "zero".
+  function _sumVariantInventory(variants) {
+    if (!variants || !variants.length) return undefined;
+    var total = 0;
+    var anyTracked = false;
+    for (var i = 0; i < variants.length; i++) {
+      var q = variants[i] && variants[i].inventory_quantity;
+      if (q !== null && q !== undefined && !isNaN(q)) {
+        total += q;
+        anyTracked = true;
+      }
+    }
+    return anyTracked ? total : undefined;
+  }
+
   function _parseProductJson(data) {
     var p = data.product || {};
     var v = (p.variants && p.variants[0]) || {};
@@ -501,7 +521,7 @@
       handle: p.handle,
       price: parseFloat(v.price) || 0,
       compare_at_price: parseFloat(v.compare_at_price) || 0,
-      inventory_quantity: v.inventory_quantity,
+      inventory_quantity: _sumVariantInventory(p.variants),
       created_at: p.created_at,
       tags: (p.tags || "").split(",").map(function (t) { return t.trim(); }),
       type: p.product_type || "",
@@ -520,7 +540,7 @@
       handle: p.handle,
       price: parseFloat(v.price) || 0,
       compare_at_price: parseFloat(v.compare_at_price) || 0,
-      inventory_quantity: v.inventory_quantity,
+      inventory_quantity: _sumVariantInventory(p.variants),
       created_at: p.created_at,
       tags: Array.isArray(p.tags) ? p.tags : (p.tags || "").split(",").map(function (t) { return t.trim(); }),
       type: p.product_type || "",
