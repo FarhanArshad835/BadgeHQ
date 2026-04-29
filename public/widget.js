@@ -498,6 +498,7 @@
     var v = (p.variants && p.variants[0]) || {};
     return {
       id: p.id,
+      handle: p.handle,
       price: parseFloat(v.price) || 0,
       compare_at_price: parseFloat(v.compare_at_price) || 0,
       inventory_quantity: v.inventory_quantity,
@@ -516,6 +517,7 @@
     var v = (p.variants && p.variants[0]) || {};
     return {
       id: p.id,
+      handle: p.handle,
       price: parseFloat(v.price) || 0,
       compare_at_price: parseFloat(v.compare_at_price) || 0,
       inventory_quantity: v.inventory_quantity,
@@ -702,9 +704,15 @@
       );
       if (card) link = card.querySelector('a[href*="/products/"]');
     }
-    if (!link) return null;
-    var m = (link.getAttribute("href") || "").match(/\/products\/([^/?#]+)/);
-    return m ? m[1] : null;
+    if (link) {
+      var m = (link.getAttribute("href") || "").match(/\/products\/([^/?#]+)/);
+      if (m) return m[1];
+    }
+    // PDP fallback — the main product image gallery on a PDP isn't wrapped in a
+    // /products/{handle} link (you're already on that product), so the walks
+    // above return null. Use the page's own URL as the source of truth.
+    var pathMatch = window.location.pathname.match(/\/products\/([^/?#]+)/);
+    return pathMatch ? pathMatch[1] : null;
   }
 
   // Fetch product data for a given img element (works on all page types)
