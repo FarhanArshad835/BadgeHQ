@@ -832,8 +832,31 @@
         // which uses position:absolute + padding-bottom aspect ratio (offsetHeight is 0 there).
         if (img.offsetWidth === 0) return;
 
-        // Skip placeholder GIFs / images that haven't decoded yet
-        if (!img.complete || img.naturalWidth <= 1) return;
+        // Lazy-load handling: Dawn (and most themes) use loading="lazy" on product
+        // card images. Below-the-fold imgs aren't img.complete during the 1s/2.5s/6s
+        // findAndAttach passes, so they were silently skipped — and the
+        // MutationObserver doesn't fire on img-load events (only DOM tree mutations),
+        // so once they did load there was no retry. Listen for the load event once
+        // per pending img and re-call attachBadges when it fires.
+        if (!img.complete || img.naturalWidth <= 1) {
+          if (!img.__badgehqPendingLoad) {
+            img.__badgehqPendingLoad = true;
+            var onLoad = function () {
+              img.removeEventListener("load", onLoad);
+              img.removeEventListener("error", onError);
+              img.__badgehqPendingLoad = false;
+              attachBadges(img);
+            };
+            var onError = function () {
+              img.removeEventListener("load", onLoad);
+              img.removeEventListener("error", onError);
+              img.__badgehqPendingLoad = false;
+            };
+            img.addEventListener("load", onLoad);
+            img.addEventListener("error", onError);
+          }
+          return;
+        }
 
         // Fetch per-card product data (works on all page types — home, collection, product)
         fetchProductDataForImg(img, function (productData) {
