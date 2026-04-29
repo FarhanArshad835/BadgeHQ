@@ -528,6 +528,74 @@
     };
   }
 
+  // Per-collection membership cache: { handle: { products: { handle1: true, ... }, loaded: bool } }.
+  // Targeted-collection badges need this — Shopify's /products/{h}.json doesn't
+  // return which collections a product belongs to, so we have to flip it around
+  // and fetch each TARGETED collection's product list.
+  var _collectionMembers = {};
+  var _collectionLoading = {};
+  function prefetchCollectionMembers(collectionHandle, onComplete) {
+    if (!collectionHandle) { if (onComplete) onComplete(); return; }
+    if (_collectionMembers[collectionHandle] && _collectionMembers[collectionHandle].loaded) {
+      if (onComplete) onComplete();
+      return;
+    }
+    if (_collectionLoading[collectionHandle]) {
+      _collectionLoading[collectionHandle].push(onComplete);
+      return;
+    }
+    _collectionLoading[collectionHandle] = [onComplete];
+
+    // sessionStorage hot path
+    try {
+      var key = "__badgehq_col_" + collectionHandle;
+      var cached = sessionStorage.getItem(key);
+      if (cached) {
+        var parsed = JSON.parse(cached);
+        if (parsed && parsed.t && Date.now() - parsed.t < 5 * 60 * 1000 && parsed.p) {
+          _collectionMembers[collectionHandle] = { products: parsed.p, loaded: true };
+          var cbs1 = _collectionLoading[collectionHandle];
+          delete _collectionLoading[collectionHandle];
+          cbs1.forEach(function (cb) { if (cb) cb(); });
+          return;
+        }
+      }
+    } catch (e) {}
+
+    var members = {};
+    var page = 1;
+    var MAX_PAGES = 4;
+    function fetchPage() {
+      fetch("/collections/" + encodeURIComponent(collectionHandle) + "/products.json?limit=250&page=" + page, { credentials: "same-origin" })
+        .then(function (r) { return r.ok ? r.json() : { products: [] }; })
+        .then(function (data) {
+          var products = (data && data.products) || [];
+          for (var i = 0; i < products.length; i++) {
+            if (products[i].handle) members[products[i].handle] = true;
+          }
+          if (products.length === 250 && page < MAX_PAGES) {
+            page++;
+            fetchPage();
+            return;
+          }
+          _collectionMembers[collectionHandle] = { products: members, loaded: true };
+          try {
+            sessionStorage.setItem("__badgehq_col_" + collectionHandle, JSON.stringify({ t: Date.now(), p: members }));
+          } catch (e) {}
+          var cbs2 = _collectionLoading[collectionHandle] || [];
+          delete _collectionLoading[collectionHandle];
+          cbs2.forEach(function (cb) { if (cb) cb(); });
+        })
+        .catch(function () {
+          _collectionMembers[collectionHandle] = { products: {}, loaded: true };
+          var cbs3 = _collectionLoading[collectionHandle] || [];
+          delete _collectionLoading[collectionHandle];
+          cbs3.forEach(function (cb) { if (cb) cb(); });
+        });
+    }
+    fetchPage();
+  }
+
   // Bulk-prefetch up to ~1000 products in 4 paginated calls to /products.json.
   // Pre-populates _productDataCache so subsequent per-card lookups (including
   // dynamic loads detected by the MutationObserver) are O(1) with no network.
@@ -686,16 +754,26 @@
       }
     }
 
-    // DOM fallback for collection targeting (data-product-collection or card container)
+    // Collection targeting: prefer the prefetched member list (authoritative)
+    // over DOM data attributes — most themes don't annotate cards with the
+    // collections they belong to, so the DOM fallback was always returning
+    // "show by default" which made collection-scoped badges leak onto every
+    // product on the page.
     if (t.type === "collection") {
+      var members = _collectionMembers[t.value];
+      if (members && members.loaded) {
+        var handle = (productData && productData.handle) || getHandleFromImg(img);
+        return !!(handle && members.products[handle]);
+      }
+      // Members not loaded yet — try DOM annotation, otherwise withhold the
+      // badge until the prefetch completes (a re-attach pass will pick it up).
       var card = img.closest("[data-product-collection], [data-collections]");
       if (card) {
         var cols = (card.getAttribute("data-product-collection") ||
                     card.getAttribute("data-collections") || "").split(",");
         return cols.indexOf(t.value) !== -1;
       }
-      // Cannot verify collection targeting — show by default
-      return true;
+      return false;
     }
 
     // No data at all — show by default so badges aren't silently hidden
@@ -709,6 +787,24 @@
       return badgeShowOnPage(b, currentPage) && badgeInSchedule(b);
     });
     if (eligible.length === 0) return;
+
+    // Kick off prefetch for every collection any eligible badge targets, then
+    // re-run findAndAttach once each one lands so badges that were "waiting"
+    // for membership data render in place.
+    var collectionsToPrefetch = {};
+    for (var ei = 0; ei < eligible.length; ei++) {
+      var et = eligible[ei].targeting;
+      if (et && et.type === "collection" && et.value) {
+        collectionsToPrefetch[et.value] = true;
+      }
+    }
+    Object.keys(collectionsToPrefetch).forEach(function (collectionHandle) {
+      prefetchCollectionMembers(collectionHandle, function () {
+        // Each collection's data lands independently; re-attach so any cards
+        // that are now resolvable get their badge.
+        if (typeof findAndAttach === "function") findAndAttach();
+      });
+    });
 
     // Selectors covering Dawn, Debut, Broadcast, Impulse and other popular themes
     var SELECTORS = [
@@ -881,16 +977,13 @@
 
       function renderBadgesOnImg(img, productData) {
         eligible.forEach(function (badge) {
-          var key = "data-badgehq-" + badge.id;
-
-          // Track on the image element itself (survives parent DOM changes)
-          if (img.getAttribute(key)) return;
-          img.setAttribute(key, "1");
-
-          // Check targeting using fetched product data (accurate on all page types)
+          // Targeting + condition checks run BEFORE any stack creation so we
+          // don't pollute the DOM with empty wrappers for non-matching products.
+          // No img-level dedup attribute — stack-presence (stackHasBadge) is the
+          // source of truth, and skipping the attr lets badges that "wait" for
+          // async data (like collection prefetch) render correctly when a retry
+          // pass fires after the data lands.
           if (!badgeTargetMatch(badge, img, productData)) return;
-
-          // Check automated condition using fetched product data
           if (!badgeConditionMet(badge, productData)) return;
 
           // Info-area placement: render in the product info area, NOT on the image.
