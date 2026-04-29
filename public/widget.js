@@ -654,6 +654,45 @@
         });
       }
 
+      // Find the price/info insertion point inside the product card containing `img`.
+      // Returns an element to insert the badge BEFORE, or null if no clear info area.
+      function findInfoInsertionPoint(img) {
+        // Walk up to find the product card root
+        var cardRoot = null;
+        var node = img.parentElement;
+        for (var i = 0; i < 10 && node && node !== document.body; i++) {
+          var cls = (node.className && node.className.toString()) || "";
+          if (
+            /product-card|product[-_]?item|card-product|grid-product|productcard/i.test(cls) ||
+            node.hasAttribute("data-product-card") ||
+            node.hasAttribute("data-product-id")
+          ) {
+            cardRoot = node;
+            break;
+          }
+          node = node.parentElement;
+        }
+        if (!cardRoot) return null;
+
+        // Find a price element inside the card. Prefer .price; fall back to anything matching.
+        var priceSelectors = [
+          ".price:not([class*='compare']):not([class*='regular-label'])",
+          ".product-card__price",
+          ".product-item__price",
+          ".grid-product__price",
+          ".card__price",
+          "[class*='price-item--regular']",
+          "[class*='ProductPrice']",
+          ".money",
+          "[class*='price']",
+        ];
+        for (var j = 0; j < priceSelectors.length; j++) {
+          var p = cardRoot.querySelector(priceSelectors[j]);
+          if (p && p.offsetWidth > 0) return p;
+        }
+        return null;
+      }
+
       function renderBadgesOnImg(img, productData) {
         eligible.forEach(function (badge) {
           var key = "data-badgehq-" + badge.id;
@@ -667,6 +706,46 @@
 
           // Check automated condition using fetched product data
           if (!badgeConditionMet(badge, productData)) return;
+
+          // Info-area placement: inject as inline element above price, then return.
+          // Falls through to image-placement code below if no info area found.
+          if (badge.placement === "info") {
+            var insertBefore = findInfoInsertionPoint(img);
+            if (insertBefore) {
+              var infoEl;
+              if (badge.badgeType === "image" && badge.imageUrl) {
+                infoEl = document.createElement("img");
+                infoEl.src = badge.imageUrl;
+                infoEl.alt = badge.text || "Badge";
+                infoEl.style.cssText =
+                  "display:inline-block;max-width:80px;height:auto;margin:4px 0;pointer-events:none;" +
+                  "opacity:" + (badge.opacity || 1) + ";" +
+                  (badge.rotation ? "transform:rotate(" + badge.rotation + "deg);" : "") +
+                  (badge.customCSS || "");
+              } else {
+                infoEl = document.createElement("div");
+                var bg = badge.gradient ? "background:" + badge.gradient + ";" : "background:" + badge.badgeColor + ";";
+                infoEl.style.cssText =
+                  "display:inline-flex;align-items:center;justify-content:center;margin:4px 0;" +
+                  bg +
+                  "color:" + badge.textColor + ";" +
+                  "font-size:" + (badge.fontSize || 11) + "px;font-weight:700;line-height:1;" +
+                  "width:auto;height:auto;max-width:max-content;white-space:nowrap;box-sizing:border-box;pointer-events:none;" +
+                  "opacity:" + (badge.opacity || 1) + ";" +
+                  (badge.rotation ? "transform:rotate(" + badge.rotation + "deg);" : "") +
+                  (badge.borderWidth ? "border:" + badge.borderWidth + "px solid " + (badge.borderColor || "#000") + ";" : "") +
+                  (SHAPE_STYLES[badge.shape] || SHAPE_STYLES["rectangle"]) +
+                  (badge.customCSS || "");
+                infoEl.textContent = badge.badgeType === "dynamic"
+                  ? resolveDynamicText(badge.text, productData)
+                  : badge.text;
+              }
+              infoEl.className = "badgehq-product-badge badgehq-pb-" + badge.id;
+              insertBefore.parentNode.insertBefore(infoEl, insertBefore);
+              return;
+            }
+            // No info area found — fall through to image placement
+          }
 
           // Walk up the DOM to find the nearest already-positioned ancestor.
           // NEVER modify existing element CSS — setting position:relative on a

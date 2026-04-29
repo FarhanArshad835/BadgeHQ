@@ -50,6 +50,7 @@ model ProductBadge {
   badgeColor String   @default("#e74c3c")
   textColor  String   @default("#ffffff")
   position   String   @default("top-left")
+  placement  String   @default("image")
   targeting  String   @default("{\"type\":\"all\"}")
   isActive   Boolean  @default(false)
 

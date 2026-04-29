@@ -59,6 +59,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         badgeColor: data.badgeColor,
         textColor: data.textColor,
         position: data.position,
+        placement: data.placement,
         targeting: JSON.stringify(data.targeting),
         isActive: data.isActive,
         condition: JSON.stringify(data.condition),
@@ -95,6 +96,7 @@ export default function NewProductBadge() {
   const [badgeColor, setBadgeColor] = useState("#e74c3c");
   const [textColor, setTextColor] = useState("#ffffff");
   const [position, setPosition] = useState("top-left");
+  const [placement, setPlacement] = useState<"image" | "info">("image");
   const [isActive, setIsActive] = useState(false);
 
   // Targeting
@@ -155,6 +157,7 @@ export default function NewProductBadge() {
       badgeColor,
       textColor,
       position,
+      placement,
       targeting: { type: targetType, value: targetValue, labels: targetLabels },
       isActive,
       condition: {
@@ -422,17 +425,37 @@ export default function NewProductBadge() {
                   )}
                 </InlineGrid>
 
-                <Select
-                  label="Position on Image"
-                  options={[
-                    { label: "Top Left", value: "top-left" },
-                    { label: "Top Right", value: "top-right" },
-                    { label: "Bottom Left", value: "bottom-left" },
-                    { label: "Bottom Right", value: "bottom-right" },
-                  ]}
-                  value={position}
-                  onChange={setPosition}
-                />
+                <BlockStack gap="200">
+                  <Text as="h3" variant="headingSm">Badge Placement</Text>
+                  <InlineGrid columns={2} gap="300">
+                    <PlacementCard
+                      selected={placement === "image"}
+                      onSelect={() => setPlacement("image")}
+                      label="Inside Product Image"
+                      preview="image"
+                    />
+                    <PlacementCard
+                      selected={placement === "info"}
+                      onSelect={() => setPlacement("info")}
+                      label="In Product Info Area"
+                      preview="info"
+                    />
+                  </InlineGrid>
+                </BlockStack>
+
+                {placement === "image" && (
+                  <Select
+                    label="Position on Image"
+                    options={[
+                      { label: "Top Left", value: "top-left" },
+                      { label: "Top Right", value: "top-right" },
+                      { label: "Bottom Left", value: "bottom-left" },
+                      { label: "Bottom Right", value: "bottom-right" },
+                    ]}
+                    value={position}
+                    onChange={setPosition}
+                  />
+                )}
 
                 <TextField
                   label="Gradient Background"
@@ -656,25 +679,51 @@ export default function NewProductBadge() {
                   <div style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
                     <Text as="p" variant="bodyMd" tone="subdued">Product Image</Text>
                   </div>
-                  {badgeType === "image" && imageUrl ? (
-                    <img
-                      src={imageUrl}
-                      alt="Badge"
-                      style={{
-                        position: "absolute",
-                        ...(position.includes("top") ? { top: 8 } : { bottom: 8 }),
-                        ...(position.includes("left") ? { left: 8 } : { right: 8 }),
-                        maxWidth: 80,
-                        height: "auto",
-                        opacity,
-                        transform: rotation ? `rotate(${rotation}deg)` : undefined,
-                      }}
-                    />
-                  ) : (
-                    <div style={previewStyle}>
-                      {badgeType === "dynamic" ? text.replace(/\{\{discount\}\}/g, "25").replace(/\{\{inventory\}\}/g, "3").replace(/\{\{sold\}\}/g, "142").replace(/\{\{price\}\}/g, `${currencySymbol}29.99`).replace(/\{\{compare_price\}\}/g, `${currencySymbol}39.99`) : text}
-                    </div>
+                  {placement === "image" && (
+                    badgeType === "image" && imageUrl ? (
+                      <img
+                        src={imageUrl}
+                        alt="Badge"
+                        style={{
+                          position: "absolute",
+                          ...(position.includes("top") ? { top: 8 } : { bottom: 8 }),
+                          ...(position.includes("left") ? { left: 8 } : { right: 8 }),
+                          maxWidth: 80,
+                          height: "auto",
+                          opacity,
+                          transform: rotation ? `rotate(${rotation}deg)` : undefined,
+                        }}
+                      />
+                    ) : (
+                      <div style={previewStyle}>
+                        {badgeType === "dynamic" ? text.replace(/\{\{discount\}\}/g, "25").replace(/\{\{inventory\}\}/g, "3").replace(/\{\{sold\}\}/g, "142").replace(/\{\{price\}\}/g, `${currencySymbol}29.99`).replace(/\{\{compare_price\}\}/g, `${currencySymbol}39.99`) : text}
+                      </div>
+                    )
                   )}
+                </div>
+                <div style={{ marginTop: 12 }}>
+                  <Text as="p" variant="bodyMd">Product Name Example</Text>
+                  {placement === "info" && (
+                    badgeType === "image" && imageUrl ? (
+                      <img
+                        src={imageUrl}
+                        alt="Badge"
+                        style={{
+                          display: "inline-block",
+                          marginTop: 6,
+                          maxWidth: 80,
+                          height: "auto",
+                          opacity,
+                          transform: rotation ? `rotate(${rotation}deg)` : undefined,
+                        }}
+                      />
+                    ) : (
+                      <div style={{ ...previewStyle, position: "static", display: "inline-flex", marginTop: 6 }}>
+                        {badgeType === "dynamic" ? text.replace(/\{\{discount\}\}/g, "25").replace(/\{\{inventory\}\}/g, "3").replace(/\{\{sold\}\}/g, "142").replace(/\{\{price\}\}/g, `${currencySymbol}29.99`).replace(/\{\{compare_price\}\}/g, `${currencySymbol}39.99`) : text}
+                      </div>
+                    )
+                  )}
+                  <Text as="p" variant="bodySm" tone="subdued">{currencySymbol}29.99</Text>
                 </div>
               </Box>
 
@@ -694,5 +743,118 @@ export default function NewProductBadge() {
         </Layout.Section>
       </Layout>
     </Page>
+  );
+}
+
+function PlacementCard({
+  selected,
+  onSelect,
+  label,
+  preview,
+}: {
+  selected: boolean;
+  onSelect: () => void;
+  label: string;
+  preview: "image" | "info";
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      style={{
+        display: "block",
+        width: "100%",
+        textAlign: "left",
+        background: "var(--p-color-bg-surface)",
+        border: `2px solid ${selected ? "var(--p-color-border-emphasis)" : "var(--p-color-border)"}`,
+        borderRadius: 12,
+        padding: 16,
+        cursor: "pointer",
+        transition: "border-color 120ms",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+        <span
+          style={{
+            width: 18,
+            height: 18,
+            borderRadius: "50%",
+            border: `2px solid ${selected ? "var(--p-color-border-emphasis)" : "var(--p-color-border)"}`,
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            flexShrink: 0,
+          }}
+        >
+          {selected && (
+            <span
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: "50%",
+                background: "var(--p-color-bg-fill-emphasis)",
+              }}
+            />
+          )}
+        </span>
+        <span style={{ fontWeight: 500, fontSize: 13 }}>{label}</span>
+      </div>
+      <div
+        style={{
+          background: "#eef1f5",
+          borderRadius: 8,
+          padding: 16,
+          aspectRatio: "1 / 1",
+          position: "relative",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        {/* T-shirt placeholder */}
+        <svg width="60%" viewBox="0 0 100 80" fill="none" stroke="#9ca3af" strokeWidth="1">
+          <path d="M30 10 L20 20 L25 30 L30 25 L30 70 L70 70 L70 25 L75 30 L80 20 L70 10 L60 12 Q50 22 40 12 Z" />
+          <path d="M48 30 L52 30 L52 40 L48 40 Z" />
+        </svg>
+        {preview === "image" && (
+          <span
+            style={{
+              position: "absolute",
+              top: 12,
+              left: 12,
+              background: "#dc2626",
+              color: "#fff",
+              fontSize: 10,
+              fontWeight: 700,
+              padding: "4px 8px",
+              borderRadius: 2,
+            }}
+          >
+            BADGE HERE
+          </span>
+        )}
+      </div>
+      <div style={{ marginTop: 12, fontSize: 12, color: "#6b7280" }}>Product Name Example</div>
+      {preview === "info" && (
+        <span
+          style={{
+            display: "inline-block",
+            marginTop: 6,
+            background: "#dc2626",
+            color: "#fff",
+            fontSize: 10,
+            fontWeight: 700,
+            padding: "4px 8px",
+            borderRadius: 2,
+          }}
+        >
+          BADGE HERE
+        </span>
+      )}
+      <div style={{ marginTop: 6, fontSize: 12 }}>
+        <span style={{ fontWeight: 600 }}>$40.00</span>{" "}
+        <span style={{ color: "#9ca3af", textDecoration: "line-through" }}>$80.00</span>
+      </div>
+    </button>
   );
 }
