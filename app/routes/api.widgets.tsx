@@ -86,6 +86,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       badgeColor: b.badgeColor,
       textColor: b.textColor,
       position: b.position,
+      placement: (b as any).placement || "image",
       targeting: JSON.parse(b.targeting),
       condition: JSON.parse(b.condition),
       pages: JSON.parse(b.pages),
