@@ -654,43 +654,80 @@
         });
       }
 
-      // Find the price/info insertion point inside the product card containing `img`.
-      // Returns an element to insert the badge BEFORE, or null if no clear info area.
+      // Find the info-area insertion point inside the product card containing `img`.
+      // Returns { target, mode } where mode is 'before' | 'after' | 'append', or null
+      // if no card-like ancestor exists. Three-tier fallback: price → title → card root.
       function findInfoInsertionPoint(img) {
-        // Walk up to find the product card root
+        // Walk up to find a card-like ancestor. Wide net so we cover Dawn, Debut,
+        // Impulse, Broadcast, Refresh, custom themes, and generic <li>/<article> grids.
         var cardRoot = null;
         var node = img.parentElement;
-        for (var i = 0; i < 10 && node && node !== document.body; i++) {
+        for (var i = 0; i < 12 && node && node !== document.body; i++) {
           var cls = (node.className && node.className.toString()) || "";
+          var tag = node.tagName;
           if (
-            /product-card|product[-_]?item|card-product|grid-product|productcard/i.test(cls) ||
+            /product-card|product[-_]?item|card-product|grid-product|productcard|card-wrapper|card__|grid__item|collection-item|product-block|product__/i.test(cls) ||
             node.hasAttribute("data-product-card") ||
-            node.hasAttribute("data-product-id")
+            node.hasAttribute("data-product-id") ||
+            node.hasAttribute("data-product-handle") ||
+            tag === "ARTICLE"
           ) {
             cardRoot = node;
             break;
+          }
+          // <li> only counts if its parent looks like a product list
+          if (tag === "LI") {
+            var parentCls = (node.parentElement && node.parentElement.className && node.parentElement.className.toString()) || "";
+            if (/grid|collection|product|list--products|cards/i.test(parentCls)) {
+              cardRoot = node;
+              break;
+            }
           }
           node = node.parentElement;
         }
         if (!cardRoot) return null;
 
-        // Find a price element inside the card. Prefer .price; fall back to anything matching.
+        // Tier 1: price element. Try specific theme classes first, then generic.
         var priceSelectors = [
-          ".price:not([class*='compare']):not([class*='regular-label'])",
+          ".price__regular",
+          ".price-item--regular",
           ".product-card__price",
           ".product-item__price",
           ".grid-product__price",
           ".card__price",
-          "[class*='price-item--regular']",
           "[class*='ProductPrice']",
-          ".money",
-          "[class*='price']",
+          "[class*='product-price']",
+          "[data-product-price]",
+          ".price:not([class*='compare']):not([class*='regular-label'])",
+          ".money:not([class*='compare'])",
+          "[class*='price']:not([class*='compare']):not([class*='label'])",
         ];
         for (var j = 0; j < priceSelectors.length; j++) {
           var p = cardRoot.querySelector(priceSelectors[j]);
-          if (p && p.offsetWidth > 0) return p;
+          if (p && p.offsetWidth > 0) return { target: p, mode: "before" };
         }
-        return null;
+
+        // Tier 2: title / heading link. Insert badge AFTER it.
+        var titleSelectors = [
+          ".card__heading",
+          ".product-card__title",
+          ".product-item__title",
+          ".grid-product__title",
+          ".card-information",
+          ".card__information",
+          ".product-card__info",
+          ".product-item__info",
+          "h2 a[href*='/products/']",
+          "h3 a[href*='/products/']",
+          "a[href*='/products/']",
+        ];
+        for (var k = 0; k < titleSelectors.length; k++) {
+          var t = cardRoot.querySelector(titleSelectors[k]);
+          if (t && t.offsetWidth > 0) return { target: t, mode: "after" };
+        }
+
+        // Tier 3: nothing found inside card — append at end of card root.
+        return { target: cardRoot, mode: "append" };
       }
 
       function renderBadgesOnImg(img, productData) {
@@ -707,44 +744,55 @@
           // Check automated condition using fetched product data
           if (!badgeConditionMet(badge, productData)) return;
 
-          // Info-area placement: inject as inline element above price, then return.
-          // Falls through to image-placement code below if no info area found.
+          // Info-area placement: render in the product info area, NOT on the image.
+          // Respects merchant choice — does not fall through to image placement on failure.
           if (badge.placement === "info") {
-            var insertBefore = findInfoInsertionPoint(img);
-            if (insertBefore) {
-              var infoEl;
-              if (badge.badgeType === "image" && badge.imageUrl) {
-                infoEl = document.createElement("img");
-                infoEl.src = badge.imageUrl;
-                infoEl.alt = badge.text || "Badge";
-                infoEl.style.cssText =
-                  "display:inline-block;max-width:80px;height:auto;margin:4px 0;pointer-events:none;" +
-                  "opacity:" + (badge.opacity || 1) + ";" +
-                  (badge.rotation ? "transform:rotate(" + badge.rotation + "deg);" : "") +
-                  (badge.customCSS || "");
-              } else {
-                infoEl = document.createElement("div");
-                var bg = badge.gradient ? "background:" + badge.gradient + ";" : "background:" + badge.badgeColor + ";";
-                infoEl.style.cssText =
-                  "display:inline-flex;align-items:center;justify-content:center;margin:4px 0;" +
-                  bg +
-                  "color:" + badge.textColor + ";" +
-                  "font-size:" + (badge.fontSize || 11) + "px;font-weight:700;line-height:1;" +
-                  "width:auto;height:auto;max-width:max-content;white-space:nowrap;box-sizing:border-box;pointer-events:none;" +
-                  "opacity:" + (badge.opacity || 1) + ";" +
-                  (badge.rotation ? "transform:rotate(" + badge.rotation + "deg);" : "") +
-                  (badge.borderWidth ? "border:" + badge.borderWidth + "px solid " + (badge.borderColor || "#000") + ";" : "") +
-                  (SHAPE_STYLES[badge.shape] || SHAPE_STYLES["rectangle"]) +
-                  (badge.customCSS || "");
-                infoEl.textContent = badge.badgeType === "dynamic"
-                  ? resolveDynamicText(badge.text, productData)
-                  : badge.text;
+            var spot = findInfoInsertionPoint(img);
+            if (!spot) {
+              if (window.console && console.warn) {
+                console.warn("[BadgeHQ] info-area placement: no card ancestor found for image — badge skipped. Theme may need a custom selector.", img);
               }
-              infoEl.className = "badgehq-product-badge badgehq-pb-" + badge.id;
-              insertBefore.parentNode.insertBefore(infoEl, insertBefore);
               return;
             }
-            // No info area found — fall through to image placement
+
+            var infoEl;
+            if (badge.badgeType === "image" && badge.imageUrl) {
+              infoEl = document.createElement("img");
+              infoEl.src = badge.imageUrl;
+              infoEl.alt = badge.text || "Badge";
+              infoEl.style.cssText =
+                "display:inline-block;max-width:80px;height:auto;margin:4px 0;pointer-events:none;" +
+                "opacity:" + (badge.opacity || 1) + ";" +
+                (badge.rotation ? "transform:rotate(" + badge.rotation + "deg);" : "") +
+                (badge.customCSS || "");
+            } else {
+              infoEl = document.createElement("div");
+              var bg = badge.gradient ? "background:" + badge.gradient + ";" : "background:" + badge.badgeColor + ";";
+              infoEl.style.cssText =
+                "display:inline-flex;align-items:center;justify-content:center;margin:4px 0;padding:4px 8px;" +
+                bg +
+                "color:" + badge.textColor + ";" +
+                "font-size:" + (badge.fontSize || 11) + "px;font-weight:700;line-height:1;" +
+                "width:auto;height:auto;max-width:max-content;white-space:nowrap;box-sizing:border-box;pointer-events:none;" +
+                "opacity:" + (badge.opacity || 1) + ";" +
+                (badge.rotation ? "transform:rotate(" + badge.rotation + "deg);" : "") +
+                (badge.borderWidth ? "border:" + badge.borderWidth + "px solid " + (badge.borderColor || "#000") + ";" : "") +
+                (SHAPE_STYLES[badge.shape] || SHAPE_STYLES["rectangle"]) +
+                (badge.customCSS || "");
+              infoEl.textContent = badge.badgeType === "dynamic"
+                ? resolveDynamicText(badge.text, productData)
+                : badge.text;
+            }
+            infoEl.className = "badgehq-product-badge badgehq-pb-" + badge.id;
+
+            if (spot.mode === "before") {
+              spot.target.parentNode.insertBefore(infoEl, spot.target);
+            } else if (spot.mode === "after") {
+              spot.target.parentNode.insertBefore(infoEl, spot.target.nextSibling);
+            } else {
+              spot.target.appendChild(infoEl);
+            }
+            return;
           }
 
           // Walk up the DOM to find the nearest already-positioned ancestor.
