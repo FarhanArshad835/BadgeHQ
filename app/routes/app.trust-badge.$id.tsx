@@ -121,7 +121,16 @@ const POSITION_OPTIONS = [
   { label: "Cart Page", value: "cart-page" },
 ];
 
+// Force remount on :id change so useState initializers re-fire with fresh
+// loader data. Otherwise Badge A's form state persists when navigating to
+// Badge B (same route, same component instance, useState ignores new
+// initial values).
 export default function EditTrustBadge() {
+  const { badge } = useLoaderData<typeof loader>();
+  return <EditTrustBadgeForm key={badge.id} />;
+}
+
+function EditTrustBadgeForm() {
   const { badge } = useLoaderData<typeof loader>();
   const actionData = useActionData<{ success?: boolean; error?: string }>();
   const navigate = useNavigate();

@@ -59,6 +59,8 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
   const { session } = await authenticate.admin(request);
+  // Guard: empty id would make updateMany match every badge for the shop.
+  if (!params.id) return json({ error: "Missing badge id" }, { status: 400 });
   const formData = await request.formData();
   const data = JSON.parse(formData.get("data") as string);
 
@@ -95,7 +97,17 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   }
 };
 
+// Outer wrapper forces a fresh mount whenever the URL :id changes. Without
+// this, navigating from /app/product-badge/A to /app/product-badge/B would
+// reuse the same component instance — useState initializers only fire on
+// first render, so Badge A's form values would persist on Badge B's page,
+// causing the user to overwrite Badge B with Badge A's settings on save.
 export default function EditProductBadge() {
+  const { badge } = useLoaderData<typeof loader>();
+  return <EditProductBadgeForm key={badge.id} />;
+}
+
+function EditProductBadgeForm() {
   const { badge, currencyCode, currencySymbol } = useLoaderData<typeof loader>();
   const actionData = useActionData<{ success?: boolean; error?: string }>();
   const navigate = useNavigate();
