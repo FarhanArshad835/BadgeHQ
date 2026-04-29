@@ -927,11 +927,65 @@
         document.querySelectorAll(SELECTORS).forEach(attachBadges);
       }
 
-      // Delay first run so theme JS (lazy-loaders, image reveal animations) finishes
-      // before we touch the DOM. Retries catch images loaded later (lazy scroll, AJAX).
-    setTimeout(findAndAttach, 1000);
-    setTimeout(findAndAttach, 2500);
-    setTimeout(findAndAttach, 6000);
+      // Attach badges to any matching images inside a freshly-added subtree.
+      // Used by the MutationObserver below so dynamically-loaded products
+      // (infinite scroll, AJAX pagination, Depict grid swaps) get badges.
+      function attachInSubtree(root) {
+        if (!root || root.nodeType !== 1) return;
+        if (root.tagName === "IMG" && root.matches && root.matches(SELECTORS)) {
+          attachBadges(root);
+        }
+        if (root.querySelectorAll) {
+          var imgs = root.querySelectorAll(SELECTORS);
+          for (var i = 0; i < imgs.length; i++) attachBadges(imgs[i]);
+        }
+      }
+
+      // Watch the DOM for newly-added product cards so badges keep working
+      // through lazy scroll, "Load more" buttons, AJAX pagination, and any
+      // theme that re-renders the grid client-side (Depict, Searchanise, etc.).
+      // Dedup via window flag so multiple widget instances on the page share
+      // one observer.
+      function setupMutationObserver() {
+        if (window.__badgehq_observer) return;
+        var pendingNodes = [];
+        var pendingFlush = false;
+        function flush() {
+          pendingFlush = false;
+          var nodes = pendingNodes;
+          pendingNodes = [];
+          for (var i = 0; i < nodes.length; i++) {
+            if (nodes[i].isConnected) attachInSubtree(nodes[i]);
+          }
+        }
+        var observer = new MutationObserver(function (mutations) {
+          for (var i = 0; i < mutations.length; i++) {
+            var added = mutations[i].addedNodes;
+            for (var j = 0; j < added.length; j++) {
+              var n = added[j];
+              if (n.nodeType !== 1) continue;
+              // Cheap filter: only queue subtrees that could plausibly contain a product image
+              if (n.tagName === "IMG" || (n.querySelector && n.querySelector("img"))) {
+                pendingNodes.push(n);
+              }
+            }
+          }
+          if (!pendingFlush && pendingNodes.length > 0) {
+            pendingFlush = true;
+            (window.requestAnimationFrame || function (cb) { setTimeout(cb, 16); })(flush);
+          }
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+        window.__badgehq_observer = observer;
+      }
+
+      // Initial pass on whatever's already in the DOM, plus a few short retries
+      // for theme JS (lazy-loaders, image reveal animations) that mutates after
+      // first paint. The MutationObserver below covers everything after that.
+      setTimeout(findAndAttach, 1000);
+      setTimeout(findAndAttach, 2500);
+      setTimeout(findAndAttach, 6000);
+      setupMutationObserver();
   }
 
   /* ===================== FREE SHIPPING BAR ===================== */
