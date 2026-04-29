@@ -723,6 +723,63 @@
         return null;
       }
 
+      // Get-or-create a flex stack for image-placement badges at one corner of a
+      // container. Multiple badges with the same position share one stack; the
+      // stack handles the absolute positioning, individual badges are inline
+      // children and flow within the stack with `gap`.
+      function getOrCreateCornerStack(container, position) {
+        var stackClass = "badgehq-corner-stack-" + position;
+        for (var i = 0; i < container.children.length; i++) {
+          if (container.children[i].classList.contains(stackClass)) return container.children[i];
+        }
+        var stack = document.createElement("div");
+        stack.className = stackClass + " badgehq-corner-stack";
+        var direction = position.indexOf("bottom") === 0 ? "column-reverse" : "column";
+        var align = position.indexOf("right") !== -1 ? "flex-end" : "flex-start";
+        stack.style.cssText =
+          "position:absolute;z-index:10;display:flex;flex-direction:" + direction + ";gap:4px;align-items:" + align + ";pointer-events:none;" +
+          (POS_STYLES[position] || POS_STYLES["top-left"]);
+        container.appendChild(stack);
+        return stack;
+      }
+
+      // Get-or-create a wrapper for info-area badges anchored to a price/title
+      // target. All info badges for a card share one wrapper inserted at the
+      // right insertion point; new ones append into it instead of stacking
+      // directly before/after the target.
+      function getOrCreateInfoWrapper(spot) {
+        var existing = null;
+        if (spot.mode === "before") {
+          existing = spot.target.previousElementSibling;
+          if (existing && existing.classList && existing.classList.contains("badgehq-info-stack")) return existing;
+          existing = null;
+        } else if (spot.mode === "after") {
+          existing = spot.target.nextElementSibling;
+          if (existing && existing.classList && existing.classList.contains("badgehq-info-stack")) return existing;
+          existing = null;
+        } else {
+          for (var i = 0; i < spot.target.children.length; i++) {
+            if (spot.target.children[i].classList.contains("badgehq-info-stack")) { existing = spot.target.children[i]; break; }
+          }
+          if (existing) return existing;
+        }
+        var wrap = document.createElement("div");
+        wrap.className = "badgehq-info-stack";
+        wrap.style.cssText = "display:flex;flex-wrap:wrap;gap:4px;margin:4px 0;";
+        if (spot.mode === "before") spot.target.parentNode.insertBefore(wrap, spot.target);
+        else if (spot.mode === "after") spot.target.parentNode.insertBefore(wrap, spot.target.nextSibling);
+        else spot.target.appendChild(wrap);
+        return wrap;
+      }
+
+      // True if a stack/wrapper already contains a badge with this id. Source of
+      // truth for "this badge is already rendered for this card" — works across
+      // multi-image cards (Dawn's main + hover image both walk up to the same
+      // container and share one stack).
+      function stackHasBadge(stackOrWrap, badgeId) {
+        return !!stackOrWrap.querySelector(".badgehq-pb-" + badgeId);
+      }
+
       function renderBadgesOnImg(img, productData) {
         eligible.forEach(function (badge) {
           var key = "data-badgehq-" + badge.id;
@@ -748,13 +805,18 @@
               return;
             }
 
+            var wrap = getOrCreateInfoWrapper(spot);
+            // Skip if this badge id is already in the wrapper (multi-image cards
+            // would otherwise add it once per image).
+            if (stackHasBadge(wrap, badge.id)) return;
+
             var infoEl;
             if (badge.badgeType === "image" && badge.imageUrl) {
               infoEl = document.createElement("img");
               infoEl.src = badge.imageUrl;
               infoEl.alt = badge.text || "Badge";
               infoEl.style.cssText =
-                "display:inline-block;max-width:80px;height:auto;margin:4px 0;pointer-events:none;" +
+                "display:inline-block;max-width:80px;height:auto;pointer-events:none;" +
                 "opacity:" + (badge.opacity || 1) + ";" +
                 (badge.rotation ? "transform:rotate(" + badge.rotation + "deg);" : "") +
                 (badge.customCSS || "");
@@ -762,7 +824,7 @@
               infoEl = document.createElement("div");
               var bg = badge.gradient ? "background:" + badge.gradient + ";" : "background:" + badge.badgeColor + ";";
               infoEl.style.cssText =
-                "display:inline-flex;align-items:center;justify-content:center;margin:4px 0;padding:4px 8px;" +
+                "display:inline-flex;align-items:center;justify-content:center;padding:4px 8px;" +
                 bg +
                 "color:" + badge.textColor + ";" +
                 "font-size:" + (badge.fontSize || 11) + "px;font-weight:700;line-height:1;" +
@@ -777,14 +839,7 @@
                 : badge.text;
             }
             infoEl.className = "badgehq-product-badge badgehq-pb-" + badge.id;
-
-            if (spot.mode === "before") {
-              spot.target.parentNode.insertBefore(infoEl, spot.target);
-            } else if (spot.mode === "after") {
-              spot.target.parentNode.insertBefore(infoEl, spot.target.nextSibling);
-            } else {
-              spot.target.appendChild(infoEl);
-            }
+            wrap.appendChild(infoEl);
             return;
           }
 
@@ -812,23 +867,27 @@
             container.style.position = "relative";
           }
 
-          // Render image badge
+          // Image-placement: badges with the same corner share one flex stack.
+          // The stack handles positioning; individual badges are inline children.
+          var cornerStack = getOrCreateCornerStack(container, badge.position);
+          // Skip if this badge id is already in the stack (multi-image cards
+          // walk to the same container and would otherwise add duplicates).
+          if (stackHasBadge(cornerStack, badge.id)) return;
+
           if (badge.badgeType === "image" && badge.imageUrl) {
             var imgEl = document.createElement("img");
             imgEl.className = "badgehq-product-badge badgehq-pb-" + badge.id;
             imgEl.src = badge.imageUrl;
             imgEl.alt = badge.text || "Badge";
             imgEl.style.cssText =
-              "position:absolute;z-index:10;max-width:80px;height:auto;pointer-events:none;" +
+              "max-width:80px;height:auto;pointer-events:none;" +
               "opacity:" + (badge.opacity || 1) + ";" +
               (badge.rotation ? "transform:rotate(" + badge.rotation + "deg);" : "") +
-              (POS_STYLES[badge.position] || POS_STYLES["top-left"]) +
               (badge.customCSS || "");
-            container.appendChild(imgEl);
+            cornerStack.appendChild(imgEl);
             return;
           }
 
-          // Render text / dynamic badge
           var el = document.createElement("div");
           el.className = "badgehq-product-badge badgehq-pb-" + badge.id;
 
@@ -837,7 +896,7 @@
             : "background:" + badge.badgeColor + ";";
 
           el.style.cssText =
-            "position:absolute;z-index:10;display:flex;align-items:center;justify-content:center;" +
+            "display:flex;align-items:center;justify-content:center;" +
             bgStyle +
             "color:" + badge.textColor + ";" +
             "font-size:" + (badge.fontSize || 11) + "px;font-weight:700;line-height:1;" +
@@ -845,7 +904,6 @@
             "opacity:" + (badge.opacity || 1) + ";" +
             (badge.rotation ? "transform:rotate(" + badge.rotation + "deg);" : "") +
             (badge.borderWidth ? "border:" + badge.borderWidth + "px solid " + (badge.borderColor || "#000") + ";" : "") +
-            (POS_STYLES[badge.position] || POS_STYLES["top-left"]) +
             (SHAPE_STYLES[badge.shape] || SHAPE_STYLES["rectangle"]) +
             (badge.customCSS || "");
 
@@ -853,7 +911,7 @@
             ? resolveDynamicText(badge.text, productData)
             : badge.text;
 
-          container.appendChild(el);
+          cornerStack.appendChild(el);
         });
       }
 
