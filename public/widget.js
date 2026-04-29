@@ -36,6 +36,14 @@
     ? APP_ORIGIN + "/api/widgets?shop=" + encodeURIComponent(SHOP)
     : "/apps/badgehq/api/widgets?shop=" + encodeURIComponent(SHOP);
 
+  // Server-side inventory feed (Admin API-backed). Returns per-handle totals
+  // including inventory, regardless of whether Shopify hides inventory in
+  // the public storefront API. Populated into _productDataCache during
+  // bulk prefetch.
+  var INVENTORY_API_URL = APP_ORIGIN
+    ? APP_ORIGIN + "/api/products/inventory?shop=" + encodeURIComponent(SHOP)
+    : null;
+
   function onReady(fn) {
     if (document.readyState === "loading") {
       document.addEventListener("DOMContentLoaded", fn);
@@ -735,6 +743,108 @@
     fetchPage();
   }
 
+  // Server-side inventory feed prefetch. Hits our app's /api/products/inventory
+  // endpoint which uses the merchant's stored Admin API token to read
+  // inventory_quantity and other server-only fields (the storefront API hides
+  // inventory on most stores). Merges into _productDataCache so badge
+  // condition checks like "inventory > 300" work even on themes that don't
+  // expose data-inventory in the DOM.
+  //
+  // Same architectural approach as ShineTrust's
+  // /search?view=shinetrust.product-handles endpoint, just hosted on our
+  // backend instead of inside the merchant's theme — no Asset API write,
+  // no scope changes for the merchant, just one fetch.
+  var _inventoryLoading = false;
+  function bulkPrefetchInventory(onComplete) {
+    if (!INVENTORY_API_URL || window.__badgehq_inventory_done || _inventoryLoading) {
+      if (onComplete) onComplete();
+      return;
+    }
+    _inventoryLoading = true;
+
+    // sessionStorage hot path
+    try {
+      var cached = sessionStorage.getItem("__badgehq_inv");
+      if (cached) {
+        var parsed = JSON.parse(cached);
+        if (parsed && parsed.t && Date.now() - parsed.t < 5 * 60 * 1000 && parsed.d) {
+          for (var h in parsed.d) {
+            mergeInventoryData(h, parsed.d[h]);
+          }
+          window.__badgehq_inventory_done = true;
+          _inventoryLoading = false;
+          if (onComplete) onComplete();
+          return;
+        }
+      }
+    } catch (e) {}
+
+    fetch(INVENTORY_API_URL, { credentials: "omit" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (body) {
+        if (!body || !body.products) {
+          _inventoryLoading = false;
+          if (onComplete) onComplete();
+          return;
+        }
+        var pdata = body.products;
+        for (var h in pdata) {
+          mergeInventoryData(h, pdata[h]);
+        }
+        try {
+          sessionStorage.setItem("__badgehq_inv", JSON.stringify({ t: Date.now(), d: pdata }));
+        } catch (e) {}
+        window.__badgehq_inventory_done = true;
+        _inventoryLoading = false;
+        if (onComplete) onComplete();
+      })
+      .catch(function () {
+        _inventoryLoading = false;
+        if (onComplete) onComplete();
+      });
+  }
+
+  // Merge inventory feed entry into _productDataCache. Creates an entry if
+  // the handle isn't cached yet, otherwise enriches the existing one with
+  // the inventory total. -1 sentinel from the feed means "infinite stock"
+  // (continue policy variant) — rewritten to a large number so > comparisons
+  // pass naturally; -2 means "untracked" — left undefined so condition
+  // checks distinguish "untracked" from "zero".
+  function mergeInventoryData(handle, entry) {
+    if (!handle || !entry) return;
+    var resolvedInv;
+    if (entry.inventory === -1) resolvedInv = Number.MAX_SAFE_INTEGER;
+    else if (entry.inventory === -2) resolvedInv = undefined;
+    else resolvedInv = entry.inventory;
+
+    if (_productDataCache[handle]) {
+      // Enrich existing entry — only fill in fields we don't already have
+      var ex = _productDataCache[handle];
+      if (ex.inventory_quantity === undefined || ex.inventory_quantity === null) {
+        ex.inventory_quantity = resolvedInv;
+      }
+      if (!ex.created_at && entry.created_at) ex.created_at = entry.created_at;
+      if (!ex.tags || !ex.tags.length) ex.tags = entry.tags || [];
+      if (!ex.type && entry.product_type) ex.type = entry.product_type;
+      if (!ex.vendor && entry.vendor) ex.vendor = entry.vendor;
+      if (!ex.price && entry.price) ex.price = entry.price;
+      if (!ex.compare_at_price && entry.compare_at_price) ex.compare_at_price = entry.compare_at_price;
+    } else {
+      _productDataCache[handle] = {
+        handle: handle,
+        price: entry.price || 0,
+        compare_at_price: entry.compare_at_price || 0,
+        inventory_quantity: resolvedInv,
+        created_at: entry.created_at || "",
+        tags: entry.tags || [],
+        type: entry.product_type || "",
+        vendor: entry.vendor || "",
+        sold: 0,
+        collections: [],
+      };
+    }
+  }
+
   // Fetch /products/{handle}.json with per-handle caching and in-flight deduplication.
   // Multiple simultaneous calls for the same handle queue up and all resolve together.
   function fetchProductDataByHandle(handle, callback) {
@@ -1362,6 +1472,15 @@
       bulkPrefetchProducts(function () {
         // After bulk completes, sweep the DOM once more — any cards that were
         // detected before the cache was warm now have data available.
+        findAndAttach();
+      });
+
+      // Server-side inventory feed (Admin API-backed). Adds inventory_quantity
+      // to cached products so badge conditions like "inventory > 300" work
+      // even on stores where Shopify hides inventory in the public storefront
+      // API. Independent of the storefront /products.json bulk prefetch above
+      // — both write into the same _productDataCache.
+      bulkPrefetchInventory(function () {
         findAndAttach();
       });
 
