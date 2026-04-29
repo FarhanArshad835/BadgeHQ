@@ -26,7 +26,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const [trustBadges, productBadges, announcementBars, freeShippingBars, stickyCarts, countdownTimers] =
     await Promise.all([
       prisma.trustBadge.findMany({ where: { shop, isEnabled: true } }),
-      prisma.productBadge.findMany({ where: { shop, isActive: true }, orderBy: { priority: "desc" } }),
+      prisma.productBadge.findMany({ where: { shop, isActive: true }, orderBy: [{ priority: "desc" }, { createdAt: "desc" }] }),
       prisma.announcementBar.findMany({ where: { shop, isActive: true } }),
       prisma.freeShippingBar.findMany({ where: { shop, isActive: true } }),
       prisma.stickyCart.findMany({ where: { shop, isActive: true } }),
