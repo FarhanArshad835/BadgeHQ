@@ -1475,14 +1475,20 @@
         findAndAttach();
       });
 
-      // Server-side inventory feed (Admin API-backed). Adds inventory_quantity
-      // to cached products so badge conditions like "inventory > 300" work
-      // even on stores where Shopify hides inventory in the public storefront
-      // API. Independent of the storefront /products.json bulk prefetch above
-      // — both write into the same _productDataCache.
-      bulkPrefetchInventory(function () {
-        findAndAttach();
+      // Server-side inventory feed (Admin API-backed). Only fetched when at
+      // least one eligible badge has an inventory-based condition — saves
+      // a per-pageview edge request on stores that don't use inventory
+      // badges, which is most of them.
+      var needsInventory = eligible.some(function (b) {
+        var c = b && b.condition;
+        if (!c) return false;
+        return c.type === "inventory_count" || c.type === "low_stock" || c.type === "out_of_stock";
       });
+      if (needsInventory) {
+        bulkPrefetchInventory(function () {
+          findAndAttach();
+        });
+      }
 
       // Initial pass on whatever's already in the DOM, plus a few short retries
       // for theme JS (lazy-loaders, image reveal animations) that mutates after
