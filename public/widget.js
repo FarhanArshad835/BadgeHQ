@@ -21,28 +21,25 @@
     return null;
   })();
 
-  var APP_ORIGIN = "";
-  if (scriptEl && scriptEl.src) {
-    try {
-      var u = new URL(scriptEl.src);
-      APP_ORIGIN = u.origin;
-    } catch (e) {
-      // fallback: strip /widget.js from the src
-      APP_ORIGIN = scriptEl.src.replace(/\/widget\.js(\?.*)?$/, "");
-    }
-  }
+  // Hardcoded API origin — always points at the Remix app on Vercel where
+  // the dynamic endpoints live, regardless of which CDN serves widget.js.
+  // We previously auto-detected this from the <script src> URL, but once
+  // widget.js moved to Cloudflare Workers (which only serves the static
+  // file), that auto-detection started pointing API calls at the worker
+  // host where /api/widgets doesn't exist — causing every API call to
+  // 404 and no badges to render.
+  //
+  // If you ever migrate the API to a different host, change API_ORIGIN
+  // here and redeploy both the Vercel app and the Cloudflare worker.
+  var API_ORIGIN = "https://badge-hq.vercel.app";
 
-  var API_URL = APP_ORIGIN
-    ? APP_ORIGIN + "/api/widgets?shop=" + encodeURIComponent(SHOP)
-    : "/apps/badgehq/api/widgets?shop=" + encodeURIComponent(SHOP);
+  var API_URL = API_ORIGIN + "/api/widgets?shop=" + encodeURIComponent(SHOP);
 
   // Server-side inventory feed (Admin API-backed). Returns per-handle totals
   // including inventory, regardless of whether Shopify hides inventory in
   // the public storefront API. Populated into _productDataCache during
   // bulk prefetch.
-  var INVENTORY_API_URL = APP_ORIGIN
-    ? APP_ORIGIN + "/api/products/inventory?shop=" + encodeURIComponent(SHOP)
-    : null;
+  var INVENTORY_API_URL = API_ORIGIN + "/api/products/inventory?shop=" + encodeURIComponent(SHOP);
 
   function onReady(fn) {
     if (document.readyState === "loading") {
