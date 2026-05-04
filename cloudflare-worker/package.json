@@ -1,0 +1,16 @@
+{
+  "name": "badgehq-widget-worker",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Edge-served widget.js via Cloudflare Workers (offloads ~70% of Vercel edge requests)",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "build": "node build.js",
+    "deploy": "npm run build && wrangler deploy",
+    "dev": "npm run build && wrangler dev"
+  },
+  "devDependencies": {
+    "wrangler": "^3.78.0"
+  }
+}
