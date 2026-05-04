@@ -148,7 +148,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     {
       headers: {
         ...CORS_HEADERS,
-        "Cache-Control": "public, max-age=0",
+        // Browser caches for 5 min, Vercel edge caches for 10 min.
+        // s-maxage is what enables edge caching of dynamic routes — without
+        // it, every request hits the origin Lambda even if Vercel could
+        // serve from cache. The dashboard previously showed this route at
+        // 0% cached vs /api/products/inventory at 93.5% — exact same kind
+        // of data, but inventory had s-maxage in its response.
+        "Cache-Control": "public, max-age=300, s-maxage=600, stale-while-revalidate=60",
       },
     },
   );
