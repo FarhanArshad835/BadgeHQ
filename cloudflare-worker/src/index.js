@@ -18,10 +18,22 @@ import { WIDGET_SOURCE, WIDGET_HASH, WIDGET_BUILT_AT } from "./widget-source.gen
 // The worker only proxies; all data still comes from here, just cached.
 const ORIGIN = "https://badge-hq.vercel.app";
 
-// Edge cache TTL for proxied API responses. Matches the Cache-Control we
-// set on the Vercel side so widget.js's sessionStorage hot path and our
-// edge cache stay in sync.
-const API_CACHE_TTL = 300; // seconds
+// Edge cache TTLs per route. Tuned to keep Vercel function invocations
+// under the free-tier compute cap (4 hours of Active CPU/month).
+//
+// Inventory (~385ms CPU per call) is by far the heaviest endpoint —
+// it triggers an Admin API call to Shopify that fetches all products.
+// Cache aggressively (1 hour) since "Trending" / "low stock" badges
+// don't need real-time stock data.
+//
+// Widgets endpoint (~50ms CPU per call) is lightweight, but bumping TTL
+// still helps reduce invocation count. 15 min is fine — merchant config
+// changes propagate within 15 min of an admin save.
+const CACHE_TTL_BY_PATH = {
+  "/api/widgets": 900,                  // 15 minutes
+  "/api/products/inventory": 3600,      // 1 hour
+};
+const DEFAULT_CACHE_TTL = 300;
 
 const HEADERS_JS = {
   "Content-Type": "application/javascript; charset=utf-8",
@@ -46,6 +58,7 @@ const CORS_HEADERS = {
 // touching Vercel at all.
 async function proxyWithCache(request, originPath) {
   const url = new URL(request.url);
+  const ttl = CACHE_TTL_BY_PATH[originPath] || DEFAULT_CACHE_TTL;
   const target = `${ORIGIN}${originPath}?${url.searchParams.toString()}`;
 
   const upstream = await fetch(target, {
@@ -55,10 +68,10 @@ async function proxyWithCache(request, originPath) {
       "X-Forwarded-For-Worker": "badgehq-widget",
     },
     cf: {
-      cacheTtl: API_CACHE_TTL,
+      cacheTtl: ttl,
       cacheEverything: true,
       // Cache 200 responses; let errors fall through without poisoning the cache
-      cacheTtlByStatus: { "200-299": API_CACHE_TTL, "400-499": 5, "500-599": 0 },
+      cacheTtlByStatus: { "200-299": ttl, "400-499": 5, "500-599": 0 },
     },
   });
 
@@ -66,10 +79,11 @@ async function proxyWithCache(request, originPath) {
   // headers, lock down Cache-Control, expose CORS for the storefront.
   const respHeaders = new Headers();
   respHeaders.set("Content-Type", upstream.headers.get("Content-Type") || "application/json");
-  respHeaders.set("Cache-Control", `public, max-age=${API_CACHE_TTL}, s-maxage=${API_CACHE_TTL * 2}`);
+  respHeaders.set("Cache-Control", `public, max-age=${ttl}, s-maxage=${ttl * 2}`);
   respHeaders.set("Access-Control-Allow-Origin", "*");
   respHeaders.set("X-Source", "cloudflare-worker-api-proxy");
   respHeaders.set("X-Origin", "vercel");
+  respHeaders.set("X-Cache-TTL", String(ttl));
   // Pass through Cloudflare's own cache status if present
   const cfCacheStatus = upstream.headers.get("CF-Cache-Status");
   if (cfCacheStatus) respHeaders.set("X-Edge-Cache", cfCacheStatus);
@@ -99,7 +113,7 @@ export default {
           widget_bytes: WIDGET_SOURCE.length,
           routes: ["/widget.js", "/health", "/api/widgets", "/api/products/inventory"],
           origin: ORIGIN,
-          api_cache_ttl_seconds: API_CACHE_TTL,
+          cache_ttl_by_path_seconds: CACHE_TTL_BY_PATH,
         }),
         {
           status: 200,
