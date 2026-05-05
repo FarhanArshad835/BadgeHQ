@@ -1,19 +1,30 @@
-// Cloudflare Worker that serves widget.js from the global edge.
-// Replaces Vercel's serving of /widget.js for the storefront, eliminating
-// ~30-40% of the app's Vercel edge-request count once the theme app
-// extension is updated to point here.
+// Cloudflare Worker that fronts the BadgeHQ widget infrastructure from
+// the global edge:
 //
-// The widget.js source is embedded into the bundle by build.js (see
-// widget-source.generated.js). To deploy a new widget.js version:
-//   cd cloudflare-worker && npm run deploy
-// (which runs `npm run build` first to re-embed the latest source).
+//   /widget.js                 — static, embedded into the bundle at build time
+//   /health                    — diagnostics: returns hash + build time
+//   /api/widgets               — proxied from Vercel, cached at edge for 5 min
+//   /api/products/inventory    — proxied from Vercel, cached at edge for 5 min
+//
+// Why proxy with cache instead of pointing the widget at Vercel directly:
+// the storefront does ~134K pageviews/day for one merchant. With the
+// proxy + cf.cacheTtl=300 (5 min), Vercel sees ~1 request per shop per 5
+// minutes (~12/hour = 288/day) instead of one per pageview. That's a
+// >99% reduction in Vercel edge requests for these dynamic endpoints.
 
 import { WIDGET_SOURCE, WIDGET_HASH, WIDGET_BUILT_AT } from "./widget-source.generated.js";
 
+// Where the actual Remix app + Postgres + Shopify Admin API integration lives.
+// The worker only proxies; all data still comes from here, just cached.
+const ORIGIN = "https://badge-hq.vercel.app";
+
+// Edge cache TTL for proxied API responses. Matches the Cache-Control we
+// set on the Vercel side so widget.js's sessionStorage hot path and our
+// edge cache stay in sync.
+const API_CACHE_TTL = 300; // seconds
+
 const HEADERS_JS = {
   "Content-Type": "application/javascript; charset=utf-8",
-  // Browser caches for 1 hour, Cloudflare edge caches for 1 day.
-  // Storefronts get widget updates within an hour of a deploy.
   "Cache-Control": "public, max-age=3600, s-maxage=86400",
   "Access-Control-Allow-Origin": "*",
   "Cross-Origin-Resource-Policy": "cross-origin",
@@ -22,28 +33,60 @@ const HEADERS_JS = {
   "X-Widget-Built-At": WIDGET_BUILT_AT,
 };
 
-const HEADERS_HEALTH = {
-  "Content-Type": "application/json; charset=utf-8",
-  "Cache-Control": "no-store",
+const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+  "Access-Control-Max-Age": "86400",
 };
+
+// Proxy a request to the Vercel origin with edge caching. cf.cacheTtl
+// makes Cloudflare cache the upstream response by URL — subsequent
+// requests for the same URL within TTL serve from the edge POP without
+// touching Vercel at all.
+async function proxyWithCache(request, originPath) {
+  const url = new URL(request.url);
+  const target = `${ORIGIN}${originPath}?${url.searchParams.toString()}`;
+
+  const upstream = await fetch(target, {
+    method: "GET",
+    headers: {
+      Accept: "application/json",
+      "X-Forwarded-For-Worker": "badgehq-widget",
+    },
+    cf: {
+      cacheTtl: API_CACHE_TTL,
+      cacheEverything: true,
+      // Cache 200 responses; let errors fall through without poisoning the cache
+      cacheTtlByStatus: { "200-299": API_CACHE_TTL, "400-499": 5, "500-599": 0 },
+    },
+  });
+
+  // Build a clean response with our own headers — strip Vercel-specific
+  // headers, lock down Cache-Control, expose CORS for the storefront.
+  const respHeaders = new Headers();
+  respHeaders.set("Content-Type", upstream.headers.get("Content-Type") || "application/json");
+  respHeaders.set("Cache-Control", `public, max-age=${API_CACHE_TTL}, s-maxage=${API_CACHE_TTL * 2}`);
+  respHeaders.set("Access-Control-Allow-Origin", "*");
+  respHeaders.set("X-Source", "cloudflare-worker-api-proxy");
+  respHeaders.set("X-Origin", "vercel");
+  // Pass through Cloudflare's own cache status if present
+  const cfCacheStatus = upstream.headers.get("CF-Cache-Status");
+  if (cfCacheStatus) respHeaders.set("X-Edge-Cache", cfCacheStatus);
+
+  return new Response(upstream.body, {
+    status: upstream.status,
+    headers: respHeaders,
+  });
+}
 
 export default {
   async fetch(request) {
     const url = new URL(request.url);
 
-    // OPTIONS preflight (defensive; widget.js shouldn't trigger CORS preflight
-    // when loaded via <script src> but a misconfigured theme might fetch() it)
+    // OPTIONS preflight
     if (request.method === "OPTIONS") {
-      return new Response(null, {
-        status: 204,
-        headers: {
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
-          "Access-Control-Allow-Headers": "*",
-          "Access-Control-Max-Age": "86400",
-        },
-      });
+      return new Response(null, { status: 204, headers: CORS_HEADERS });
     }
 
     // Health/version probe — useful for diagnostics
@@ -54,25 +97,49 @@ export default {
           widget_hash: WIDGET_HASH,
           widget_built_at: WIDGET_BUILT_AT,
           widget_bytes: WIDGET_SOURCE.length,
+          routes: ["/widget.js", "/health", "/api/widgets", "/api/products/inventory"],
+          origin: ORIGIN,
+          api_cache_ttl_seconds: API_CACHE_TTL,
         }),
-        { status: 200, headers: HEADERS_HEALTH }
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json; charset=utf-8",
+            "Cache-Control": "no-store",
+            "Access-Control-Allow-Origin": "*",
+          },
+        }
       );
     }
 
-    // Serve widget.js — accept any path that ends in widget.js so we can use
-    // a versioned URL like /widget.js?v=abc123 if needed for cache-busting.
+    // Static widget.js — embedded into the worker bundle
+    if (
+      (request.method === "GET" || request.method === "HEAD") &&
+      (url.pathname === "/widget.js" || url.pathname.endsWith("/widget.js"))
+    ) {
+      return new Response(request.method === "HEAD" ? null : WIDGET_SOURCE, {
+        status: 200,
+        headers: HEADERS_JS,
+      });
+    }
+
+    // Proxied API endpoints — cached at the edge, falls through to Vercel
+    // on cache miss (~1 fetch per shop per 5 minutes instead of every pageview)
     if (request.method === "GET" || request.method === "HEAD") {
-      if (url.pathname === "/widget.js" || url.pathname.endsWith("/widget.js")) {
-        return new Response(request.method === "HEAD" ? null : WIDGET_SOURCE, {
-          status: 200,
-          headers: HEADERS_JS,
-        });
+      if (url.pathname === "/api/widgets") {
+        return proxyWithCache(request, "/api/widgets");
+      }
+      if (url.pathname === "/api/products/inventory") {
+        return proxyWithCache(request, "/api/products/inventory");
       }
     }
 
     return new Response("Not found", {
       status: 404,
-      headers: { "Content-Type": "text/plain; charset=utf-8" },
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Access-Control-Allow-Origin": "*",
+      },
     });
   },
 };

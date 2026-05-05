@@ -21,17 +21,17 @@
     return null;
   })();
 
-  // Hardcoded API origin — always points at the Remix app on Vercel where
-  // the dynamic endpoints live, regardless of which CDN serves widget.js.
-  // We previously auto-detected this from the <script src> URL, but once
-  // widget.js moved to Cloudflare Workers (which only serves the static
-  // file), that auto-detection started pointing API calls at the worker
-  // host where /api/widgets doesn't exist — causing every API call to
-  // 404 and no badges to render.
+  // Hardcoded API origin — points at the Cloudflare Worker which proxies
+  // /api/widgets and /api/products/inventory to Vercel with edge caching.
+  // The worker caches responses for 5 minutes via cf.cacheTtl, so Vercel
+  // only sees ~1 request per shop per 5 minutes instead of one per
+  // pageview — >99% reduction for these dynamic endpoints.
   //
-  // If you ever migrate the API to a different host, change API_ORIGIN
-  // here and redeploy both the Vercel app and the Cloudflare worker.
-  var API_ORIGIN = "https://badge-hq.vercel.app";
+  // Vercel still serves the same endpoints at https://badge-hq.vercel.app
+  // — that's where the actual Remix app + Postgres + Shopify Admin API
+  // integration runs, and what the worker proxies through to. This URL
+  // is purely the storefront-facing edge layer.
+  var API_ORIGIN = "https://badgehq-widget.badgehq.workers.dev";
 
   var API_URL = API_ORIGIN + "/api/widgets?shop=" + encodeURIComponent(SHOP);
 
