@@ -18,20 +18,26 @@ import { WIDGET_SOURCE, WIDGET_HASH, WIDGET_BUILT_AT } from "./widget-source.gen
 // The worker only proxies; all data still comes from here, just cached.
 const ORIGIN = "https://badge-hq.vercel.app";
 
-// Edge cache TTLs per route. Tuned to keep Vercel function invocations
-// under the free-tier compute cap (4 hours of Active CPU/month).
+// Edge cache TTLs per route. Tuned aggressively to keep Vercel function
+// invocations under the free-tier compute cap (4 hours of Active CPU/month).
 //
-// Inventory (~385ms CPU per call) is by far the heaviest endpoint —
-// it triggers an Admin API call to Shopify that fetches all products.
-// Cache aggressively (1 hour) since "Trending" / "low stock" badges
-// don't need real-time stock data.
+// Cloudflare's cf.cacheTtl is per-POP, not global — each edge POP fills
+// its own cache. For high-traffic merchants whose visitors come from many
+// regions, that means N times the invocation count vs theoretical.
+// Solution: cache long enough that even per-POP invocations are tiny.
 //
-// Widgets endpoint (~50ms CPU per call) is lightweight, but bumping TTL
-// still helps reduce invocation count. 15 min is fine — merchant config
-// changes propagate within 15 min of an admin save.
+// Inventory (~385ms CPU/call): 6 hours. "Trending"/"low stock" badges
+// don't need to update faster than that.
+//
+// Widgets (~50ms CPU/call): 1 hour. When merchant edits a badge in admin,
+// storefront sees changes within 1 hour. Acceptable tradeoff for the
+// invocation savings.
+//
+// To force-refresh after a merchant config change: redeploy the worker
+// (hashes change → cache key changes → first request rebuilds cache).
 const CACHE_TTL_BY_PATH = {
-  "/api/widgets": 900,                  // 15 minutes
-  "/api/products/inventory": 3600,      // 1 hour
+  "/api/widgets": 3600,                 // 1 hour
+  "/api/products/inventory": 21600,     // 6 hours
 };
 const DEFAULT_CACHE_TTL = 300;
 
