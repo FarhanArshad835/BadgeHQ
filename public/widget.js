@@ -2633,8 +2633,11 @@
   /* --- Surface: header icon with count --- */
   function wlMountHeaderIcon(cfg) {
     if (document.getElementById("badgehq-wl-header")) return;
+    // Dawn family: .header__icons; DigiFist Release: ul.header__utils-items;
+    // plus generic fallbacks. When the slot is a list, we add a proper <li>.
     var slot = document.querySelector(
-      ".header__icons, header-icons, header .header__icons, header [class*='header__icons'], header [class*='header-icons']"
+      ".header__icons, .header__utils-items, header-icons, header .header__icons, " +
+      "header [class*='header__icons'], header [class*='header-icons'], header [class*='utils-items']"
     );
     var a = document.createElement("a");
     a.id = "badgehq-wl-header";
@@ -2652,7 +2655,13 @@
         "position:relative;display:inline-flex;align-items:center;justify-content:center;" +
         "width:44px;height:44px;color:inherit;";
       a.innerHTML = wlHeartSvg(false, "currentColor", 20) + bubble;
-      slot.insertBefore(a, slot.firstChild);
+      var node = a;
+      if (slot.tagName === "UL" || slot.tagName === "OL") {
+        node = document.createElement("li");
+        node.style.cssText = "display:inline-flex;align-items:center;list-style:none;";
+        node.appendChild(a);
+      }
+      slot.insertBefore(node, slot.firstChild);
     } else {
       // Fallback: floating button so the wishlist page is always reachable.
       a.style.cssText =
