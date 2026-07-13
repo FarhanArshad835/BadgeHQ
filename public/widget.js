@@ -2501,7 +2501,7 @@
     var bubble = document.querySelector("[data-badgehq-wl-count]");
     if (bubble) {
       bubble.textContent = String(count);
-      bubble.style.display = count > 0 ? "" : "none";
+      bubble.style.display = count > 0 ? (bubble.getAttribute("data-wl-display") || "") : "none";
     }
     var hearts = document.querySelectorAll("[data-badgehq-wl-handle]");
     for (var i = 0; i < hearts.length; i++) {
@@ -2690,6 +2690,34 @@
       }
       if (cartItem && cartItem.parentNode === slot) slot.insertBefore(node, cartItem);
       else slot.appendChild(node);
+
+      // Clone the cart badge's exact geometry (size, font, radius, and its
+      // offset relative to the cart link) so both badges look identical.
+      if (themeBadge && cartEl) {
+        try {
+          var ourBubble = a.querySelector("[data-badgehq-wl-count]");
+          var tbs = window.getComputedStyle(themeBadge);
+          var badgeRect = themeBadge.getBoundingClientRect();
+          var cartRect = cartEl.getBoundingClientRect();
+          if (ourBubble && badgeRect.width > 0 && cartRect.width > 0) {
+            ourBubble.style.minWidth = badgeRect.width + "px";
+            ourBubble.style.height = badgeRect.height + "px";
+            ourBubble.style.lineHeight = tbs.lineHeight;
+            ourBubble.style.fontSize = tbs.fontSize;
+            ourBubble.style.fontWeight = tbs.fontWeight;
+            ourBubble.style.fontFamily = tbs.fontFamily;
+            ourBubble.style.borderRadius = tbs.borderRadius;
+            ourBubble.style.padding = tbs.padding;
+            // Same corner offset the theme uses for the cart badge.
+            ourBubble.style.top = Math.round(badgeRect.top - cartRect.top) + "px";
+            ourBubble.style.right = Math.round(cartRect.right - badgeRect.right) + "px";
+            ourBubble.setAttribute("data-wl-display", "flex");
+            ourBubble.style.display = count > 0 ? "flex" : "none";
+            ourBubble.style.alignItems = "center";
+            ourBubble.style.justifyContent = "center";
+          }
+        } catch (e) {}
+      }
     } else {
       // Fallback: floating button so the wishlist page is always reachable.
       a.style.cssText =
