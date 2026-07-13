@@ -103,9 +103,9 @@ async function proxyWithCache(request, originPath, env) {
   const respHeaders = new Headers();
   respHeaders.set("Content-Type", upstream.headers.get("Content-Type") || "application/json");
   // /api/widgets gets a short browser TTL so repeat visitors pick up
-  // publishes within minutes; the expensive edge->origin caching above is
+  // publishes within ~a minute; the expensive edge->origin caching above is
   // unaffected. Other routes keep browser TTL = edge TTL.
-  const browserTtl = originPath === "/api/widgets" ? 300 : ttl;
+  const browserTtl = originPath === "/api/widgets" ? 60 : ttl;
   respHeaders.set("Cache-Control", `public, max-age=${browserTtl}, s-maxage=${ttl * 2}`);
   respHeaders.set("Access-Control-Allow-Origin", "*");
   respHeaders.set("X-Source", "cloudflare-worker-api-proxy");

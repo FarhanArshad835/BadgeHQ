@@ -9,9 +9,21 @@
  */
 const WORKER_ORIGIN = "https://badgehq-widget.badgehq.workers.dev";
 
+let warnedMissingSecret = false;
+
 export async function bumpConfigVersion(shop: string): Promise<void> {
   const secret = process.env.BUMP_SECRET;
-  if (!secret) return;
+  if (!secret) {
+    if (!warnedMissingSecret) {
+      warnedMissingSecret = true;
+      // Surface the config gap once — without BUMP_SECRET, admin saves can't
+      // bust the edge cache and storefronts stay stale for the full TTL.
+      console.warn(
+        "[config-version] BUMP_SECRET is not set — admin saves will NOT refresh the storefront cache instantly (falling back to the edge TTL).",
+      );
+    }
+    return;
+  }
   try {
     await fetch(`${WORKER_ORIGIN}/internal/bump?shop=${encodeURIComponent(shop)}`, {
       method: "POST",

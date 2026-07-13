@@ -134,7 +134,7 @@
           if (missing("badgehq-countdown-" + timer.id)) renderCountdownTimer(timer, page, gs);
         });
       if (w.deliveryEstimate && w.deliveryEstimate.enabled && missing("badgehq-delivery-estimate"))
-        mountDeliveryEstimate(w.deliveryEstimate.placement || "below-atc");
+        mountDeliveryEstimate(w.deliveryEstimate.placement || "below-atc", 0);
     }
 
     var debounce = null;
@@ -146,6 +146,18 @@
       debounce = setTimeout(reinject, 400);
     });
     observer.observe(document.body, { childList: true, subtree: true });
+
+    // The theme fires this on section swaps (design mode + some runtime paths).
+    document.addEventListener("shopify:section:load", reinject);
+
+    // Belt-and-suspenders: the variant swap a `?variant=` URL triggers can land
+    // just after our first mount and before the observer is armed. Poll a few
+    // times over the first ~5s so the widgets survive that initial reflow.
+    var checks = 0;
+    var early = setInterval(function () {
+      reinject();
+      if (++checks >= 10) clearInterval(early);
+    }, 500);
   }
 
   function detectPage() {
@@ -2033,38 +2045,58 @@
 
   /* ===================== DELIVERY ESTIMATE ===================== */
   function renderDeliveryEstimate(placement) {
-    // Dawn mounts <product-form> as a web component after initial parse —
-    // delay DOM lookup so the ATC form is available (same as sticky cart).
-    setTimeout(function () { mountDeliveryEstimate(placement); }, 800);
-    setTimeout(function () {
-      if (!document.getElementById("badgehq-delivery-estimate")) mountDeliveryEstimate(placement);
-    }, 2000);
+    // Dawn/Release mount <product-form> as a web component after initial
+    // parse, so the anchor isn't there on first tick. mountDeliveryEstimate
+    // retries on its own until the anchor appears.
+    mountDeliveryEstimate(placement, 0);
   }
 
-  function mountDeliveryEstimate(placement) {
+  // Resolve the delivery widget's insertion point for the chosen placement.
+  // Returns { target, before } or null when no anchor is available yet.
+  // The ATC form is the most stable anchor on Section-Rendering themes; the
+  // product description lives inside <product-info> and can be an accordion,
+  // so "below-description" falls back to below-ATC when it isn't found.
+  function resolveDeliveryAnchor(placement) {
+    if (placement === "above-atc") {
+      var above = document.querySelector(".product-form__buttons, form[action*='/cart/add'], .product-form");
+      return above ? { target: above, before: true } : null;
+    }
+    if (placement === "below-description") {
+      var desc = document.querySelector(
+        ".product__description, .product-single__description, [class*='product-description'], .product__meta"
+      );
+      if (desc) {
+        // Never inject inside a collapsed accordion body — climb to the block.
+        var accBody = desc.closest(".accordion__body, .accordion__body-inner");
+        if (accBody && accBody.parentNode) desc = accBody.parentNode;
+        return { target: desc, before: false };
+      }
+      // fall through to below-atc when there's no description anchor
+    }
+    // below-atc (default) + fallback for the cases above.
+    var btns = document.querySelector(".product-form__buttons");
+    if (btns) return { target: btns, before: false };
+    var form = document.querySelector("form[action*='/cart/add'], .product-form");
+    return form ? { target: form, before: false } : null;
+  }
+
+  function mountDeliveryEstimate(placement, attempt) {
+    attempt = attempt || 0;
     // Skip if already injected, or if the merchant placed the optional
     // "Delivery Estimate" theme app block for manual positioning.
     if (document.querySelector("[data-delivery-estimate]")) return;
 
-    // Resolve the insertion anchor from the merchant's placement setting
-    // (same anchors the trust badge positions use).
-    var target = null;
-    var insertBeforeTarget = false;
-    if (placement === "above-atc") {
-      // Before the ATC form so the widget sits above the buy buttons.
-      target = document.querySelector('form[action*="/cart/add"], .product-form');
-      insertBeforeTarget = true;
-    } else if (placement === "below-description") {
-      target = document.querySelector(
-        '.product__description, .product-single__description, [class*="product-description"], .product__meta'
-      );
+    var anchor = resolveDeliveryAnchor(placement);
+    if (!anchor || !anchor.target.parentNode) {
+      // Anchor not in the DOM yet (late mount / mid variant-swap): retry a
+      // bounded number of times before giving up.
+      if (attempt < 12) {
+        setTimeout(function () { mountDeliveryEstimate(placement, attempt + 1); }, 400);
+      }
+      return;
     }
-    if (!target) {
-      // "below-atc" and fallback for themes missing the above anchors.
-      target = document.querySelector('form[action*="/cart/add"], .product-form');
-      insertBeforeTarget = placement === "above-atc";
-    }
-    if (!target) return;
+    var target = anchor.target;
+    var insertBeforeTarget = anchor.before;
 
     if (!document.getElementById("badgehq-de-style")) {
       var style = document.createElement("style");
