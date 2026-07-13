@@ -65,6 +65,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     freeShippingBarCount,
     stickyCartCount,
     countdownTimerCount,
+    deliveryEstimateCount,
     themeExtensionEnabled,
     currentPlan,
   ] = await Promise.all([
@@ -74,6 +75,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     prisma.freeShippingBar.count({ where: { shop } }),
     prisma.stickyCart.count({ where: { shop } }),
     prisma.countdownTimer.count({ where: { shop } }),
+    prisma.deliverySettings.count({ where: { shop, isEnabled: true } }),
     checkThemeExtensionEnabled(shop, accessToken),
     getShopPlan(shop),
   ]);
@@ -90,6 +92,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       freeShippingBars: freeShippingBarCount,
       stickyCarts: stickyCartCount,
       countdownTimers: countdownTimerCount,
+      deliveryEstimates: deliveryEstimateCount,
     },
     isEnabled: themeExtensionEnabled,
     themeEditorUrl,
@@ -134,6 +137,12 @@ const features = [
     description: "Create urgency with countdown timer widgets",
     route: "/app/countdown-timer",
     key: "countdownTimers" as const,
+  },
+  {
+    title: "Delivery Estimate",
+    description: "Show delivery date by PIN code on product pages (Delhivery)",
+    route: "/app/delivery-estimate",
+    key: "deliveryEstimates" as const,
   },
 ];
 

@@ -58,6 +58,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     freeShippingBars,
     stickyCarts,
     countdownTimers,
+    deliverySettings,
   ] = await Promise.all([
     prisma.trustBadge.findMany({ where: { shop, isEnabled: true } }),
     prisma.productBadge.findMany({ where: { shop, isActive: true }, orderBy: [{ priority: "desc" }, { createdAt: "desc" }] }),
@@ -65,6 +66,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     prisma.freeShippingBar.findMany({ where: { shop, isActive: true } }),
     prisma.stickyCart.findMany({ where: { shop, isActive: true } }),
     prisma.countdownTimer.findMany({ where: { shop, isActive: true } }),
+    prisma.deliverySettings.findUnique({ where: { shop } }),
   ]);
 
   const globalSettings = appSettings
@@ -141,6 +143,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       colors: JSON.parse(b.colors),
       pages: JSON.parse(b.pages),
     })),
+    // Only the boolean — the Delhivery token/origin pin never leave the server.
+    deliveryEstimate: {
+      enabled: Boolean(
+        deliverySettings?.isEnabled &&
+        deliverySettings?.apiToken &&
+        /^\d{6}$/.test(deliverySettings?.originPin ?? ""),
+      ),
+    },
   };
 
   return json(

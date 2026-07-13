@@ -203,9 +203,11 @@ export default function DeliveryEstimate() {
             {actionData?.error && <Banner tone="critical">{actionData.error}</Banner>}
 
             <Banner tone="info">
-              After enabling, open the theme editor and add the "Delivery Estimate" app
-              block to your product page, just under the buy buttons. Storefront changes
-              can take up to 6 hours to appear because results are cached at the edge.
+              Once enabled, the widget appears automatically on your product pages under
+              the Add to Cart button — no theme changes needed. Allow up to 1 hour for it
+              to appear or disappear, and up to 6 hours for delivery-date updates (results
+              are cached at the edge). Tip: to control the exact placement, you can
+              instead add the "Delivery Estimate" app block in the theme editor.
             </Banner>
 
             <Card>

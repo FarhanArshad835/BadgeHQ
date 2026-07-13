@@ -41,6 +41,10 @@
   // bulk prefetch.
   var INVENTORY_API_URL = API_ORIGIN + "/api/products/inventory?shop=" + encodeURIComponent(SHOP);
 
+  // Delivery-estimate endpoint (Delhivery Expected TAT). The merchant's API
+  // token lives server-side only; this returns {serviceable, etaDate, etaText}.
+  var DELIVERY_API_URL = API_ORIGIN + "/api/delivery-edd?shop=" + encodeURIComponent(SHOP);
+
   function onReady(fn) {
     if (document.readyState === "loading") {
       document.addEventListener("DOMContentLoaded", fn);
@@ -93,6 +97,8 @@
       w.countdownTimers.forEach(function (timer) {
         renderCountdownTimer(timer, page, gs);
       });
+    if (w.deliveryEstimate && w.deliveryEstimate.enabled && page === "product")
+      renderDeliveryEstimate();
   }
 
   function detectPage() {
@@ -1957,5 +1963,148 @@
     );
     if (target)
       target.parentNode.insertBefore(el, target.nextSibling);
+  }
+
+  /* ===================== DELIVERY ESTIMATE ===================== */
+  function renderDeliveryEstimate() {
+    // Dawn mounts <product-form> as a web component after initial parse —
+    // delay DOM lookup so the ATC form is available (same as sticky cart).
+    setTimeout(mountDeliveryEstimate, 800);
+    setTimeout(function () {
+      if (!document.getElementById("badgehq-delivery-estimate")) mountDeliveryEstimate();
+    }, 2000);
+  }
+
+  function mountDeliveryEstimate() {
+    // Skip if already injected, or if the merchant placed the optional
+    // "Delivery Estimate" theme app block for manual positioning.
+    if (document.querySelector("[data-delivery-estimate]")) return;
+
+    var target = document.querySelector('form[action*="/cart/add"], .product-form');
+    if (!target) return;
+
+    if (!document.getElementById("badgehq-de-style")) {
+      var style = document.createElement("style");
+      style.id = "badgehq-de-style";
+      style.textContent =
+        ".badgehq-de{margin:16px 0;padding:14px 16px;border:1px solid rgba(var(--color-foreground,18 18 18),0.12);border-radius:var(--buttons-radius,6px);font-size:1.4rem;}" +
+        ".badgehq-de__label{display:flex;align-items:center;gap:6px;font-weight:600;margin-bottom:10px;}" +
+        ".badgehq-de__label svg{flex:none;opacity:0.75;}" +
+        ".badgehq-de__form{display:flex;gap:8px;align-items:stretch;}" +
+        ".badgehq-de__input{flex:1 1 auto;min-width:0;padding:10px 12px;font:inherit;font-size:1.4rem;color:rgb(var(--color-foreground,18 18 18));background:rgb(var(--color-background,255 255 255));border:1px solid rgba(var(--color-foreground,18 18 18),0.2);border-radius:var(--inputs-radius,4px);letter-spacing:0.05em;}" +
+        ".badgehq-de__input:focus{outline:none;border-color:rgb(var(--color-foreground,18 18 18));}" +
+        ".badgehq-de__button{flex:none;padding:10px 18px;font:inherit;font-weight:600;cursor:pointer;color:rgb(var(--color-button-text,255 255 255));background:rgb(var(--color-button,18 18 18));border:1px solid transparent;border-radius:var(--buttons-radius,4px);}" +
+        ".badgehq-de__button:disabled{opacity:0.6;cursor:default;}" +
+        ".badgehq-de__result{margin-top:10px;line-height:1.4;}" +
+        '.badgehq-de__result[data-de-state="idle"]{margin-top:0;}' +
+        '.badgehq-de__result[data-de-state="ok"]{color:#157a3d;}' +
+        '.badgehq-de__result[data-de-state="unserviceable"],.badgehq-de__result[data-de-state="error"]{color:rgb(var(--color-foreground,18 18 18));opacity:0.85;}' +
+        ".badgehq-de__result svg{vertical-align:-2px;margin-right:4px;}" +
+        ".badgehq-de__result strong{font-weight:700;}" +
+        ".badgehq-de-spinner{display:inline-block;width:13px;height:13px;margin-right:4px;vertical-align:-1px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:badgehq-de-spin 0.6s linear infinite;}" +
+        "@keyframes badgehq-de-spin{to{transform:rotate(360deg);}}" +
+        "@media (prefers-reduced-motion:reduce){.badgehq-de-spinner{animation-duration:2s;}}";
+      document.head.appendChild(style);
+    }
+
+    var root = document.createElement("div");
+    root.id = "badgehq-delivery-estimate";
+    root.className = "badgehq-de";
+    root.setAttribute("data-delivery-estimate", "");
+    root.innerHTML =
+      '<div class="badgehq-de__label">' +
+      '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">' +
+      '<path fill="currentColor" d="M12 2a7 7 0 0 0-7 7c0 5 7 13 7 13s7-8 7-13a7 7 0 0 0-7-7Zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5Z"/></svg>' +
+      "<span>Estimate delivery date</span></div>" +
+      '<form class="badgehq-de__form" novalidate>' +
+      '<input class="badgehq-de__input" type="text" inputmode="numeric" pattern="\\d{6}" maxlength="6" autocomplete="postal-code" placeholder="Enter 6-digit PIN code" aria-label="Enter your 6-digit PIN code">' +
+      '<button class="badgehq-de__button" type="submit">Check</button></form>' +
+      '<div class="badgehq-de__result" data-de-state="idle" aria-live="polite"></div>';
+
+    target.parentNode.insertBefore(root, target.nextSibling);
+
+    var form = root.querySelector("form");
+    var input = root.querySelector("input");
+    var button = root.querySelector("button");
+    var result = root.querySelector(".badgehq-de__result");
+    var STORAGE_KEY = "badgehq_delivery_pin";
+
+    function setState(state, html) {
+      result.setAttribute("data-de-state", state);
+      result.innerHTML = html;
+    }
+
+    function check(pin) {
+      setState("loading", '<span class="badgehq-de-spinner" aria-hidden="true"></span> Checking delivery time…');
+      button.disabled = true;
+
+      var controller = new AbortController();
+      var timer = setTimeout(function () { controller.abort(); }, 8000);
+
+      fetch(DELIVERY_API_URL + "&pincode=" + encodeURIComponent(pin), {
+        headers: { Accept: "application/json" },
+        signal: controller.signal,
+      })
+        .then(function (r) {
+          clearTimeout(timer);
+          if (r.status === 404) throw new Error("setup-pending");
+          if (!r.ok) throw new Error("bad-status");
+          return r.json();
+        })
+        .then(function (data) {
+          if (data && data.serviceable && (data.etaText || data.etaDate)) {
+            var when = data.etaText || data.etaDate;
+            setState("ok",
+              '<svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">' +
+              '<path fill="currentColor" d="M8 15.2 3.8 11l1.4-1.4L8 12.4l6.8-6.8L16.2 7 8 15.2z"/></svg>' +
+              "Delivery by <strong>" + escapeDeHtml(when) + "</strong>");
+          } else {
+            setState("unserviceable",
+              "Sorry, we don’t deliver to <strong>" + escapeDeHtml(pin) + "</strong> yet.");
+          }
+        })
+        .catch(function (err) {
+          clearTimeout(timer);
+          if (err && err.message === "setup-pending") {
+            // Config was disabled after the widgets payload was cached — hide.
+            setState("idle", "");
+            root.style.display = "none";
+          } else {
+            setState("error", "Couldn’t check right now. Please try again.");
+          }
+        })
+        .finally(function () { button.disabled = false; });
+    }
+
+    // Restore the shopper's last-used PIN so they don't retype it per product.
+    try {
+      var saved = localStorage.getItem(STORAGE_KEY);
+      if (saved && /^\d{6}$/.test(saved)) {
+        input.value = saved;
+        check(saved);
+      }
+    } catch (e) { /* private mode: ignore */ }
+
+    input.addEventListener("input", function () {
+      input.value = input.value.replace(/\D/g, "").slice(0, 6);
+    });
+
+    form.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var pin = input.value.trim();
+      if (!/^\d{6}$/.test(pin)) {
+        setState("error", "Enter a valid 6-digit PIN code.");
+        input.focus();
+        return;
+      }
+      try { localStorage.setItem(STORAGE_KEY, pin); } catch (e2) {}
+      check(pin);
+    });
+  }
+
+  function escapeDeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
   }
 })();
