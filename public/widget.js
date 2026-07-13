@@ -2672,13 +2672,33 @@
     a.setAttribute("aria-label", "Wishlist");
     var count = wlGet().length;
 
-    // Match the theme's own cart count badge (color/background) so the
-    // wishlist count looks native; fall back to the configured heart color.
+    // The cart entry in the header — used both for positioning (we sit just
+    // before it) and as the scope for finding the theme's cart count badge.
+    var cartEl = slot
+      ? slot.querySelector(
+          "a[href*='/cart'], [data-cart-link], #cart-counter, a[onclick*='Cart'], [class*='utils-link--cart']"
+        )
+      : null;
+
+    // Match the theme's own cart count badge so the wishlist count looks
+    // native. Look INSIDE the cart link first; only then try the known theme
+    // classes — and never match other apps' wishlist elements.
+    var themeBadge = null;
+    if (cartEl) {
+      var inCart = cartEl.querySelectorAll("[class*='count'], [class*='bubble'] span, [class*='badge']");
+      for (var tb1 = 0; tb1 < inCart.length; tb1++) {
+        if (!/wishlist|badgehq/i.test(String(inCart[tb1].className))) { themeBadge = inCart[tb1]; break; }
+      }
+    }
+    if (!themeBadge) {
+      var cands = document.querySelectorAll(".cart-count-badge, .cart-count-bubble, [class*='cart-count']");
+      for (var tb2 = 0; tb2 < cands.length; tb2++) {
+        if (!/wishlist|badgehq/i.test(String(cands[tb2].className))) { themeBadge = cands[tb2]; break; }
+      }
+    }
+
     var badgeBg = cfg.iconColor;
     var badgeFg = "#fff";
-    var themeBadge = document.querySelector(
-      ".cart-count-badge, .cart-count-bubble, [class*='cart-count'], [class*='cart-counter'] span"
-    );
     if (themeBadge) {
       try {
         var tb = window.getComputedStyle(themeBadge);
@@ -2707,9 +2727,6 @@
       }
       // Sit between the account/profile icon and the cart: insert directly
       // before the cart entry when we can find it, else append at the end.
-      var cartEl = slot.querySelector(
-        "a[href*='/cart'], [data-cart-link], #cart-counter, a[onclick*='Cart'], [class*='utils-link--cart']"
-      );
       var cartItem = null;
       if (cartEl) {
         cartItem = cartEl;
@@ -2758,6 +2775,11 @@
           var offRight = Math.round(cartRect.right - badgeRect.right);
           if (restoreStyle !== null) themeBadge.setAttribute("style", restoreStyle);
           if (restoreText !== null) themeBadge.textContent = restoreText;
+
+          // Sanity: a real cart badge hugs its icon. Degenerate measurements
+          // (hidden/foreign elements at 0,0) would fling our bubble across
+          // the header — keep the defaults in that case.
+          if (Math.abs(offTop) > 30 || Math.abs(offRight) > 30) throw new Error("implausible-offset");
 
           // Translate that glyph-relative offset onto OUR heart glyph.
           var ourIcon = a.querySelector("svg");
