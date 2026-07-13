@@ -2721,11 +2721,25 @@
             borderRadius: live.borderRadius,
             padding: live.padding,
           };
-          var cartRect = cartEl.getBoundingClientRect();
+          // Measure the badge offset against the cart's icon GLYPH (svg/img),
+          // not the link box — link paddings differ between the cart and our
+          // 44px anchor, and it's the glyph the badge visually attaches to.
+          var cartIcon = cartEl.querySelector("svg, img, i, span:not([class*='count'])") || cartEl;
+          var cartRect = cartIcon.getBoundingClientRect();
+          if (cartRect.width === 0) cartRect = cartEl.getBoundingClientRect();
           var offTop = Math.round(badgeRect.top - cartRect.top);
           var offRight = Math.round(cartRect.right - badgeRect.right);
           if (restoreStyle !== null) themeBadge.setAttribute("style", restoreStyle);
           if (restoreText !== null) themeBadge.textContent = restoreText;
+
+          // Translate that glyph-relative offset onto OUR heart glyph.
+          var ourIcon = a.querySelector("svg");
+          var ourIconRect = ourIcon ? ourIcon.getBoundingClientRect() : null;
+          var ourARect = a.getBoundingClientRect();
+          if (ourIconRect && ourIconRect.width > 0 && ourARect.width > 0) {
+            offTop = Math.round(ourIconRect.top - ourARect.top) + offTop;
+            offRight = Math.round(ourARect.right - ourIconRect.right) + offRight;
+          }
 
           if (ourBubble && badgeRect.width > 0 && cartRect.width > 0) {
             ourBubble.style.minWidth = badgeRect.width + "px";
