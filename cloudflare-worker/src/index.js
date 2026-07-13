@@ -72,53 +72,71 @@ async function proxyWithCache(request, originPath, env) {
   const url = new URL(request.url);
   const ttl = CACHE_TTL_BY_PATH[originPath] || DEFAULT_CACHE_TTL;
 
+  // Per-shop config version (bumped via /internal/bump on every admin save).
   let configVersion = "0";
   const shop = url.searchParams.get("shop");
   if (shop && env && env.CONFIG_VERSIONS) {
     try {
-      configVersion = (await env.CONFIG_VERSIONS.get("v:" + shop, { cacheTtl: 60 })) || "0";
+      configVersion = (await env.CONFIG_VERSIONS.get("v:" + shop, { cacheTtl: 30 })) || "0";
     } catch (e) {
-      // KV hiccup — fall back to the unversioned key (plain TTL behavior).
+      // KV hiccup — fall back to version 0 (still correct, just not busted).
     }
   }
 
-  const target = `${ORIGIN}${originPath}?${url.searchParams.toString()}&_cv=${configVersion}`;
+  // We manage the edge cache explicitly via the Cache API so the version is
+  // part of the CACHE KEY. A bump changes the key -> guaranteed miss -> fresh
+  // origin fetch; unchanged configs keep serving from the edge for the full
+  // TTL. (Relying on cf.cacheTtl instead keyed only on the incoming URL, which
+  // has no version, so a bump could never invalidate it.)
+  const cache = caches.default;
+  const cacheKey = new Request(
+    `https://cache.badgehq.internal${originPath}?${url.searchParams.toString()}&_cv=${configVersion}`,
+    { method: "GET" },
+  );
 
+  const cached = await cache.match(cacheKey);
+  if (cached) {
+    const hit = new Response(cached.body, cached);
+    hit.headers.set("X-Edge-Cache", "HIT");
+    return hit;
+  }
+
+  const target = `${ORIGIN}${originPath}?${url.searchParams.toString()}&_cv=${configVersion}`;
   const upstream = await fetch(target, {
     method: "GET",
     headers: {
       Accept: "application/json",
       "X-Forwarded-For-Worker": "badgehq-widget",
     },
-    cf: {
-      cacheTtl: ttl,
-      cacheEverything: true,
-      // Cache 200 responses; let errors fall through without poisoning the cache
-      cacheTtlByStatus: { "200-299": ttl, "400-499": 5, "500-599": 0 },
-    },
+    // Don't let Cloudflare's implicit cache double-cache this; we own caching.
+    cf: { cacheTtl: 0, cacheEverything: false },
   });
 
   // Build a clean response with our own headers — strip Vercel-specific
   // headers, lock down Cache-Control, expose CORS for the storefront.
+  const body = await upstream.arrayBuffer();
+  const browserTtl = originPath === "/api/widgets" ? 60 : ttl;
   const respHeaders = new Headers();
   respHeaders.set("Content-Type", upstream.headers.get("Content-Type") || "application/json");
-  // /api/widgets gets a short browser TTL so repeat visitors pick up
-  // publishes within ~a minute; the expensive edge->origin caching above is
-  // unaffected. Other routes keep browser TTL = edge TTL.
-  const browserTtl = originPath === "/api/widgets" ? 60 : ttl;
-  respHeaders.set("Cache-Control", `public, max-age=${browserTtl}, s-maxage=${ttl * 2}`);
+  respHeaders.set("Cache-Control", `public, max-age=${browserTtl}`);
   respHeaders.set("Access-Control-Allow-Origin", "*");
   respHeaders.set("X-Source", "cloudflare-worker-api-proxy");
   respHeaders.set("X-Origin", "vercel");
   respHeaders.set("X-Cache-TTL", String(ttl));
-  // Pass through Cloudflare's own cache status if present
-  const cfCacheStatus = upstream.headers.get("CF-Cache-Status");
-  if (cfCacheStatus) respHeaders.set("X-Edge-Cache", cfCacheStatus);
+  respHeaders.set("X-Config-Version", configVersion);
+  respHeaders.set("X-Edge-Cache", "MISS");
 
-  return new Response(upstream.body, {
-    status: upstream.status,
-    headers: respHeaders,
-  });
+  const response = new Response(body, { status: upstream.status, headers: respHeaders });
+
+  // Only cache successes at the edge, for `ttl` seconds under the versioned
+  // key. The stored copy carries its own Cache-Control so cache.put honors ttl.
+  if (upstream.status >= 200 && upstream.status < 300) {
+    const toStore = response.clone();
+    toStore.headers.set("Cache-Control", `public, max-age=${ttl}`);
+    await cache.put(cacheKey, toStore);
+  }
+
+  return response;
 }
 
 export default {
