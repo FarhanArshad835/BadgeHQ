@@ -175,6 +175,31 @@ model OrderManageSettings {
   updatedAt        DateTime @updatedAt
 }
 
+model WishlistSettings {
+  id               String   @id @default(cuid())
+  shop             String   @unique
+  isEnabled        Boolean  @default(false)
+  showOnCards      Boolean  @default(true)
+  cardPosition     String   @default("top-right") // top-right | top-left
+  showOnProduct    Boolean  @default(true)
+  productPlacement String   @default("below-atc") // below-atc | above-atc
+  showHeader       Boolean  @default(true)
+  iconColor        String   @default("#e74c3c")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+model Wishlist {
+  id         String   @id @default(cuid())
+  shop       String
+  customerId String
+  handles    String   @default("[]") // JSON array of product handles
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([shop, customerId])
+}
+
 model ShopPlan {
   id        String   @id @default(cuid())
   shop      String   @unique

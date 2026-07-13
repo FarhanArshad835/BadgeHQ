@@ -60,6 +60,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     countdownTimers,
     deliverySettings,
     orderManageSettings,
+    wishlistSettings,
   ] = await Promise.all([
     prisma.trustBadge.findMany({ where: { shop, isEnabled: true } }),
     prisma.productBadge.findMany({ where: { shop, isActive: true }, orderBy: [{ priority: "desc" }, { createdAt: "desc" }] }),
@@ -69,6 +70,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     prisma.countdownTimer.findMany({ where: { shop, isActive: true } }),
     prisma.deliverySettings.findUnique({ where: { shop } }),
     prisma.orderManageSettings.findUnique({ where: { shop } }),
+    prisma.wishlistSettings.findUnique({ where: { shop } }),
   ]);
 
   const globalSettings = appSettings
@@ -160,6 +162,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       allowCancel: orderManageSettings?.allowCancel ?? true,
       cancelScope: orderManageSettings?.cancelScope ?? "unpaid",
       allowAddressEdit: orderManageSettings?.allowAddressEdit ?? true,
+    },
+    wishlist: {
+      enabled: Boolean(wishlistSettings?.isEnabled),
+      showOnCards: wishlistSettings?.showOnCards ?? true,
+      cardPosition: wishlistSettings?.cardPosition ?? "top-right",
+      showOnProduct: wishlistSettings?.showOnProduct ?? true,
+      productPlacement: wishlistSettings?.productPlacement ?? "below-atc",
+      showHeader: wishlistSettings?.showHeader ?? true,
+      iconColor: wishlistSettings?.iconColor ?? "#e74c3c",
     },
   };
 

@@ -67,6 +67,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     countdownTimerCount,
     deliveryEstimateCount,
     orderManagementCount,
+    wishlistCount,
     themeExtensionEnabled,
     currentPlan,
   ] = await Promise.all([
@@ -78,6 +79,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     prisma.countdownTimer.count({ where: { shop } }),
     prisma.deliverySettings.count({ where: { shop, isEnabled: true } }),
     prisma.orderManageSettings.count({ where: { shop, isEnabled: true } }),
+    prisma.wishlistSettings.count({ where: { shop, isEnabled: true } }),
     checkThemeExtensionEnabled(shop, accessToken),
     getShopPlan(shop),
   ]);
@@ -96,6 +98,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       countdownTimers: countdownTimerCount,
       deliveryEstimates: deliveryEstimateCount,
       orderManagements: orderManagementCount,
+      wishlists: wishlistCount,
     },
     isEnabled: themeExtensionEnabled,
     themeEditorUrl,
@@ -152,6 +155,12 @@ const features = [
     description: "Let customers cancel or edit the address on unfulfilled orders",
     route: "/app/order-management",
     key: "orderManagements" as const,
+  },
+  {
+    title: "Wishlist",
+    description: "Let shoppers save products and sync their wishlist across devices",
+    route: "/app/wishlist",
+    key: "wishlists" as const,
   },
 ];
 

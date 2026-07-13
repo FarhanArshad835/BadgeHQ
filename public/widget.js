@@ -101,8 +101,25 @@
       renderDeliveryEstimate(w.deliveryEstimate.placement || "below-atc");
     if (w.orderManagement && w.orderManagement.enabled && page === "order")
       renderOrderActions();
+    if (w.wishlist && w.wishlist.enabled) initWishlist(w.wishlist, page);
 
     if (page === "product") setupProductRerenderWatch(data, page);
+    else setupCardRerenderWatch(data, page);
+  }
+
+  // Lightweight observer for non-product pages: re-runs the wishlist card-
+  // heart pass after infinite scroll / section swaps re-render product cards.
+  function setupCardRerenderWatch(data, page) {
+    if (!window.MutationObserver) return;
+    var w = data.widgets || {};
+    if (!(w.wishlist && w.wishlist.enabled && w.wishlist.showOnCards)) return;
+    var debounce = null;
+    var observer = new MutationObserver(function () {
+      clearTimeout(debounce);
+      debounce = setTimeout(function () { wlDecorateCards(w.wishlist); }, 400);
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    document.addEventListener("shopify:section:load", function () { wlDecorateCards(w.wishlist); });
   }
 
   // Some themes (Dawn descendants like "Release") re-render the whole
@@ -135,6 +152,11 @@
         });
       if (w.deliveryEstimate && w.deliveryEstimate.enabled && missing("badgehq-delivery-estimate"))
         mountDeliveryEstimate(w.deliveryEstimate.placement || "below-atc", 0);
+      if (w.wishlist && w.wishlist.enabled) {
+        if (w.wishlist.showOnProduct && missing("badgehq-wl-product"))
+          wlMountProductButton(w.wishlist, 0);
+        if (w.wishlist.showOnCards) wlDecorateCards(w.wishlist);
+      }
     }
 
     var debounce = null;
@@ -2399,5 +2421,348 @@
         post(p, form.querySelector('button[type="submit"]'), "Address updated. Refreshing…");
       });
     }
+  }
+
+  /* ===================== WISHLIST ===================== */
+  // localStorage is the source of truth; logged-in customers additionally
+  // sync the list (union-merged) through the app proxy at
+  // /apps/badgehq/wishlist-sync. The wishlist page is served by the proxy at
+  // /apps/badgehq/wishlist and rendered client-side by wlRenderPage.
+  var WL_KEY = "badgehq_wishlist";
+  var WL_SYNC = "/apps/badgehq/wishlist-sync";
+  var WL_PAGE = "/apps/badgehq/wishlist";
+  var wlSyncTimer = null;
+  var wlCfg = null;
+
+  function wlGet() {
+    try {
+      var raw = JSON.parse(localStorage.getItem(WL_KEY) || "[]");
+      return Array.isArray(raw) ? raw : [];
+    } catch (e) { return []; }
+  }
+  function wlSave(handles) {
+    try { localStorage.setItem(WL_KEY, JSON.stringify(handles)); } catch (e) {}
+    wlOnChange();
+  }
+  function wlHas(handle) { return wlGet().indexOf(handle) !== -1; }
+  function wlToggle(handle) {
+    if (!handle) return;
+    var list = wlGet();
+    var i = list.indexOf(handle);
+    if (i === -1) list.push(handle); else list.splice(i, 1);
+    wlSave(list);
+    wlScheduleSync();
+  }
+
+  function wlCustomerId() {
+    try {
+      if (window.__st && window.__st.cid) return String(window.__st.cid);
+      var meta = window.ShopifyAnalytics && window.ShopifyAnalytics.meta;
+      if (meta && meta.page && meta.page.customerId) return String(meta.page.customerId);
+    } catch (e) {}
+    return null;
+  }
+
+  function wlScheduleSync() {
+    if (!wlCustomerId()) return;
+    clearTimeout(wlSyncTimer);
+    wlSyncTimer = setTimeout(function () {
+      var p = new URLSearchParams();
+      p.set("handles", JSON.stringify(wlGet()));
+      fetch(WL_SYNC, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+        credentials: "same-origin",
+        body: p.toString(),
+      }).catch(function () { /* local copy remains authoritative */ });
+    }, 2000);
+  }
+
+  function wlInitialSync() {
+    if (!wlCustomerId()) return;
+    fetch(WL_SYNC, { headers: { Accept: "application/json" }, credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (!data || !Array.isArray(data.handles)) return;
+        var local = wlGet();
+        var merged = local.slice();
+        for (var i = 0; i < data.handles.length; i++) {
+          if (merged.indexOf(data.handles[i]) === -1) merged.push(data.handles[i]);
+        }
+        if (merged.length !== local.length) wlSave(merged);
+        if (merged.length !== data.handles.length) wlScheduleSync();
+      })
+      .catch(function () {});
+  }
+
+  // Re-render every wishlist-driven bit of UI after any change.
+  function wlOnChange() {
+    var count = wlGet().length;
+    var bubble = document.querySelector("[data-badgehq-wl-count]");
+    if (bubble) {
+      bubble.textContent = String(count);
+      bubble.style.display = count > 0 ? "" : "none";
+    }
+    var hearts = document.querySelectorAll("[data-badgehq-wl-handle]");
+    for (var i = 0; i < hearts.length; i++) {
+      wlPaintHeart(hearts[i], wlHas(hearts[i].getAttribute("data-badgehq-wl-handle")));
+    }
+    var pdp = document.getElementById("badgehq-wl-product");
+    if (pdp) {
+      var on = wlHas(pdp.getAttribute("data-badgehq-wl-handle"));
+      var label = pdp.querySelector("[data-wl-label]");
+      if (label) label.textContent = on ? "Added to wishlist" : "Add to wishlist";
+    }
+  }
+
+  var WL_HEART_PATH =
+    '<path d="M12 21s-7.5-4.9-10-9.3C.3 8.6 2.2 5 5.7 5c2 0 3.5 1.1 4.3 2.6L12 9l2-1.4C14.8 6.1 16.3 5 18.3 5c3.5 0 5.4 3.6 3.7 6.7C19.5 16.1 12 21 12 21z"/>';
+
+  function wlHeartSvg(filled, color, size) {
+    return (
+      '<svg viewBox="0 0 24 24" width="' + size + '" height="' + size + '" aria-hidden="true" ' +
+      'fill="' + (filled ? color : "none") + '" stroke="' + color + '" stroke-width="2">' +
+      WL_HEART_PATH + "</svg>"
+    );
+  }
+
+  function wlPaintHeart(el, filled) {
+    var svg = el.querySelector("svg");
+    if (!svg) return;
+    svg.setAttribute("fill", filled ? (wlCfg && wlCfg.iconColor) || "#e74c3c" : "none");
+    el.setAttribute("aria-pressed", filled ? "true" : "false");
+  }
+
+  function wlHandleFromLink(el) {
+    var a = el.closest ? el.closest('a[href*="/products/"]') : null;
+    if (!a) {
+      var scope = el.closest ? el.closest("li, article, div") : null;
+      a = scope && scope.querySelector ? scope.querySelector('a[href*="/products/"]') : null;
+    }
+    if (!a) return null;
+    var m = a.getAttribute("href").match(/\/products\/([^/?#]+)/);
+    return m ? m[1] : null;
+  }
+
+  /* --- Surface: product-card hearts --- */
+  var WL_CARD_SELECTORS = [
+    ".card__media",            // Dawn
+    ".product-card__media",    // DigiFist Release
+    ".card-product__image",
+    ".grid-product__image-wrapper",
+    ".product-item__image",
+    '[class*="product-card"] [class*="media"]',
+    ".card__inner",
+  ];
+
+  function wlDecorateCards(cfg) {
+    wlCfg = cfg;
+    if (!cfg.showOnCards) return;
+    for (var s = 0; s < WL_CARD_SELECTORS.length; s++) {
+      var wraps = document.querySelectorAll(WL_CARD_SELECTORS[s]);
+      for (var i = 0; i < wraps.length; i++) {
+        var wrap = wraps[i];
+        if (wrap.getAttribute("data-badgehq-wl-done")) continue;
+        // Skip if a nested candidate will also match (decorate innermost only once).
+        if (wrap.querySelector("[data-badgehq-wl-handle]")) {
+          wrap.setAttribute("data-badgehq-wl-done", "1");
+          continue;
+        }
+        var handle = wlHandleFromLink(wrap);
+        if (!handle) continue;
+        wrap.setAttribute("data-badgehq-wl-done", "1");
+
+        var cs = window.getComputedStyle(wrap);
+        if (cs.position === "static") wrap.style.position = "relative";
+
+        var btn = document.createElement("button");
+        btn.type = "button";
+        btn.setAttribute("data-badgehq-wl-handle", handle);
+        btn.setAttribute("aria-label", "Add to wishlist");
+        var corner = cfg.cardPosition === "top-left" ? "left:8px;" : "right:8px;";
+        btn.style.cssText =
+          "position:absolute;top:8px;" + corner +
+          "z-index:4;width:34px;height:34px;padding:0;display:flex;align-items:center;justify-content:center;" +
+          "background:rgba(255,255,255,0.92);border:none;border-radius:50%;cursor:pointer;" +
+          "box-shadow:0 1px 4px rgba(0,0,0,0.15);";
+        btn.innerHTML = wlHeartSvg(wlHas(handle), cfg.iconColor, 18);
+        wlPaintHeart(btn, wlHas(handle));
+        btn.addEventListener("click", function (e) {
+          e.preventDefault();
+          e.stopPropagation();
+          wlToggle(this.getAttribute("data-badgehq-wl-handle"));
+        });
+        wrap.appendChild(btn);
+      }
+    }
+  }
+
+  /* --- Surface: product-page button --- */
+  function wlMountProductButton(cfg, attempt) {
+    wlCfg = cfg;
+    if (document.getElementById("badgehq-wl-product")) return;
+    var m = window.location.pathname.match(/\/products\/([^/?#]+)/);
+    if (!m) return;
+    var handle = m[1];
+
+    var anchor = resolveDeliveryAnchor(cfg.productPlacement === "above-atc" ? "above-atc" : "below-atc");
+    if (!anchor || !anchor.target.parentNode) {
+      if ((attempt || 0) < 12)
+        setTimeout(function () { wlMountProductButton(cfg, (attempt || 0) + 1); }, 400);
+      return;
+    }
+
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.id = "badgehq-wl-product";
+    btn.setAttribute("data-badgehq-wl-handle", handle);
+    btn.style.cssText =
+      "display:inline-flex;align-items:center;gap:8px;margin:10px 0;padding:10px 18px;" +
+      "font:inherit;font-weight:600;cursor:pointer;background:transparent;" +
+      "border:1px solid rgba(0,0,0,0.35);border-radius:var(--buttons-radius,6px);";
+    btn.innerHTML =
+      wlHeartSvg(wlHas(handle), cfg.iconColor, 18) +
+      '<span data-wl-label>' + (wlHas(handle) ? "Added to wishlist" : "Add to wishlist") + "</span>";
+    wlPaintHeart(btn, wlHas(handle));
+    btn.addEventListener("click", function () { wlToggle(handle); });
+
+    if (anchor.before) anchor.target.parentNode.insertBefore(btn, anchor.target);
+    else anchor.target.parentNode.insertBefore(btn, anchor.target.nextSibling);
+  }
+
+  /* --- Surface: header icon with count --- */
+  function wlMountHeaderIcon(cfg) {
+    if (document.getElementById("badgehq-wl-header")) return;
+    var slot = document.querySelector(
+      ".header__icons, header-icons, header .header__icons, header [class*='header__icons'], header [class*='header-icons']"
+    );
+    var a = document.createElement("a");
+    a.id = "badgehq-wl-header";
+    a.href = WL_PAGE;
+    a.setAttribute("aria-label", "Wishlist");
+    var count = wlGet().length;
+    var bubble =
+      '<span data-badgehq-wl-count style="position:absolute;top:-4px;right:-6px;min-width:16px;height:16px;' +
+      "padding:0 4px;box-sizing:border-box;background:" + cfg.iconColor + ";color:#fff;border-radius:8px;" +
+      'font-size:10px;line-height:16px;text-align:center;font-weight:700;' +
+      (count > 0 ? "" : "display:none;") + '">' + count + "</span>";
+
+    if (slot) {
+      a.style.cssText =
+        "position:relative;display:inline-flex;align-items:center;justify-content:center;" +
+        "width:44px;height:44px;color:inherit;";
+      a.innerHTML = wlHeartSvg(false, "currentColor", 20) + bubble;
+      slot.insertBefore(a, slot.firstChild);
+    } else {
+      // Fallback: floating button so the wishlist page is always reachable.
+      a.style.cssText =
+        "position:fixed;bottom:20px;right:20px;z-index:9990;display:flex;align-items:center;justify-content:center;" +
+        "width:48px;height:48px;background:#fff;border-radius:50%;box-shadow:0 2px 10px rgba(0,0,0,0.2);color:#333;";
+      a.innerHTML = wlHeartSvg(false, cfg.iconColor, 22) + bubble;
+      document.body.appendChild(a);
+    }
+  }
+
+  /* --- Wishlist page renderer --- */
+  function wlRenderPage(cfg) {
+    var container = document.querySelector("[data-badgehq-wishlist-page]");
+    if (!container || container.getAttribute("data-wl-ready")) return;
+    container.setAttribute("data-wl-ready", "1");
+
+    var handles = wlGet();
+    if (!handles.length) {
+      container.innerHTML =
+        '<p>Your wishlist is empty.</p><p><a href="/collections/all">Continue shopping</a></p>';
+      return;
+    }
+
+    container.innerHTML =
+      '<div data-wl-grid style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:20px;margin-top:16px;"></div>';
+    var grid = container.querySelector("[data-wl-grid]");
+    var missing = [];
+    var pending = handles.length;
+
+    function money(cents) {
+      var cur = (window.Shopify && window.Shopify.currency && window.Shopify.currency.active) || "";
+      return (cur === "INR" ? "₹" : cur ? cur + " " : "") + (cents / 100).toFixed(2).replace(/\.00$/, "");
+    }
+
+    function done() {
+      if (--pending > 0) return;
+      if (missing.length) {
+        // Prune deleted products from the saved list.
+        var list = wlGet().filter(function (h) { return missing.indexOf(h) === -1; });
+        wlSave(list);
+        wlScheduleSync();
+      }
+    }
+
+    handles.forEach(function (handle) {
+      fetch("/products/" + encodeURIComponent(handle) + ".js")
+        .then(function (r) {
+          if (!r.ok) throw new Error("gone");
+          return r.json();
+        })
+        .then(function (p) {
+          var card = document.createElement("div");
+          card.style.cssText = "border:1px solid rgba(0,0,0,0.1);border-radius:8px;overflow:hidden;display:flex;flex-direction:column;";
+          var img = p.featured_image || (p.images && p.images[0]) || "";
+          var variant = null;
+          for (var i = 0; i < (p.variants || []).length; i++) {
+            if (p.variants[i].available) { variant = p.variants[i]; break; }
+          }
+          card.innerHTML =
+            '<a href="/products/' + encodeURIComponent(handle) + '" style="display:block;">' +
+            (img ? '<img src="' + img + '" alt="" loading="lazy" style="width:100%;aspect-ratio:1;object-fit:cover;display:block;">' : "") +
+            "</a>" +
+            '<div style="padding:12px;display:flex;flex-direction:column;gap:8px;flex:1;">' +
+            '<a href="/products/' + encodeURIComponent(handle) + '" style="font-weight:600;color:inherit;text-decoration:none;">' +
+            escapeDeHtml(p.title) + "</a>" +
+            '<div style="opacity:0.85;">' + money(p.price) + "</div>" +
+            '<div style="margin-top:auto;display:flex;gap:8px;">' +
+            (variant
+              ? '<button type="button" data-wl-atc="' + variant.id + '" style="flex:1;padding:9px 10px;font:inherit;font-weight:600;cursor:pointer;background:#111;color:#fff;border:none;border-radius:6px;">Add to cart</button>'
+              : '<span style="flex:1;padding:9px 10px;text-align:center;opacity:0.6;">Sold out</span>') +
+            '<button type="button" data-wl-remove="' + handle + '" aria-label="Remove" style="padding:9px 12px;font:inherit;cursor:pointer;background:transparent;border:1px solid rgba(0,0,0,0.25);border-radius:6px;">✕</button>' +
+            "</div></div>";
+          grid.appendChild(card);
+
+          var atc = card.querySelector("[data-wl-atc]");
+          if (atc)
+            atc.addEventListener("click", function () {
+              atc.disabled = true;
+              atc.textContent = "Adding…";
+              fetch("/cart/add.js", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id: parseInt(atc.getAttribute("data-wl-atc"), 10), quantity: 1 }),
+              })
+                .then(function (r) { if (!r.ok) throw new Error("atc"); window.location.href = "/cart"; })
+                .catch(function () { atc.disabled = false; atc.textContent = "Add to cart"; });
+            });
+          card.querySelector("[data-wl-remove]").addEventListener("click", function () {
+            wlToggle(handle);
+            card.remove();
+            if (!grid.children.length) {
+              container.removeAttribute("data-wl-ready");
+              wlRenderPage(cfg);
+            }
+          });
+          done();
+        })
+        .catch(function () {
+          missing.push(handle);
+          done();
+        });
+    });
+  }
+
+  function initWishlist(cfg, page) {
+    wlCfg = cfg;
+    wlInitialSync();
+    if (cfg.showHeader) wlMountHeaderIcon(cfg);
+    if (cfg.showOnCards) wlDecorateCards(cfg);
+    if (cfg.showOnProduct && page === "product") wlMountProductButton(cfg, 0);
+    wlRenderPage(cfg);
   }
 })();
