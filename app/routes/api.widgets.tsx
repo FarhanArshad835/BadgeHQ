@@ -143,13 +143,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       colors: JSON.parse(b.colors),
       pages: JSON.parse(b.pages),
     })),
-    // Only the boolean — the Delhivery token/origin pin never leave the server.
+    // Only the boolean + placement — the Delhivery token/origin pin never
+    // leave the server.
     deliveryEstimate: {
       enabled: Boolean(
         deliverySettings?.isEnabled &&
         deliverySettings?.apiToken &&
         /^\d{6}$/.test(deliverySettings?.originPin ?? ""),
       ),
+      placement: deliverySettings?.placement ?? "below-atc",
     },
   };
 

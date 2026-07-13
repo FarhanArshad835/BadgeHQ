@@ -39,6 +39,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     originPin: settings?.originPin ?? "",
     bufferDays: settings?.bufferDays ?? 1,
     environment: settings?.environment ?? "staging",
+    placement: settings?.placement ?? "below-atc",
   });
 };
 
@@ -94,6 +95,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return json({ error: "Dispatch buffer must be between 0 and 10 days." }, { status: 400 });
   }
   const environment = data.environment === "production" ? "production" : "staging";
+  const PLACEMENTS = ["below-atc", "above-atc", "below-description"];
+  const placement = PLACEMENTS.includes(data.placement) ? data.placement : "below-atc";
   const newToken = String(data.apiToken || "").trim();
 
   try {
@@ -106,6 +109,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         originPin,
         bufferDays,
         environment,
+        placement,
       },
       update: {
         isEnabled: data.isEnabled,
@@ -114,6 +118,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         originPin,
         bufferDays,
         environment,
+        placement,
       },
     });
     await bumpConfigVersion(session.shop);
@@ -143,6 +148,7 @@ export default function DeliveryEstimate() {
     originPin: loaderData.originPin,
     bufferDays: String(loaderData.bufferDays),
     environment: loaderData.environment,
+    placement: loaderData.placement,
   };
 
   const [enabled, setEnabled] = useState(initial.enabled);
@@ -150,6 +156,7 @@ export default function DeliveryEstimate() {
   const [originPin, setOriginPin] = useState(initial.originPin);
   const [bufferDays, setBufferDays] = useState(initial.bufferDays);
   const [environment, setEnvironment] = useState(initial.environment);
+  const [placement, setPlacement] = useState(initial.placement);
   const [testPincode, setTestPincode] = useState("");
   const [showSuccess, setShowSuccess] = useState(false);
 
@@ -158,7 +165,8 @@ export default function DeliveryEstimate() {
     apiToken !== initial.apiToken ||
     originPin !== initial.originPin ||
     bufferDays !== initial.bufferDays ||
-    environment !== initial.environment;
+    environment !== initial.environment ||
+    placement !== initial.placement;
 
   useEffect(() => {
     if (actionData?.success) {
@@ -175,6 +183,7 @@ export default function DeliveryEstimate() {
     setOriginPin(initial.originPin);
     setBufferDays(initial.bufferDays);
     setEnvironment(initial.environment);
+    setPlacement(initial.placement);
   };
 
   const handleSave = () => {
@@ -184,6 +193,7 @@ export default function DeliveryEstimate() {
       originPin,
       bufferDays,
       environment,
+      placement,
     };
     submit({ data: JSON.stringify(data) }, { method: "POST" });
   };
@@ -224,6 +234,17 @@ export default function DeliveryEstimate() {
                   helpText="When disabled, the widget stays hidden on your storefront"
                   checked={enabled}
                   onChange={setEnabled}
+                />
+                <Select
+                  label="Placement on product page"
+                  options={[
+                    { label: "Below Add to Cart button", value: "below-atc" },
+                    { label: "Above Add to Cart button", value: "above-atc" },
+                    { label: "Below product description", value: "below-description" },
+                  ]}
+                  value={placement}
+                  onChange={setPlacement}
+                  helpText="Where the PIN-code checker appears on your product pages"
                 />
               </BlockStack>
             </Card>

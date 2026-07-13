@@ -98,7 +98,7 @@
         renderCountdownTimer(timer, page, gs);
       });
     if (w.deliveryEstimate && w.deliveryEstimate.enabled && page === "product")
-      renderDeliveryEstimate();
+      renderDeliveryEstimate(w.deliveryEstimate.placement || "below-atc");
   }
 
   function detectPage() {
@@ -1966,21 +1966,38 @@
   }
 
   /* ===================== DELIVERY ESTIMATE ===================== */
-  function renderDeliveryEstimate() {
+  function renderDeliveryEstimate(placement) {
     // Dawn mounts <product-form> as a web component after initial parse —
     // delay DOM lookup so the ATC form is available (same as sticky cart).
-    setTimeout(mountDeliveryEstimate, 800);
+    setTimeout(function () { mountDeliveryEstimate(placement); }, 800);
     setTimeout(function () {
-      if (!document.getElementById("badgehq-delivery-estimate")) mountDeliveryEstimate();
+      if (!document.getElementById("badgehq-delivery-estimate")) mountDeliveryEstimate(placement);
     }, 2000);
   }
 
-  function mountDeliveryEstimate() {
+  function mountDeliveryEstimate(placement) {
     // Skip if already injected, or if the merchant placed the optional
     // "Delivery Estimate" theme app block for manual positioning.
     if (document.querySelector("[data-delivery-estimate]")) return;
 
-    var target = document.querySelector('form[action*="/cart/add"], .product-form');
+    // Resolve the insertion anchor from the merchant's placement setting
+    // (same anchors the trust badge positions use).
+    var target = null;
+    var insertBeforeTarget = false;
+    if (placement === "above-atc") {
+      // Before the ATC form so the widget sits above the buy buttons.
+      target = document.querySelector('form[action*="/cart/add"], .product-form');
+      insertBeforeTarget = true;
+    } else if (placement === "below-description") {
+      target = document.querySelector(
+        '.product__description, .product-single__description, [class*="product-description"], .product__meta'
+      );
+    }
+    if (!target) {
+      // "below-atc" and fallback for themes missing the above anchors.
+      target = document.querySelector('form[action*="/cart/add"], .product-form');
+      insertBeforeTarget = placement === "above-atc";
+    }
     if (!target) return;
 
     if (!document.getElementById("badgehq-de-style")) {
@@ -2021,7 +2038,11 @@
       '<button class="badgehq-de__button" type="submit">Check</button></form>' +
       '<div class="badgehq-de__result" data-de-state="idle" aria-live="polite"></div>';
 
-    target.parentNode.insertBefore(root, target.nextSibling);
+    if (insertBeforeTarget) {
+      target.parentNode.insertBefore(root, target);
+    } else {
+      target.parentNode.insertBefore(root, target.nextSibling);
+    }
 
     var form = root.querySelector("form");
     var input = root.querySelector("input");

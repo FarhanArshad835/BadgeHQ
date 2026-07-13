@@ -159,6 +159,7 @@ model DeliverySettings {
   originPin   String   @default("")
   bufferDays  Int      @default(1)
   environment String   @default("staging")
+  placement   String   @default("below-atc")
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }
