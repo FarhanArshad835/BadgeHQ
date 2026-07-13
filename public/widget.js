@@ -2644,10 +2644,27 @@
     a.href = WL_PAGE;
     a.setAttribute("aria-label", "Wishlist");
     var count = wlGet().length;
+
+    // Match the theme's own cart count badge (color/background) so the
+    // wishlist count looks native; fall back to the configured heart color.
+    var badgeBg = cfg.iconColor;
+    var badgeFg = "#fff";
+    var themeBadge = document.querySelector(
+      ".cart-count-badge, .cart-count-bubble, [class*='cart-count'], [class*='cart-counter'] span"
+    );
+    if (themeBadge) {
+      try {
+        var tb = window.getComputedStyle(themeBadge);
+        if (tb.backgroundColor && tb.backgroundColor !== "rgba(0, 0, 0, 0)" && tb.backgroundColor !== "transparent") {
+          badgeBg = tb.backgroundColor;
+          badgeFg = tb.color || "#fff";
+        }
+      } catch (e) {}
+    }
     var bubble =
-      '<span data-badgehq-wl-count style="position:absolute;top:-4px;right:-6px;min-width:16px;height:16px;' +
-      "padding:0 4px;box-sizing:border-box;background:" + cfg.iconColor + ";color:#fff;border-radius:8px;" +
-      'font-size:10px;line-height:16px;text-align:center;font-weight:700;' +
+      '<span data-badgehq-wl-count style="position:absolute;top:2px;right:0;min-width:17px;height:17px;' +
+      "padding:0 4px;box-sizing:border-box;background:" + badgeBg + ";color:" + badgeFg + ";border-radius:9px;" +
+      'font-size:10px;line-height:17px;text-align:center;font-weight:700;' +
       (count > 0 ? "" : "display:none;") + '">' + count + "</span>";
 
     if (slot) {
@@ -2661,7 +2678,18 @@
         node.style.cssText = "display:inline-flex;align-items:center;list-style:none;";
         node.appendChild(a);
       }
-      slot.insertBefore(node, slot.firstChild);
+      // Sit between the account/profile icon and the cart: insert directly
+      // before the cart entry when we can find it, else append at the end.
+      var cartEl = slot.querySelector(
+        "a[href*='/cart'], [data-cart-link], #cart-counter, a[onclick*='Cart'], [class*='utils-link--cart']"
+      );
+      var cartItem = null;
+      if (cartEl) {
+        cartItem = cartEl;
+        while (cartItem.parentNode && cartItem.parentNode !== slot) cartItem = cartItem.parentNode;
+      }
+      if (cartItem && cartItem.parentNode === slot) slot.insertBefore(node, cartItem);
+      else slot.appendChild(node);
     } else {
       // Fallback: floating button so the wishlist page is always reachable.
       a.style.cssText =
