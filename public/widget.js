@@ -2617,9 +2617,36 @@
     btn.id = "badgehq-wl-product";
     btn.setAttribute("data-badgehq-wl-handle", handle);
     btn.style.cssText =
-      "display:inline-flex;align-items:center;gap:8px;margin:10px 0;padding:10px 18px;" +
-      "font:inherit;font-weight:600;cursor:pointer;background:transparent;" +
-      "border:1px solid rgba(0,0,0,0.35);border-radius:var(--buttons-radius,6px);";
+      "width:100%;display:flex;align-items:center;justify-content:center;gap:8px;margin:12px 0 0;" +
+      "padding:12px 18px;font:inherit;font-weight:600;cursor:pointer;background:transparent;color:inherit;" +
+      "border:1px solid rgba(0,0,0,0.6);border-radius:var(--buttons-radius,6px);box-sizing:border-box;";
+
+    // Render as the theme ATC button's natural "secondary" variant: same
+    // shape, height, and typography, outline instead of filled.
+    var atcBtn = document.querySelector(
+      "product-form button[type='submit'], form[action*='/cart/add'] button[type='submit'], " +
+      ".product-form__submit, button[name='add'], [data-add-to-cart]"
+    );
+    if (atcBtn) {
+      try {
+        var abs = window.getComputedStyle(atcBtn);
+        var abr = atcBtn.getBoundingClientRect();
+        btn.style.borderRadius = abs.borderRadius;
+        btn.style.fontSize = abs.fontSize;
+        btn.style.fontWeight = abs.fontWeight;
+        btn.style.fontFamily = abs.fontFamily;
+        btn.style.letterSpacing = abs.letterSpacing;
+        btn.style.textTransform = abs.textTransform;
+        if (abr.height > 0) btn.style.minHeight = Math.round(abr.height) + "px";
+        // Outline in the ATC's fill color so the pair reads as primary/secondary.
+        var atcBg = abs.backgroundColor;
+        if (atcBg && atcBg !== "rgba(0, 0, 0, 0)" && atcBg !== "transparent") {
+          btn.style.borderColor = atcBg;
+          btn.style.color = atcBg;
+        }
+      } catch (e) {}
+    }
+
     btn.innerHTML =
       wlHeartSvg(wlHas(handle), cfg.iconColor, 18) +
       '<span data-wl-label>' + (wlHas(handle) ? "Added to wishlist" : "Add to wishlist") + "</span>";
