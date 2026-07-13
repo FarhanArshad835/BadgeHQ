@@ -99,6 +99,51 @@
       });
     if (w.deliveryEstimate && w.deliveryEstimate.enabled && page === "product")
       renderDeliveryEstimate(w.deliveryEstimate.placement || "below-atc");
+
+    if (page === "product") setupProductRerenderWatch(data, page);
+  }
+
+  // Some themes (Dawn descendants like "Release") re-render the whole
+  // product-info subtree via the Section Rendering API on variant change,
+  // wiping anything we injected near the buy buttons. Watch for our roots
+  // disappearing and re-run the (idempotent) product-page renderers.
+  function setupProductRerenderWatch(data, page) {
+    if (!window.MutationObserver) return;
+    var gs = data.globalSettings || {};
+    var w = data.widgets || {};
+    var currencySymbol = data.currencySymbol || "$";
+
+    function missing(id) {
+      return !document.getElementById(id);
+    }
+
+    function reinject() {
+      if (w.trustBadges)
+        w.trustBadges.forEach(function (badge) {
+          if (missing("badgehq-trust-" + badge.id)) renderTrustBadge(badge, page, gs);
+        });
+      if (w.freeShippingBars)
+        w.freeShippingBars.forEach(function (bar) {
+          if (shouldShowOnPage(bar.pages, page) && missing("badgehq-freeship-" + bar.id))
+            renderFreeShippingBar(bar, page, currencySymbol);
+        });
+      if (w.countdownTimers)
+        w.countdownTimers.forEach(function (timer) {
+          if (missing("badgehq-countdown-" + timer.id)) renderCountdownTimer(timer, page, gs);
+        });
+      if (w.deliveryEstimate && w.deliveryEstimate.enabled && missing("badgehq-delivery-estimate"))
+        mountDeliveryEstimate(w.deliveryEstimate.placement || "below-atc");
+    }
+
+    var debounce = null;
+    var observer = new MutationObserver(function () {
+      // Debounce: section swaps arrive as bursts of mutations, and our own
+      // re-injection also mutates the DOM (the idempotency guards make the
+      // follow-up pass a no-op, so this can't loop).
+      clearTimeout(debounce);
+      debounce = setTimeout(reinject, 400);
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
   }
 
   function detectPage() {
@@ -303,6 +348,10 @@
     // Only render on product pages for ATC positions, or cart page for cart-page position
     if (pos === "cart-page" && page !== "cart") return;
     if (pos !== "cart-page" && page !== "product") return;
+
+    // Idempotent: skip if already in the DOM (the re-inject watcher re-runs
+    // renderers after themes wipe the product info on variant change).
+    if (document.getElementById("badgehq-trust-" + badge.id)) return;
 
     var isDark = s.colorScheme === "dark";
     var bgColor = isDark ? "#1a1a2e" : "#ffffff";
@@ -1576,7 +1625,9 @@
       var cartTotalSelectors = [
         ".cart-subtotal__price", ".totals__subtotal-value",
         ".cart__total", ".cart-subtotal", "[data-cart-total]",
-        ".cart-drawer__footer .price", ".cart__footer .price"
+        ".cart-drawer__footer .price", ".cart__footer .price",
+        // DigiFist "Release" theme (cart page + drawer)
+        "[data-cart-total-price]", ".cart__summary-total-price", ".cart-drawer__total-price"
       ].join(",");
       var cartTotalEls = document.querySelectorAll(cartTotalSelectors);
       if (cartTotalEls.length > 0) {
@@ -1633,6 +1684,7 @@
           "cart-footer",
           ".cart__footer",
           ".cart-footer",
+          ".cart__summary", // DigiFist "Release": bar sits right above the subtotal
           "cart-items",
           ".cart__items",
           'form[action="/cart"]'
@@ -1891,6 +1943,9 @@
     var c = timer.colors || {};
     var m = timer.messages || {};
 
+    // Idempotent for the re-inject watcher.
+    if (document.getElementById("badgehq-countdown-" + timer.id)) return;
+
     var el = document.createElement("div");
     el.id = "badgehq-countdown-" + timer.id;
     el.style.cssText =
@@ -1956,7 +2011,15 @@
     }
 
     update();
-    setInterval(update, 1000);
+    var intervalId = setInterval(function () {
+      // Stop ticking if the theme wiped the element (variant-change re-render);
+      // the re-inject watcher creates a fresh timer with its own interval.
+      if (!el.isConnected) {
+        clearInterval(intervalId);
+        return;
+      }
+      update();
+    }, 1000);
 
     var target = document.querySelector(
       'form[action*="/cart/add"], .product-form, main, #MainContent'
