@@ -16,3 +16,10 @@ compatibility_date = "2024-09-01"
 
 [observability]
 enabled = true
+
+# Per-shop config version — bumped by the Remix app on every admin save via
+# POST /internal/bump (authenticated by the BUMP_SECRET worker secret), so the
+# edge cache is busted immediately on publish instead of waiting out the TTL.
+[[kv_namespaces]]
+binding = "CONFIG_VERSIONS"
+id = "a923221545774ca1bb3440b8f950dae0"

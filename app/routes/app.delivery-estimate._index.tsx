@@ -18,6 +18,7 @@ import {
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { bumpConfigVersion } from "../utils/config-version.server";
 import {
   DELHIVERY_BASES,
   computeEtaDate,
@@ -115,6 +116,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         environment,
       },
     });
+    await bumpConfigVersion(session.shop);
     return json({ success: true });
   } catch (error) {
     return json({ error: "Failed to save settings" }, { status: 500 });

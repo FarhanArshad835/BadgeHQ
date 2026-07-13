@@ -19,6 +19,7 @@ import {
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { bumpConfigVersion } from "../utils/config-version.server";
 import { getBadgesByIds } from "../data/badgeLibrary";
 
 interface TrustBadgeRow {
@@ -59,6 +60,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   if (actionType === "delete") {
     await prisma.trustBadge.deleteMany({ where: { id, shop: session.shop } });
+    await bumpConfigVersion(session.shop);
     return json({ success: true });
   }
 
@@ -71,6 +73,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         where: { id },
         data: { isEnabled: !badge.isEnabled },
       });
+      await bumpConfigVersion(session.shop);
     }
     return json({ success: true });
   }

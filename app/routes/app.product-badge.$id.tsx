@@ -23,6 +23,7 @@ import {
 import { TitleBar, useAppBridge } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { bumpConfigVersion } from "../utils/config-version.server";
 import { getStoreCurrency } from "../utils/currency.server";
 
 const PRESET_BADGES = [
@@ -92,6 +93,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         customCSS: data.customCSS,
       },
     });
+    await bumpConfigVersion(session.shop);
     return json({ success: true });
   } catch (error) {
     return json({ error: "Failed to update product badge" }, { status: 500 });

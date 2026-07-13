@@ -15,6 +15,7 @@ import {
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { bumpConfigVersion } from "../utils/config-version.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -48,6 +49,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         settings: JSON.stringify(data.settings),
       },
     });
+    await bumpConfigVersion(session.shop);
     return json({ success: true });
   } catch (error) {
     return json({ error: "Failed to save settings" }, { status: 500 });

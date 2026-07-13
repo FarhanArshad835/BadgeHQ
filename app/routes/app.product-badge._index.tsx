@@ -16,6 +16,7 @@ import {
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { bumpConfigVersion } from "../utils/config-version.server";
 
 function conditionLabel(condition: { type: string }): string {
   const map: Record<string, string> = {
@@ -58,6 +59,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   if (action === "delete") {
     await prisma.productBadge.deleteMany({ where: { id, shop: session.shop } });
+    await bumpConfigVersion(session.shop);
     return json({ success: true });
   }
 
@@ -65,6 +67,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const badge = await prisma.productBadge.findFirst({ where: { id, shop: session.shop } });
     if (badge) {
       await prisma.productBadge.update({ where: { id }, data: { isActive: !badge.isActive } });
+      await bumpConfigVersion(session.shop);
     }
     return json({ success: true });
   }

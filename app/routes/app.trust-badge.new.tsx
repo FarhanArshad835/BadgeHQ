@@ -25,6 +25,7 @@ import {
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { bumpConfigVersion } from "../utils/config-version.server";
 import {
   badgeLibrary,
   badgeCategories,
@@ -53,6 +54,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         settings: JSON.stringify(data.settings),
       },
     });
+    await bumpConfigVersion(session.shop);
     return redirect(`/app/trust-badge/${badge.id}`);
   } catch (error) {
     return json({ error: "Failed to create trust badge" }, { status: 500 });

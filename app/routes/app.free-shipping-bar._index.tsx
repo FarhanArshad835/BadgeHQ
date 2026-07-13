@@ -18,6 +18,7 @@ import {
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { bumpConfigVersion } from "../utils/config-version.server";
 import { getStoreCurrency } from "../utils/currency.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -66,6 +67,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     } else {
       await prisma.freeShippingBar.create({ data: { shop: session.shop, ...saveData } });
     }
+    await bumpConfigVersion(session.shop);
     return json({ success: true });
   } catch (error) {
     return json({ error: "Failed to save free shipping bar" }, { status: 500 });

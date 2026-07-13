@@ -20,6 +20,7 @@ import {
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import { bumpConfigVersion } from "../utils/config-version.server";
 
 interface BarMessage {
   text: string;
@@ -81,6 +82,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         },
       });
     }
+    await bumpConfigVersion(session.shop);
     return json({ success: true });
   } catch (error) {
     return json({ error: "Failed to save announcement bar" }, { status: 500 });

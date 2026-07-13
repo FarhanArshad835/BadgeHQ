@@ -63,10 +63,26 @@ const CORS_HEADERS = {
 // makes Cloudflare cache the upstream response by URL — subsequent
 // requests for the same URL within TTL serve from the edge POP without
 // touching Vercel at all.
-async function proxyWithCache(request, originPath) {
+//
+// The shop's config version (bumped via /internal/bump on every admin
+// save) is appended to the target URL, so a publish changes the cache
+// key and forces a fresh origin fetch; unchanged configs stay cached
+// for the full TTL. The 60s KV read-cache keeps KV reads to ~1/min/POP.
+async function proxyWithCache(request, originPath, env) {
   const url = new URL(request.url);
   const ttl = CACHE_TTL_BY_PATH[originPath] || DEFAULT_CACHE_TTL;
-  const target = `${ORIGIN}${originPath}?${url.searchParams.toString()}`;
+
+  let configVersion = "0";
+  const shop = url.searchParams.get("shop");
+  if (shop && env && env.CONFIG_VERSIONS) {
+    try {
+      configVersion = (await env.CONFIG_VERSIONS.get("v:" + shop, { cacheTtl: 60 })) || "0";
+    } catch (e) {
+      // KV hiccup — fall back to the unversioned key (plain TTL behavior).
+    }
+  }
+
+  const target = `${ORIGIN}${originPath}?${url.searchParams.toString()}&_cv=${configVersion}`;
 
   const upstream = await fetch(target, {
     method: "GET",
@@ -86,7 +102,11 @@ async function proxyWithCache(request, originPath) {
   // headers, lock down Cache-Control, expose CORS for the storefront.
   const respHeaders = new Headers();
   respHeaders.set("Content-Type", upstream.headers.get("Content-Type") || "application/json");
-  respHeaders.set("Cache-Control", `public, max-age=${ttl}, s-maxage=${ttl * 2}`);
+  // /api/widgets gets a short browser TTL so repeat visitors pick up
+  // publishes within minutes; the expensive edge->origin caching above is
+  // unaffected. Other routes keep browser TTL = edge TTL.
+  const browserTtl = originPath === "/api/widgets" ? 300 : ttl;
+  respHeaders.set("Cache-Control", `public, max-age=${browserTtl}, s-maxage=${ttl * 2}`);
   respHeaders.set("Access-Control-Allow-Origin", "*");
   respHeaders.set("X-Source", "cloudflare-worker-api-proxy");
   respHeaders.set("X-Origin", "vercel");
@@ -102,12 +122,44 @@ async function proxyWithCache(request, originPath) {
 }
 
 export default {
-  async fetch(request) {
+  async fetch(request, env) {
     const url = new URL(request.url);
 
     // OPTIONS preflight
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: CORS_HEADERS });
+    }
+
+    // Cache-bust hook: the Remix app calls this after every admin save so
+    // storefronts fetch the new config immediately instead of waiting out
+    // the edge TTL. Authenticated with the BUMP_SECRET worker secret.
+    if (request.method === "POST" && url.pathname === "/internal/bump") {
+      const secret = request.headers.get("X-Bump-Secret");
+      if (!env.BUMP_SECRET || !secret || secret !== env.BUMP_SECRET) {
+        return new Response(JSON.stringify({ error: "unauthorized" }), {
+          status: 401,
+          headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+        });
+      }
+      const shop = url.searchParams.get("shop") || "";
+      if (!/^[a-z0-9][a-z0-9.-]*\.myshopify\.com$/.test(shop)) {
+        return new Response(JSON.stringify({ error: "invalid-shop" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+        });
+      }
+      if (!env.CONFIG_VERSIONS) {
+        return new Response(JSON.stringify({ error: "kv-not-bound" }), {
+          status: 500,
+          headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+        });
+      }
+      const version = String(Date.now());
+      await env.CONFIG_VERSIONS.put("v:" + shop, version);
+      return new Response(JSON.stringify({ ok: true, shop: shop, version: version }), {
+        status: 200,
+        headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+      });
     }
 
     // Health/version probe — useful for diagnostics
@@ -118,7 +170,7 @@ export default {
           widget_hash: WIDGET_HASH,
           widget_built_at: WIDGET_BUILT_AT,
           widget_bytes: WIDGET_SOURCE.length,
-          routes: ["/widget.js", "/health", "/api/widgets", "/api/products/inventory", "/api/delivery-edd"],
+          routes: ["/widget.js", "/health", "/api/widgets", "/api/products/inventory", "/api/delivery-edd", "/internal/bump"],
           origin: ORIGIN,
           cache_ttl_by_path_seconds: CACHE_TTL_BY_PATH,
         }),
@@ -148,13 +200,13 @@ export default {
     // on cache miss (~1 fetch per shop per 5 minutes instead of every pageview)
     if (request.method === "GET" || request.method === "HEAD") {
       if (url.pathname === "/api/widgets") {
-        return proxyWithCache(request, "/api/widgets");
+        return proxyWithCache(request, "/api/widgets", env);
       }
       if (url.pathname === "/api/products/inventory") {
-        return proxyWithCache(request, "/api/products/inventory");
+        return proxyWithCache(request, "/api/products/inventory", env);
       }
       if (url.pathname === "/api/delivery-edd") {
-        return proxyWithCache(request, "/api/delivery-edd");
+        return proxyWithCache(request, "/api/delivery-edd", env);
       }
     }
 
