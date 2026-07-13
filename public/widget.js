@@ -99,6 +99,8 @@
       });
     if (w.deliveryEstimate && w.deliveryEstimate.enabled && page === "product")
       renderDeliveryEstimate(w.deliveryEstimate.placement || "below-atc");
+    if (w.orderManagement && w.orderManagement.enabled && page === "order")
+      renderOrderActions();
 
     if (page === "product") setupProductRerenderWatch(data, page);
   }
@@ -148,6 +150,7 @@
 
   function detectPage() {
     var path = window.location.pathname;
+    if (path.indexOf("/account") !== -1 && path.match(/\/orders\//)) return "order";
     if (path.match(/\/products\//)) return "product";
     if (path.match(/\/cart/)) return "cart";
     if (path.match(/\/collections\//)) return "collection";
@@ -2190,5 +2193,179 @@
     return String(s).replace(/[&<>"']/g, function (c) {
       return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
     });
+  }
+
+  /* ===================== ORDER MANAGEMENT (account order page) ===================== */
+  // Talks to the app proxy at /apps/badgehq/order-actions. Shopify signs the
+  // request and attaches logged_in_customer_id; the backend enforces that the
+  // order belongs to the logged-in customer and is still unfulfilled.
+  var OM_PROXY = "/apps/badgehq/order-actions";
+
+  function renderOrderActions() {
+    if (document.getElementById("badgehq-order-actions")) return;
+
+    // Find the order name ("#172138") in the page heading.
+    var name = null;
+    var headings = document.querySelectorAll("h1, h2");
+    for (var i = 0; i < headings.length; i++) {
+      var m = headings[i].textContent.match(/#[\w-]+/);
+      if (m) { name = m[0]; break; }
+    }
+    if (!name) {
+      var t = (document.title || "").match(/#[\w-]+/);
+      if (t) name = t[0];
+    }
+    if (!name) return;
+
+    fetch(OM_PROXY + "?name=" + encodeURIComponent(name), {
+      headers: { Accept: "application/json" },
+      credentials: "same-origin",
+    })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (info) {
+        if (!info || !info.enabled) return;
+        if (!info.cancellable && !info.addressEditable && info.reason !== "prepaid") return;
+        mountOrderActions(name, info);
+      })
+      .catch(function () { /* proxy unreachable — stay silent */ });
+  }
+
+  function mountOrderActions(name, info) {
+    if (document.getElementById("badgehq-order-actions")) return;
+
+    if (!document.getElementById("badgehq-om-style")) {
+      var style = document.createElement("style");
+      style.id = "badgehq-om-style";
+      style.textContent =
+        ".badgehq-om{margin:20px 0;padding:16px;border:1px solid rgba(0,0,0,0.12);border-radius:8px;max-width:520px;}" +
+        ".badgehq-om h3{margin:0 0 12px;font-size:1.1em;}" +
+        ".badgehq-om__row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:8px;}" +
+        ".badgehq-om__btn{padding:10px 18px;font:inherit;font-weight:600;cursor:pointer;border-radius:6px;border:1px solid transparent;}" +
+        ".badgehq-om__btn--danger{color:#fff;background:#c62828;}" +
+        ".badgehq-om__btn--secondary{color:inherit;background:transparent;border-color:rgba(0,0,0,0.35);}" +
+        ".badgehq-om__btn:disabled{opacity:0.6;cursor:default;}" +
+        ".badgehq-om__msg{margin:8px 0 0;line-height:1.4;}" +
+        ".badgehq-om__msg--ok{color:#157a3d;}" +
+        ".badgehq-om__msg--err{color:#c62828;}" +
+        ".badgehq-om__form{display:none;margin-top:12px;}" +
+        ".badgehq-om__form.is-open{display:block;}" +
+        ".badgehq-om__grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;}" +
+        ".badgehq-om__grid .full{grid-column:1 / -1;}" +
+        ".badgehq-om__form input{width:100%;box-sizing:border-box;padding:9px 10px;font:inherit;border:1px solid rgba(0,0,0,0.25);border-radius:5px;}" +
+        ".badgehq-om__form label{display:block;font-size:0.85em;margin:0 0 3px;opacity:0.8;}" +
+        ".badgehq-om__form .badgehq-om__row{margin-top:10px;}";
+      document.head.appendChild(style);
+    }
+
+    var root = document.createElement("div");
+    root.id = "badgehq-order-actions";
+    root.className = "badgehq-om";
+
+    var a = info.shippingAddress || {};
+    function field(id, label, value, full) {
+      return (
+        '<div class="' + (full ? "full" : "") + '"><label for="badgehq-om-' + id + '">' + label + "</label>" +
+        '<input id="badgehq-om-' + id + '" name="' + id + '" value="' + escapeDeHtml(value || "") + '"></div>'
+      );
+    }
+
+    var html = "<h3>Manage this order</h3>";
+    html += '<div class="badgehq-om__row">';
+    if (info.cancellable) {
+      html += '<button type="button" class="badgehq-om__btn badgehq-om__btn--danger" data-om-cancel>Cancel order</button>';
+    }
+    if (info.addressEditable) {
+      html += '<button type="button" class="badgehq-om__btn badgehq-om__btn--secondary" data-om-edit>Edit shipping address</button>';
+    }
+    html += "</div>";
+    if (!info.cancellable && info.reason === "prepaid") {
+      html += '<p class="badgehq-om__msg">This order is prepaid — please contact us to cancel it.</p>';
+    }
+    if (info.addressEditable) {
+      html +=
+        '<form class="badgehq-om__form" data-om-form><div class="badgehq-om__grid">' +
+        field("firstName", "First name", a.firstName) +
+        field("lastName", "Last name", a.lastName) +
+        field("address1", "Address line 1", a.address1, true) +
+        field("address2", "Address line 2", a.address2, true) +
+        field("city", "City", a.city) +
+        field("province", "State", a.province) +
+        field("zip", "PIN / ZIP code", a.zip) +
+        field("phone", "Phone", a.phone) +
+        "</div>" +
+        '<div class="badgehq-om__row"><button type="submit" class="badgehq-om__btn badgehq-om__btn--danger">Save address</button></div>' +
+        "</form>";
+    }
+    html += '<div class="badgehq-om__msg" data-om-msg aria-live="polite"></div>';
+    root.innerHTML = html;
+
+    // Insert after the first heading's block, else prepend to main.
+    var h = document.querySelector("h1");
+    if (h && h.parentNode) {
+      h.parentNode.insertBefore(root, h.nextSibling);
+    } else {
+      var main = document.querySelector("main, #MainContent");
+      if (main) main.prepend(root);
+      else return;
+    }
+
+    var msgEl = root.querySelector("[data-om-msg]");
+    function setMsg(kind, text) {
+      msgEl.className = "badgehq-om__msg" + (kind ? " badgehq-om__msg--" + kind : "");
+      msgEl.textContent = text;
+    }
+
+    function post(params, button, okText) {
+      button.disabled = true;
+      setMsg("", "Please wait…");
+      params.set("name", name);
+      fetch(OM_PROXY, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+        credentials: "same-origin",
+        body: params.toString(),
+      })
+        .then(function (r) { return r.json().then(function (d) { return { s: r.status, d: d }; }); })
+        .then(function (res) {
+          if (res.d && res.d.ok) {
+            setMsg("ok", okText);
+            setTimeout(function () { window.location.reload(); }, 1800);
+          } else {
+            var err = (res.d && res.d.error) || "Something went wrong. Please try again.";
+            setMsg("err", err === "not-cancellable" ? "This order can no longer be cancelled." : err);
+            button.disabled = false;
+          }
+        })
+        .catch(function () {
+          setMsg("err", "Couldn’t reach the server. Please try again.");
+          button.disabled = false;
+        });
+    }
+
+    var cancelBtn = root.querySelector("[data-om-cancel]");
+    if (cancelBtn) {
+      cancelBtn.addEventListener("click", function () {
+        if (!window.confirm("Cancel order " + name + "? This cannot be undone.")) return;
+        var p = new URLSearchParams();
+        p.set("intent", "cancel");
+        post(p, cancelBtn, "Order cancelled. Refreshing…");
+      });
+    }
+
+    var editBtn = root.querySelector("[data-om-edit]");
+    var form = root.querySelector("[data-om-form]");
+    if (editBtn && form) {
+      editBtn.addEventListener("click", function () {
+        form.classList.toggle("is-open");
+      });
+      form.addEventListener("submit", function (e) {
+        e.preventDefault();
+        var p = new URLSearchParams();
+        p.set("intent", "update-address");
+        var inputs = form.querySelectorAll("input");
+        for (var i = 0; i < inputs.length; i++) p.set(inputs[i].name, inputs[i].value);
+        post(p, form.querySelector('button[type="submit"]'), "Address updated. Refreshing…");
+      });
+    }
   }
 })();

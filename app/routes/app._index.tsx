@@ -66,6 +66,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     stickyCartCount,
     countdownTimerCount,
     deliveryEstimateCount,
+    orderManagementCount,
     themeExtensionEnabled,
     currentPlan,
   ] = await Promise.all([
@@ -76,6 +77,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     prisma.stickyCart.count({ where: { shop } }),
     prisma.countdownTimer.count({ where: { shop } }),
     prisma.deliverySettings.count({ where: { shop, isEnabled: true } }),
+    prisma.orderManageSettings.count({ where: { shop, isEnabled: true } }),
     checkThemeExtensionEnabled(shop, accessToken),
     getShopPlan(shop),
   ]);
@@ -93,6 +95,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       stickyCarts: stickyCartCount,
       countdownTimers: countdownTimerCount,
       deliveryEstimates: deliveryEstimateCount,
+      orderManagements: orderManagementCount,
     },
     isEnabled: themeExtensionEnabled,
     themeEditorUrl,
@@ -143,6 +146,12 @@ const features = [
     description: "Show delivery date by PIN code on product pages (Delhivery)",
     route: "/app/delivery-estimate",
     key: "deliveryEstimates" as const,
+  },
+  {
+    title: "Order Management",
+    description: "Let customers cancel or edit the address on unfulfilled orders",
+    route: "/app/order-management",
+    key: "orderManagements" as const,
   },
 ];
 

@@ -59,6 +59,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     stickyCarts,
     countdownTimers,
     deliverySettings,
+    orderManageSettings,
   ] = await Promise.all([
     prisma.trustBadge.findMany({ where: { shop, isEnabled: true } }),
     prisma.productBadge.findMany({ where: { shop, isActive: true }, orderBy: [{ priority: "desc" }, { createdAt: "desc" }] }),
@@ -67,6 +68,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     prisma.stickyCart.findMany({ where: { shop, isActive: true } }),
     prisma.countdownTimer.findMany({ where: { shop, isActive: true } }),
     prisma.deliverySettings.findUnique({ where: { shop } }),
+    prisma.orderManageSettings.findUnique({ where: { shop } }),
   ]);
 
   const globalSettings = appSettings
@@ -152,6 +154,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         /^\d{6}$/.test(deliverySettings?.originPin ?? ""),
       ),
       placement: deliverySettings?.placement ?? "below-atc",
+    },
+    orderManagement: {
+      enabled: Boolean(orderManageSettings?.isEnabled),
+      allowCancel: orderManageSettings?.allowCancel ?? true,
+      cancelScope: orderManageSettings?.cancelScope ?? "unpaid",
+      allowAddressEdit: orderManageSettings?.allowAddressEdit ?? true,
     },
   };
 
