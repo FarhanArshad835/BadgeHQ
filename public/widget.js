@@ -2696,21 +2696,49 @@
       if (themeBadge && cartEl) {
         try {
           var ourBubble = a.querySelector("[data-badgehq-wl-count]");
-          var tbs = window.getComputedStyle(themeBadge);
+          // Themes hide the cart badge when the cart is empty — measure it
+          // invisibly in that case, then restore. getComputedStyle is live,
+          // so snapshot every value BEFORE restoring the hidden state.
+          var restoreStyle = null;
+          var restoreText = null;
           var badgeRect = themeBadge.getBoundingClientRect();
+          if (badgeRect.width === 0) {
+            restoreStyle = themeBadge.getAttribute("style") || "";
+            themeBadge.style.setProperty("display", "block", "important");
+            themeBadge.style.setProperty("visibility", "hidden", "important");
+            if (!themeBadge.textContent) {
+              restoreText = themeBadge.textContent;
+              themeBadge.textContent = "1";
+            }
+            badgeRect = themeBadge.getBoundingClientRect();
+          }
+          var live = window.getComputedStyle(themeBadge);
+          var snap = {
+            lineHeight: live.lineHeight,
+            fontSize: live.fontSize,
+            fontWeight: live.fontWeight,
+            fontFamily: live.fontFamily,
+            borderRadius: live.borderRadius,
+            padding: live.padding,
+          };
           var cartRect = cartEl.getBoundingClientRect();
+          var offTop = Math.round(badgeRect.top - cartRect.top);
+          var offRight = Math.round(cartRect.right - badgeRect.right);
+          if (restoreStyle !== null) themeBadge.setAttribute("style", restoreStyle);
+          if (restoreText !== null) themeBadge.textContent = restoreText;
+
           if (ourBubble && badgeRect.width > 0 && cartRect.width > 0) {
             ourBubble.style.minWidth = badgeRect.width + "px";
             ourBubble.style.height = badgeRect.height + "px";
-            ourBubble.style.lineHeight = tbs.lineHeight;
-            ourBubble.style.fontSize = tbs.fontSize;
-            ourBubble.style.fontWeight = tbs.fontWeight;
-            ourBubble.style.fontFamily = tbs.fontFamily;
-            ourBubble.style.borderRadius = tbs.borderRadius;
-            ourBubble.style.padding = tbs.padding;
+            ourBubble.style.lineHeight = snap.lineHeight;
+            ourBubble.style.fontSize = snap.fontSize;
+            ourBubble.style.fontWeight = snap.fontWeight;
+            ourBubble.style.fontFamily = snap.fontFamily;
+            ourBubble.style.borderRadius = snap.borderRadius;
+            ourBubble.style.padding = snap.padding;
             // Same corner offset the theme uses for the cart badge.
-            ourBubble.style.top = Math.round(badgeRect.top - cartRect.top) + "px";
-            ourBubble.style.right = Math.round(cartRect.right - badgeRect.right) + "px";
+            ourBubble.style.top = offTop + "px";
+            ourBubble.style.right = offRight + "px";
             ourBubble.setAttribute("data-wl-display", "flex");
             ourBubble.style.display = count > 0 ? "flex" : "none";
             ourBubble.style.alignItems = "center";
