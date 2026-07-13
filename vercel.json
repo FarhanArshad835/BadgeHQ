@@ -23,6 +23,13 @@
         { "key": "Access-Control-Allow-Origin", "value": "*" },
         { "key": "Cache-Control", "value": "public, max-age=300, s-maxage=600" }
       ]
+    },
+    {
+      "source": "/api/delivery-edd",
+      "headers": [
+        { "key": "Access-Control-Allow-Origin", "value": "*" },
+        { "key": "Cache-Control", "value": "public, max-age=3600, s-maxage=21600" }
+      ]
     }
   ]
 }

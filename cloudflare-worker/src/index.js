@@ -38,6 +38,7 @@ const ORIGIN = "https://badge-hq.vercel.app";
 const CACHE_TTL_BY_PATH = {
   "/api/widgets": 3600,                 // 1 hour
   "/api/products/inventory": 21600,     // 6 hours
+  "/api/delivery-edd": 21600,           // 6 hours — TAT per shop+pincode barely changes intra-day
 };
 const DEFAULT_CACHE_TTL = 300;
 
@@ -117,7 +118,7 @@ export default {
           widget_hash: WIDGET_HASH,
           widget_built_at: WIDGET_BUILT_AT,
           widget_bytes: WIDGET_SOURCE.length,
-          routes: ["/widget.js", "/health", "/api/widgets", "/api/products/inventory"],
+          routes: ["/widget.js", "/health", "/api/widgets", "/api/products/inventory", "/api/delivery-edd"],
           origin: ORIGIN,
           cache_ttl_by_path_seconds: CACHE_TTL_BY_PATH,
         }),
@@ -151,6 +152,9 @@ export default {
       }
       if (url.pathname === "/api/products/inventory") {
         return proxyWithCache(request, "/api/products/inventory");
+      }
+      if (url.pathname === "/api/delivery-edd") {
+        return proxyWithCache(request, "/api/delivery-edd");
       }
     }
 

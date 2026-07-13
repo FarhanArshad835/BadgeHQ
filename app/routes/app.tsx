@@ -55,6 +55,7 @@ export default function App() {
         <Link to="/app/free-shipping-bar">Free Shipping Bar</Link>
         <Link to="/app/sticky-cart">Sticky Add to Cart</Link>
         <Link to="/app/countdown-timer">Countdown Timer</Link>
+        <Link to="/app/delivery-estimate">Delivery Estimate</Link>
         <Link to="/app/global-settings">Settings</Link>
         <Link to="/app/pricing">Pricing</Link>
       </NavMenu>
