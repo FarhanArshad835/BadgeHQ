@@ -60,11 +60,19 @@ export async function findOrderByName(admin: AdminGraphql, name: string): Promis
   };
 }
 
-/** Numeric tail comparison: order.customer.id is a gid, the proxy's
- * logged_in_customer_id is the bare numeric id. */
-export function customerOwnsOrder(order: OrderSummary, loggedInCustomerId: string): boolean {
-  if (!order.customerId || !/^\d+$/.test(loggedInCustomerId)) return false;
-  return order.customerId.endsWith(`/${loggedInCustomerId}`);
+/** Ownership check with a distinct "protected" state. When the app has not
+ * been granted Protected Customer Data access, Shopify redacts order.customer
+ * entirely (customerId === null) even though the order exists — that's a
+ * configuration gap, not a not-your-order case, so we report it separately.
+ * Numeric tail comparison: order.customer.id is a gid, logged_in_customer_id
+ * is the bare numeric id. */
+export function checkOwnership(
+  order: OrderSummary,
+  loggedInCustomerId: string,
+): "owner" | "not-owner" | "protected" {
+  if (order.customerId === null) return "protected";
+  if (!/^\d+$/.test(loggedInCustomerId)) return "not-owner";
+  return order.customerId.endsWith(`/${loggedInCustomerId}`) ? "owner" : "not-owner";
 }
 
 const UNPAID_STATUSES = ["PENDING", "AUTHORIZED", "EXPIRED"];

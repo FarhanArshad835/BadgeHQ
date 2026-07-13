@@ -19,7 +19,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import {
   cancelOrder,
-  customerOwnsOrder,
+  checkOwnership,
   findOrderByName,
   getEligibility,
   updateShippingAddress,
@@ -64,7 +64,16 @@ async function loadOwnedOrder(admin: any, url: URL, request: Request, customerId
     // Most likely the merchant hasn't approved the new orders scopes yet.
     return { error: json({ error: "permissions" }, { status: 200, headers: NO_STORE }) };
   }
-  if (!order || !customerOwnsOrder(order, customerId)) {
+  if (!order) {
+    return { error: json({ error: "order-not-found" }, { status: 404, headers: NO_STORE }) };
+  }
+  const ownership = checkOwnership(order, customerId);
+  if (ownership === "protected") {
+    // Order exists but customer field is redacted — Protected Customer Data
+    // access isn't granted yet. Surface it so the merchant can diagnose.
+    return { error: json({ error: "protected-data" }, { status: 200, headers: NO_STORE }) };
+  }
+  if (ownership !== "owner") {
     return { error: json({ error: "order-not-found" }, { status: 404, headers: NO_STORE }) };
   }
   return { order };
