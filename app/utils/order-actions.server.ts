@@ -17,13 +17,29 @@ export type OrderSummary = {
 
 type AdminGraphql = { graphql: (query: string, opts?: { variables?: any }) => Promise<Response> };
 
-const ORDER_FIELDS = `
+/**
+ * Protected Customer Data Level-2 gate. Shopify approved Level 1 (customer id,
+ * order number) but NOT Name/Address. Querying shippingAddress without that
+ * approval makes the Admin API reject the WHOLE order query, which would break
+ * even order cancellation. So while this is false we never request
+ * shippingAddress and the address-edit capability is disabled end to end.
+ * Flip to true once Shopify approves Level-2 PCD (ref #106713).
+ */
+export const ADDRESS_EDIT_ENABLED = false;
+
+// Level-1 only — safe to query with the currently approved PCD scope.
+const ORDER_FIELDS_BASE = `
   id
   name
   cancelledAt
   displayFinancialStatus
   fulfillments { id }
   customer { id }
+`;
+
+// Base + shippingAddress (Level-2 PCD). Only used when ADDRESS_EDIT_ENABLED.
+const ORDER_FIELDS_WITH_ADDRESS = `
+  ${ORDER_FIELDS_BASE}
   shippingAddress {
     firstName lastName address1 address2 city
     province provinceCode zip country countryCode phone
@@ -36,10 +52,11 @@ export async function findOrderByName(admin: AdminGraphql, name: string): Promis
   const clean = name.replace(/^#/, "").replace(/[^\w.-]/g, "");
   if (!clean) return null;
 
+  const fields = ADDRESS_EDIT_ENABLED ? ORDER_FIELDS_WITH_ADDRESS : ORDER_FIELDS_BASE;
   const resp = await admin.graphql(
     `query FindOrder($q: String!) {
       orders(first: 2, query: $q) {
-        edges { node { ${ORDER_FIELDS} } }
+        edges { node { ${fields} } }
       }
     }`,
     { variables: { q: `name:${clean}` } },
@@ -95,7 +112,10 @@ export function getEligibility(
     cancellable = false;
     reason = "prepaid";
   }
-  return { cancellable, reason, addressEditable: settings.allowAddressEdit };
+  // Address edit stays off until Shopify grants Level-2 PCD, regardless of the
+  // merchant's toggle.
+  const addressEditable = ADDRESS_EDIT_ENABLED && settings.allowAddressEdit;
+  return { cancellable, reason, addressEditable };
 }
 
 export async function cancelOrder(
@@ -136,6 +156,10 @@ export async function updateShippingAddress(
   orderId: string,
   form: URLSearchParams,
 ): Promise<{ ok: boolean; error?: string }> {
+  // Defense in depth: never touch address PII while Level-2 PCD is ungranted.
+  if (!ADDRESS_EDIT_ENABLED) {
+    return { ok: false, error: "address-edit-disabled" };
+  }
   const address: Record<string, string> = {};
   for (const f of ADDRESS_FIELDS) {
     const v = (form.get(f) || "").trim().slice(0, 255);

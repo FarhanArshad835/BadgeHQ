@@ -18,6 +18,7 @@ import { json } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import {
+  ADDRESS_EDIT_ENABLED,
   cancelOrder,
   checkOwnership,
   findOrderByName,
@@ -127,6 +128,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   if (intent === "update-address") {
+    // Address editing needs Level-2 PCD (Name/Address), not yet granted — see
+    // ADDRESS_EDIT_ENABLED. Reject before any PII handling.
+    if (!ADDRESS_EDIT_ENABLED) {
+      return json({ error: "address-edit-disabled" }, { status: 200, headers: NO_STORE });
+    }
     if (!addressEditable) return json({ error: "not-editable" }, { status: 403, headers: NO_STORE });
     const result = await updateShippingAddress(ctx.admin, order.id, form);
     return json(result, { status: result.ok ? 200 : 422, headers: NO_STORE });
