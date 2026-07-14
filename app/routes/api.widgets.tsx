@@ -156,6 +156,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         /^\d{6}$/.test(deliverySettings?.originPin ?? ""),
       ),
       placement: deliverySettings?.placement ?? "below-atc",
+      // Merchant-editable widget text (safe to expose — no token involved).
+      heading: deliverySettings?.headingText ?? "Estimate delivery date",
+      deliverBy: deliverySettings?.deliverByText ?? "Delivery by",
+      freeDelivery: deliverySettings?.freeDeliveryOn
+        ? (deliverySettings?.freeDeliveryText ?? "Free delivery")
+        : "",
+      fasterNote: deliverySettings?.fasterNoteOn
+        ? (deliverySettings?.fasterNoteText ?? "")
+        : "",
     },
     orderManagement: {
       enabled: Boolean(orderManageSettings?.isEnabled),

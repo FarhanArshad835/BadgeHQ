@@ -98,7 +98,7 @@
         renderCountdownTimer(timer, page, gs);
       });
     if (w.deliveryEstimate && w.deliveryEstimate.enabled && page === "product")
-      renderDeliveryEstimate(w.deliveryEstimate.placement || "below-atc");
+      renderDeliveryEstimate(w.deliveryEstimate);
     if (w.orderManagement && w.orderManagement.enabled && page === "order")
       renderOrderActions();
     if (w.wishlist && w.wishlist.enabled) initWishlist(w.wishlist, page);
@@ -151,7 +151,7 @@
           if (missing("badgehq-countdown-" + timer.id)) renderCountdownTimer(timer, page, gs);
         });
       if (w.deliveryEstimate && w.deliveryEstimate.enabled && missing("badgehq-delivery-estimate"))
-        mountDeliveryEstimate(w.deliveryEstimate.placement || "below-atc", 0);
+        mountDeliveryEstimate(w.deliveryEstimate, 0);
       if (w.wishlist && w.wishlist.enabled) {
         if (w.wishlist.showOnProduct && missing("badgehq-wl-product"))
           wlMountProductButton(w.wishlist, 0);
@@ -2066,11 +2066,11 @@
   }
 
   /* ===================== DELIVERY ESTIMATE ===================== */
-  function renderDeliveryEstimate(placement) {
+  function renderDeliveryEstimate(cfg) {
     // Dawn/Release mount <product-form> as a web component after initial
     // parse, so the anchor isn't there on first tick. mountDeliveryEstimate
     // retries on its own until the anchor appears.
-    mountDeliveryEstimate(placement, 0);
+    mountDeliveryEstimate(cfg, 0);
   }
 
   // Resolve the delivery widget's insertion point for the chosen placement.
@@ -2102,8 +2102,14 @@
     return form ? { target: form, before: false } : null;
   }
 
-  function mountDeliveryEstimate(placement, attempt) {
+  function mountDeliveryEstimate(cfg, attempt) {
+    cfg = cfg || {};
     attempt = attempt || 0;
+    var placement = cfg.placement || "below-atc";
+    var heading = cfg.heading || "Estimate delivery date";
+    var deliverBy = cfg.deliverBy || "Delivery by";
+    var freeDelivery = cfg.freeDelivery || "";
+    var fasterNote = cfg.fasterNote || "";
     // Skip if already injected, or if the merchant placed the optional
     // "Delivery Estimate" theme app block for manual positioning.
     if (document.querySelector("[data-delivery-estimate]")) return;
@@ -2113,7 +2119,7 @@
       // Anchor not in the DOM yet (late mount / mid variant-swap): retry a
       // bounded number of times before giving up.
       if (attempt < 12) {
-        setTimeout(function () { mountDeliveryEstimate(placement, attempt + 1); }, 400);
+        setTimeout(function () { mountDeliveryEstimate(cfg, attempt + 1); }, 400);
       }
       return;
     }
@@ -2136,6 +2142,10 @@
         '.badgehq-de__result[data-de-state="idle"]{margin-top:0;}' +
         '.badgehq-de__result[data-de-state="ok"]{color:#157a3d;}' +
         '.badgehq-de__result[data-de-state="unserviceable"],.badgehq-de__result[data-de-state="error"]{color:rgb(var(--color-foreground,18 18 18));opacity:0.85;}' +
+        ".badgehq-de__row{display:flex;align-items:center;gap:6px;}" +
+        ".badgehq-de__row svg{flex:none;}" +
+        ".badgehq-de__row+.badgehq-de__row{margin-top:4px;}" +
+        ".badgehq-de__faster{color:rgb(var(--color-foreground,18 18 18));opacity:0.7;font-size:0.92em;}" +
         ".badgehq-de__result svg{vertical-align:-2px;margin-right:4px;}" +
         ".badgehq-de__result strong{font-weight:700;}" +
         ".badgehq-de-spinner{display:inline-block;width:13px;height:13px;margin-right:4px;vertical-align:-1px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:badgehq-de-spin 0.6s linear infinite;}" +
@@ -2152,7 +2162,7 @@
       '<div class="badgehq-de__label">' +
       '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">' +
       '<path fill="currentColor" d="M12 2a7 7 0 0 0-7 7c0 5 7 13 7 13s7-8 7-13a7 7 0 0 0-7-7Zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5Z"/></svg>' +
-      "<span>Estimate delivery date</span></div>" +
+      "<span>" + escapeDeHtml(heading) + "</span></div>" +
       '<form class="badgehq-de__form" novalidate>' +
       '<input class="badgehq-de__input" type="text" inputmode="numeric" pattern="\\d{6}" maxlength="6" autocomplete="postal-code" placeholder="Enter 6-digit PIN code" aria-label="Enter your 6-digit PIN code">' +
       '<button class="badgehq-de__button" type="submit">Check</button></form>' +
@@ -2193,7 +2203,11 @@
           return r.json();
         })
         .then(function (data) {
-          var html = deliveryResultHtml(data);
+          var html = deliveryResultHtml(data, {
+            deliverBy: deliverBy,
+            freeDelivery: freeDelivery,
+            fasterNote: fasterNote,
+          });
           if (html) {
             setState("ok", html);
           } else {
@@ -2247,32 +2261,53 @@
   }
 
   // Build the "ok" result HTML from the EDD response. Returns "" when no
-  // configured mode is serviceable. When the merchant shows both Standard
-  // and Express, one labelled row renders per serviceable mode; the legacy
+  // configured mode is serviceable. Shows a single "{deliverBy} {date}" row
+  // using the fastest serviceable date (no standard/express labels), plus
+  // optional merchant free-delivery and "faster at checkout" lines. The
   // top-level etaText path keeps old cached responses working.
   var DE_CHECK_SVG =
     '<svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">' +
     '<path fill="currentColor" d="M8 15.2 3.8 11l1.4-1.4L8 12.4l6.8-6.8L16.2 7 8 15.2z"/></svg>';
-  var DE_MODE_LABELS = { standard: "Standard delivery", express: "Express delivery" };
+  var DE_TRUCK_SVG =
+    '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">' +
+    '<path fill="currentColor" d="M3 4h11v9H3V4Zm12 3h3.5L21 10v3h-6V7ZM6.5 18a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Zm11 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Z"/></svg>';
 
-  function deliveryResultHtml(data) {
-    if (!data) return "";
-    if (Object.prototype.toString.call(data.modes) === "[object Array]" && data.modes.length) {
-      var rows = [];
+  // Pick the earliest (fastest) serviceable entry from the modes array.
+  function fastestServiceable(data) {
+    if (Object.prototype.toString.call(data.modes) === "[object Array]") {
+      var best = null;
       for (var i = 0; i < data.modes.length; i++) {
         var m = data.modes[i];
         if (!m || !m.serviceable || !(m.etaText || m.etaDate)) continue;
-        var label = data.modes.length > 1
-          ? (DE_MODE_LABELS[m.mode] || "Delivery")
-          : "Delivery";
-        rows.push(DE_CHECK_SVG + label + " by <strong>" + escapeDeHtml(m.etaText || m.etaDate) + "</strong>");
+        if (!best || String(m.etaDate || "") < String(best.etaDate || "")) best = m;
       }
-      return rows.join("<br>");
+      if (best) return best;
     }
     if (data.serviceable && (data.etaText || data.etaDate)) {
-      return DE_CHECK_SVG + "Delivery by <strong>" + escapeDeHtml(data.etaText || data.etaDate) + "</strong>";
+      return { etaText: data.etaText, etaDate: data.etaDate };
     }
-    return "";
+    return null;
+  }
+
+  function deliveryResultHtml(data, opts) {
+    if (!data) return "";
+    opts = opts || {};
+    var best = fastestServiceable(data);
+    if (!best) return "";
+    var deliverBy = opts.deliverBy || "Delivery by";
+    var when = best.etaText || best.etaDate;
+    var html =
+      '<div class="badgehq-de__row">' + DE_CHECK_SVG +
+      "<span>" + escapeDeHtml(deliverBy) + " <strong>" + escapeDeHtml(when) + "</strong></span></div>";
+    if (opts.freeDelivery) {
+      html += '<div class="badgehq-de__row">' + DE_TRUCK_SVG +
+        "<span>" + escapeDeHtml(opts.freeDelivery) + "</span></div>";
+    }
+    if (opts.fasterNote) {
+      html += '<div class="badgehq-de__row badgehq-de__faster"><span>' +
+        escapeDeHtml(opts.fasterNote) + "</span></div>";
+    }
+    return html;
   }
 
   /* ===================== ORDER MANAGEMENT (account order page) ===================== */

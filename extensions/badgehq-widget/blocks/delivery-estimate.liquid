@@ -13,6 +13,9 @@
   data-delivery-estimate
   data-de-endpoint="https://badgehq-widget.badgehq.workers.dev/api/delivery-edd"
   data-de-shop="{{ shop.permanent_domain }}"
+  data-de-deliverby="{{ block.settings.deliver_by_text | escape }}"
+  {% if block.settings.show_free_delivery %}data-de-free="{{ block.settings.free_delivery_text | escape }}"{% endif %}
+  {% if block.settings.show_faster_note %}data-de-faster="{{ block.settings.faster_note_text | escape }}"{% endif %}
   {{ block.shopify_attributes }}
 >
   <div class="de-widget__label">
@@ -101,6 +104,10 @@
   .de-widget__result[data-de-state="error"] { color: rgb(var(--color-foreground, 18 18 18)); opacity: 0.85; }
   .de-widget__result .de-icon { vertical-align: -2px; margin-right: 4px; }
   .de-widget__result strong { font-weight: 700; }
+  .de-widget__row { display: flex; align-items: center; gap: 6px; }
+  .de-widget__row .de-icon { flex: none; vertical-align: baseline; margin-right: 0; }
+  .de-widget__row + .de-widget__row { margin-top: 4px; }
+  .de-widget__faster { color: rgb(var(--color-foreground, 18 18 18)); opacity: 0.7; font-size: 0.92em; }
   .de-spinner {
     display: inline-block;
     width: 13px; height: 13px;
@@ -122,7 +129,12 @@
   "settings": [
     { "type": "text", "id": "heading", "label": "Heading", "default": "Estimate delivery date" },
     { "type": "text", "id": "button_label", "label": "Button label", "default": "Check" },
-    { "type": "text", "id": "placeholder", "label": "Input placeholder", "default": "Enter 6-digit PIN code" }
+    { "type": "text", "id": "placeholder", "label": "Input placeholder", "default": "Enter 6-digit PIN code" },
+    { "type": "text", "id": "deliver_by_text", "label": "Delivery date prefix", "default": "Delivery by", "info": "Shown before the date, e.g. \"Delivery by Sun, 19 Jul\"." },
+    { "type": "checkbox", "id": "show_free_delivery", "label": "Show a free-delivery line", "default": false },
+    { "type": "text", "id": "free_delivery_text", "label": "Free-delivery text", "default": "Free delivery" },
+    { "type": "checkbox", "id": "show_faster_note", "label": "Show a \"faster at checkout\" note", "default": false },
+    { "type": "text", "id": "faster_note_text", "label": "Note text", "default": "Faster delivery methods available at checkout" }
   ]
 }
 {% endschema %}

@@ -161,6 +161,12 @@ model DeliverySettings {
   environment  String  @default("staging")
   placement    String  @default("below-atc")
   deliveryMode String  @default("standard") // "standard" | "express" | "both"
+  headingText      String  @default("Estimate delivery date")
+  deliverByText    String  @default("Delivery by")
+  freeDeliveryOn   Boolean @default(false)
+  freeDeliveryText String  @default("Free delivery")
+  fasterNoteOn     Boolean @default(false)
+  fasterNoteText   String  @default("Faster delivery methods available at checkout")
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }

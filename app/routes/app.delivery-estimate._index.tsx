@@ -43,6 +43,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     environment: settings?.environment ?? "staging",
     placement: settings?.placement ?? "below-atc",
     deliveryMode: settings?.deliveryMode ?? "standard",
+    headingText: settings?.headingText ?? "Estimate delivery date",
+    deliverByText: settings?.deliverByText ?? "Delivery by",
+    freeDeliveryOn: settings?.freeDeliveryOn ?? false,
+    freeDeliveryText: settings?.freeDeliveryText ?? "Free delivery",
+    fasterNoteOn: settings?.fasterNoteOn ?? false,
+    fasterNoteText:
+      settings?.fasterNoteText ?? "Faster delivery methods available at checkout",
   });
 };
 
@@ -116,6 +123,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const deliveryMode = MODES.includes(data.deliveryMode) ? data.deliveryMode : "standard";
   const newToken = String(data.apiToken || "").trim();
 
+  // Merchant-editable widget text. Cap length; fall back to defaults when blank
+  // for the fields that should never be empty on the storefront.
+  const clampText = (v: unknown, fallback: string) => {
+    const s = String(v ?? "").trim().slice(0, 120);
+    return s || fallback;
+  };
+  const headingText = clampText(data.headingText, "Estimate delivery date");
+  const deliverByText = clampText(data.deliverByText, "Delivery by");
+  const freeDeliveryOn = Boolean(data.freeDeliveryOn);
+  const freeDeliveryText = clampText(data.freeDeliveryText, "Free delivery");
+  const fasterNoteOn = Boolean(data.fasterNoteOn);
+  const fasterNoteText = clampText(
+    data.fasterNoteText,
+    "Faster delivery methods available at checkout",
+  );
+
   try {
     await prisma.deliverySettings.upsert({
       where: { shop: session.shop },
@@ -128,6 +151,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         environment,
         placement,
         deliveryMode,
+        headingText,
+        deliverByText,
+        freeDeliveryOn,
+        freeDeliveryText,
+        fasterNoteOn,
+        fasterNoteText,
       },
       update: {
         isEnabled: data.isEnabled,
@@ -138,6 +167,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         environment,
         placement,
         deliveryMode,
+        headingText,
+        deliverByText,
+        freeDeliveryOn,
+        freeDeliveryText,
+        fasterNoteOn,
+        fasterNoteText,
       },
     });
     await bumpConfigVersion(session.shop);
@@ -169,6 +204,12 @@ export default function DeliveryEstimate() {
     environment: loaderData.environment,
     placement: loaderData.placement,
     deliveryMode: loaderData.deliveryMode,
+    headingText: loaderData.headingText,
+    deliverByText: loaderData.deliverByText,
+    freeDeliveryOn: loaderData.freeDeliveryOn,
+    freeDeliveryText: loaderData.freeDeliveryText,
+    fasterNoteOn: loaderData.fasterNoteOn,
+    fasterNoteText: loaderData.fasterNoteText,
   };
 
   const [enabled, setEnabled] = useState(initial.enabled);
@@ -178,6 +219,12 @@ export default function DeliveryEstimate() {
   const [environment, setEnvironment] = useState(initial.environment);
   const [placement, setPlacement] = useState(initial.placement);
   const [deliveryMode, setDeliveryMode] = useState(initial.deliveryMode);
+  const [headingText, setHeadingText] = useState(initial.headingText);
+  const [deliverByText, setDeliverByText] = useState(initial.deliverByText);
+  const [freeDeliveryOn, setFreeDeliveryOn] = useState(initial.freeDeliveryOn);
+  const [freeDeliveryText, setFreeDeliveryText] = useState(initial.freeDeliveryText);
+  const [fasterNoteOn, setFasterNoteOn] = useState(initial.fasterNoteOn);
+  const [fasterNoteText, setFasterNoteText] = useState(initial.fasterNoteText);
   const [testPincode, setTestPincode] = useState("");
   const [showSuccess, setShowSuccess] = useState(false);
 
@@ -188,7 +235,13 @@ export default function DeliveryEstimate() {
     bufferDays !== initial.bufferDays ||
     environment !== initial.environment ||
     placement !== initial.placement ||
-    deliveryMode !== initial.deliveryMode;
+    deliveryMode !== initial.deliveryMode ||
+    headingText !== initial.headingText ||
+    deliverByText !== initial.deliverByText ||
+    freeDeliveryOn !== initial.freeDeliveryOn ||
+    freeDeliveryText !== initial.freeDeliveryText ||
+    fasterNoteOn !== initial.fasterNoteOn ||
+    fasterNoteText !== initial.fasterNoteText;
 
   useEffect(() => {
     if (actionData?.success) {
@@ -207,6 +260,12 @@ export default function DeliveryEstimate() {
     setEnvironment(initial.environment);
     setPlacement(initial.placement);
     setDeliveryMode(initial.deliveryMode);
+    setHeadingText(initial.headingText);
+    setDeliverByText(initial.deliverByText);
+    setFreeDeliveryOn(initial.freeDeliveryOn);
+    setFreeDeliveryText(initial.freeDeliveryText);
+    setFasterNoteOn(initial.fasterNoteOn);
+    setFasterNoteText(initial.fasterNoteText);
   };
 
   const handleSave = () => {
@@ -218,6 +277,12 @@ export default function DeliveryEstimate() {
       environment,
       placement,
       deliveryMode,
+      headingText,
+      deliverByText,
+      freeDeliveryOn,
+      freeDeliveryText,
+      fasterNoteOn,
+      fasterNoteText,
     };
     submit({ data: JSON.stringify(data) }, { method: "POST" });
   };
@@ -279,7 +344,63 @@ export default function DeliveryEstimate() {
                   ]}
                   value={deliveryMode}
                   onChange={setDeliveryMode}
-                  helpText='Which Delhivery shipping speed the estimate uses. "Show both" displays a standard and an express date side by side.'
+                  helpText='Which Delhivery shipping speed the estimate uses. "Show both" shows the fastest available date to the shopper.'
+                />
+              </BlockStack>
+            </Card>
+
+            <Card>
+              <BlockStack gap="400">
+                <Text as="h2" variant="headingMd">Widget text</Text>
+                <Text as="p" tone="subdued">
+                  Control the wording shoppers see. Shipping speeds are never labelled
+                  "standard" or "express" on the storefront.
+                </Text>
+                <TextField
+                  label="Widget heading"
+                  value={headingText}
+                  onChange={setHeadingText}
+                  autoComplete="off"
+                  maxLength={120}
+                  helpText="Shown above the PIN-code field, e.g. “Estimate delivery date”."
+                />
+                <TextField
+                  label="Delivery date prefix"
+                  value={deliverByText}
+                  onChange={setDeliverByText}
+                  autoComplete="off"
+                  maxLength={120}
+                  helpText="Shown before the date, e.g. “Delivery by” → “Delivery by Sun, 19 Jul”."
+                />
+                <Checkbox
+                  label="Show a free-delivery line"
+                  helpText="Displays an extra line inside the widget once a PIN is serviceable"
+                  checked={freeDeliveryOn}
+                  onChange={setFreeDeliveryOn}
+                />
+                <TextField
+                  label="Free-delivery text"
+                  value={freeDeliveryText}
+                  onChange={setFreeDeliveryText}
+                  autoComplete="off"
+                  maxLength={120}
+                  disabled={!freeDeliveryOn}
+                  placeholder="e.g. Free delivery over ₹499"
+                />
+                <Checkbox
+                  label="Show a “faster at checkout” note"
+                  helpText="Tells shoppers faster shipping options are available later"
+                  checked={fasterNoteOn}
+                  onChange={setFasterNoteOn}
+                />
+                <TextField
+                  label="Note text"
+                  value={fasterNoteText}
+                  onChange={setFasterNoteText}
+                  autoComplete="off"
+                  maxLength={120}
+                  disabled={!fasterNoteOn}
+                  placeholder="e.g. Faster delivery methods available at checkout"
                 />
               </BlockStack>
             </Card>

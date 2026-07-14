@@ -32,6 +32,13 @@
     var result = root.querySelector('[data-de-result]');
     if (!endpoint || !shop || !form || !input || !result) return;
 
+    // Merchant-editable text from the block settings (data-* attributes).
+    var textOpts = {
+      deliverBy: root.getAttribute('data-de-deliverby') || 'Delivery by',
+      freeDelivery: root.getAttribute('data-de-free') || '',
+      fasterNote: root.getAttribute('data-de-faster') || ''
+    };
+
     // Restore the shopper's last-used PIN so they don't retype it per product.
     try {
       var saved = localStorage.getItem(STORAGE_KEY);
@@ -82,7 +89,7 @@
         })
         .then(function (data) {
           root.removeAttribute('data-de-hidden');
-          var html = resultHtml(data);
+          var html = resultHtml(data, textOpts);
           if (html) {
             setState('ok', html);
           } else {
@@ -112,30 +119,52 @@
   }
 
   // Build the "ok" result HTML from the EDD response. Returns '' when no
-  // configured mode is serviceable. When the merchant shows both Standard
-  // and Express, one labelled row renders per serviceable mode; the legacy
+  // configured mode is serviceable. Shows a single "{deliverBy} {date}" row
+  // using the fastest serviceable date (no standard/express labels), plus
+  // optional merchant free-delivery and "faster at checkout" lines. The
   // top-level etaText path keeps old cached responses working.
   var CHECK_SVG =
     '<svg class="de-icon" viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">' +
     '<path fill="currentColor" d="M8 15.2 3.8 11l1.4-1.4L8 12.4l6.8-6.8L16.2 7 8 15.2z"/></svg>';
-  var MODE_LABELS = { standard: 'Standard delivery', express: 'Express delivery' };
+  var TRUCK_SVG =
+    '<svg class="de-icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">' +
+    '<path fill="currentColor" d="M3 4h11v9H3V4Zm12 3h3.5L21 10v3h-6V7ZM6.5 18a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Zm11 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Z"/></svg>';
 
-  function resultHtml(data) {
-    if (!data) return '';
-    if (Object.prototype.toString.call(data.modes) === '[object Array]' && data.modes.length) {
-      var rows = [];
+  function fastestServiceable(data) {
+    if (Object.prototype.toString.call(data.modes) === '[object Array]') {
+      var best = null;
       for (var i = 0; i < data.modes.length; i++) {
         var m = data.modes[i];
         if (!m || !m.serviceable || !(m.etaText || m.etaDate)) continue;
-        var label = data.modes.length > 1 ? (MODE_LABELS[m.mode] || 'Delivery') : 'Delivery';
-        rows.push(CHECK_SVG + label + ' by <strong>' + escapeHtml(m.etaText || m.etaDate) + '</strong>');
+        if (!best || String(m.etaDate || '') < String(best.etaDate || '')) best = m;
       }
-      return rows.join('<br>');
+      if (best) return best;
     }
     if (data.serviceable && (data.etaText || data.etaDate)) {
-      return CHECK_SVG + 'Delivery by <strong>' + escapeHtml(data.etaText || data.etaDate) + '</strong>';
+      return { etaText: data.etaText, etaDate: data.etaDate };
     }
-    return '';
+    return null;
+  }
+
+  function resultHtml(data, opts) {
+    if (!data) return '';
+    opts = opts || {};
+    var best = fastestServiceable(data);
+    if (!best) return '';
+    var deliverBy = opts.deliverBy || 'Delivery by';
+    var when = best.etaText || best.etaDate;
+    var html =
+      '<div class="de-widget__row">' + CHECK_SVG +
+      '<span>' + escapeHtml(deliverBy) + ' <strong>' + escapeHtml(when) + '</strong></span></div>';
+    if (opts.freeDelivery) {
+      html += '<div class="de-widget__row">' + TRUCK_SVG +
+        '<span>' + escapeHtml(opts.freeDelivery) + '</span></div>';
+    }
+    if (opts.fasterNote) {
+      html += '<div class="de-widget__row de-widget__faster"><span>' +
+        escapeHtml(opts.fasterNote) + '</span></div>';
+    }
+    return html;
   }
 
   function initAll() {
