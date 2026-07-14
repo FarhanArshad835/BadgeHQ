@@ -4,8 +4,12 @@
  *   /api/delivery-edd?shop={shop}.myshopify.com&pincode=NNNNNN
  *
  * Responses (widget contract):
- *   200 { serviceable: true, etaDate: "2026-07-17", etaText: "Fri, 17 Jul" }
- *   200 { serviceable: false }
+ *   200 { serviceable: true, etaDate: "2026-07-17", etaText: "Fri, 17 Jul",
+ *         modes: [{ mode: "standard", serviceable: true, etaDate, etaText },
+ *                 { mode: "express", ... }] }   — modes follow the merchant's
+ *         deliveryMode setting; top-level etaDate/etaText mirror the first
+ *         serviceable mode for old cached widget.js copies.
+ *   200 { serviceable: false, modes: [...] }
  *   404 { error: "not-configured" }  — widget stays silent
  *   502 { error: "upstream" }        — widget shows "try again"
  *
@@ -17,9 +21,11 @@ import { json } from "@remix-run/node";
 import prisma from "../db.server";
 import {
   DELHIVERY_BASES,
+  DELIVERY_MODES,
   computeEtaDate,
   fetchDelhiveryTat,
   formatEta,
+  modesForSetting,
 } from "../utils/delivery-eta.server";
 
 const CORS_HEADERS = {
@@ -60,24 +66,40 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     return json({ error: "not-configured" }, { status: 404, headers: CORS_HEADERS });
   }
 
-  let data: any;
-  try {
-    data = await fetchDelhiveryTat({
-      base: DELHIVERY_BASES[settings.environment] || DELHIVERY_BASES.staging,
-      token: settings.apiToken,
-      originPin: settings.originPin,
-      destinationPin: pincode,
-    });
-  } catch {
+  // One Delhivery call per configured delivery speed (Surface / Express).
+  const modes = modesForSetting(settings.deliveryMode);
+  const results = await Promise.allSettled(
+    modes.map((mode) =>
+      fetchDelhiveryTat({
+        base: DELHIVERY_BASES[settings.environment] || DELHIVERY_BASES.staging,
+        token: settings.apiToken,
+        originPin: settings.originPin,
+        destinationPin: pincode,
+        mot: DELIVERY_MODES[mode],
+      }),
+    ),
+  );
+
+  if (results.every((r) => r.status === "rejected")) {
     // Upstream failure — 502 is never cached by the worker.
     return json({ error: "upstream" }, { status: 502, headers: CORS_HEADERS });
   }
 
-  const tat = data && data.success && data.data ? data.data.tat : null;
-  const payload =
-    typeof tat === "number" && tat >= 0
-      ? { serviceable: true, ...formatEta(computeEtaDate(tat, settings.bufferDays)) }
-      : { serviceable: false };
+  const modeResults = modes.map((mode, i) => {
+    const r = results[i];
+    const data: any = r.status === "fulfilled" ? r.value : null;
+    const tat = data && data.success && data.data ? data.data.tat : null;
+    return typeof tat === "number" && tat >= 0
+      ? { mode, serviceable: true as const, ...formatEta(computeEtaDate(tat, settings.bufferDays)) }
+      : { mode, serviceable: false as const };
+  });
+
+  // Backward-compatible top level (old cached widget.js reads these):
+  // primary = first serviceable mode in display order (standard before express).
+  const primary = modeResults.find((m) => m.serviceable);
+  const payload = primary
+    ? { serviceable: true, etaDate: primary.etaDate, etaText: primary.etaText, modes: modeResults }
+    : { serviceable: false, modes: modeResults };
 
   return json(payload, {
     headers: {

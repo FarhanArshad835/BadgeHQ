@@ -47,6 +47,19 @@ export const DELHIVERY_BASES: Record<string, string> = {
   production: "https://track.delhivery.com",
 };
 
+/** Delivery speeds we expose, mapped to Delhivery's mode-of-transport
+ * codes: Surface (standard) and Express (air). */
+export const DELIVERY_MODES = { standard: "S", express: "E" } as const;
+export type DeliveryMode = keyof typeof DELIVERY_MODES;
+
+/** Resolve the merchant's deliveryMode setting ("standard" | "express" |
+ * "both") to the list of modes to query, in display order. */
+export function modesForSetting(setting: string): DeliveryMode[] {
+  if (setting === "express") return ["express"];
+  if (setting === "both") return ["standard", "express"];
+  return ["standard"];
+}
+
 /** Call Delhivery Expected TAT. Returns the raw parsed JSON; throws on
  * non-2xx or network failure. */
 export async function fetchDelhiveryTat(opts: {
@@ -54,12 +67,13 @@ export async function fetchDelhiveryTat(opts: {
   token: string;
   originPin: string;
   destinationPin: string;
+  mot?: "S" | "E";
 }): Promise<any> {
   const url =
     `${opts.base}/api/dc/expected_tat` +
     `?origin_pin=${encodeURIComponent(opts.originPin)}` +
     `&destination_pin=${encodeURIComponent(opts.destinationPin)}` +
-    `&mot=S`;
+    `&mot=${opts.mot || "S"}`;
 
   const res = await fetch(url, {
     headers: {

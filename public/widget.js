@@ -2193,12 +2193,9 @@
           return r.json();
         })
         .then(function (data) {
-          if (data && data.serviceable && (data.etaText || data.etaDate)) {
-            var when = data.etaText || data.etaDate;
-            setState("ok",
-              '<svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">' +
-              '<path fill="currentColor" d="M8 15.2 3.8 11l1.4-1.4L8 12.4l6.8-6.8L16.2 7 8 15.2z"/></svg>' +
-              "Delivery by <strong>" + escapeDeHtml(when) + "</strong>");
+          var html = deliveryResultHtml(data);
+          if (html) {
+            setState("ok", html);
           } else {
             setState("unserviceable",
               "Sorry, we don’t deliver to <strong>" + escapeDeHtml(pin) + "</strong> yet.");
@@ -2247,6 +2244,35 @@
     return String(s).replace(/[&<>"']/g, function (c) {
       return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
     });
+  }
+
+  // Build the "ok" result HTML from the EDD response. Returns "" when no
+  // configured mode is serviceable. When the merchant shows both Standard
+  // and Express, one labelled row renders per serviceable mode; the legacy
+  // top-level etaText path keeps old cached responses working.
+  var DE_CHECK_SVG =
+    '<svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">' +
+    '<path fill="currentColor" d="M8 15.2 3.8 11l1.4-1.4L8 12.4l6.8-6.8L16.2 7 8 15.2z"/></svg>';
+  var DE_MODE_LABELS = { standard: "Standard delivery", express: "Express delivery" };
+
+  function deliveryResultHtml(data) {
+    if (!data) return "";
+    if (Object.prototype.toString.call(data.modes) === "[object Array]" && data.modes.length) {
+      var rows = [];
+      for (var i = 0; i < data.modes.length; i++) {
+        var m = data.modes[i];
+        if (!m || !m.serviceable || !(m.etaText || m.etaDate)) continue;
+        var label = data.modes.length > 1
+          ? (DE_MODE_LABELS[m.mode] || "Delivery")
+          : "Delivery";
+        rows.push(DE_CHECK_SVG + label + " by <strong>" + escapeDeHtml(m.etaText || m.etaDate) + "</strong>");
+      }
+      return rows.join("<br>");
+    }
+    if (data.serviceable && (data.etaText || data.etaDate)) {
+      return DE_CHECK_SVG + "Delivery by <strong>" + escapeDeHtml(data.etaText || data.etaDate) + "</strong>";
+    }
+    return "";
   }
 
   /* ===================== ORDER MANAGEMENT (account order page) ===================== */

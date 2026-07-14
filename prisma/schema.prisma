@@ -157,9 +157,10 @@ model DeliverySettings {
   isEnabled   Boolean  @default(false)
   apiToken    String   @default("")
   originPin   String   @default("")
-  bufferDays  Int      @default(1)
-  environment String   @default("staging")
-  placement   String   @default("below-atc")
+  bufferDays   Int     @default(1)
+  environment  String  @default("staging")
+  placement    String  @default("below-atc")
+  deliveryMode String  @default("standard") // "standard" | "express" | "both"
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }

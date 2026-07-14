@@ -21,9 +21,11 @@ import prisma from "../db.server";
 import { bumpConfigVersion } from "../utils/config-version.server";
 import {
   DELHIVERY_BASES,
+  DELIVERY_MODES,
   computeEtaDate,
   fetchDelhiveryTat,
   formatEta,
+  modesForSetting,
 } from "../utils/delivery-eta.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -40,6 +42,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     bufferDays: settings?.bufferDays ?? 1,
     environment: settings?.environment ?? "staging",
     placement: settings?.placement ?? "below-atc",
+    deliveryMode: settings?.deliveryMode ?? "standard",
   });
 };
 
@@ -59,29 +62,41 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     if (!/^\d{6}$/.test(pincode)) {
       return json({ testError: "Enter a valid 6-digit PIN code to test." });
     }
-    try {
-      const data = await fetchDelhiveryTat({
-        base: DELHIVERY_BASES[settings.environment] || DELHIVERY_BASES.staging,
-        token: settings.apiToken,
-        originPin: settings.originPin,
-        destinationPin: pincode,
-      });
-      const tat = data && data.success && data.data ? data.data.tat : null;
-      if (typeof tat === "number" && tat >= 0) {
-        const eta = formatEta(computeEtaDate(tat, settings.bufferDays));
-        return json({
-          testResult: `Serviceable — transit ${tat} day(s), estimated delivery ${eta.etaText} (${eta.etaDate}).`,
-        });
-      }
-      return json({
-        testResult: `Delhivery responded, but ${pincode} is not serviceable from ${settings.originPin} (${settings.environment}). Note: staging supports very few pincodes.`,
-      });
-    } catch {
+    const modes = modesForSetting(settings.deliveryMode);
+    const results = await Promise.allSettled(
+      modes.map((mode) =>
+        fetchDelhiveryTat({
+          base: DELHIVERY_BASES[settings.environment] || DELHIVERY_BASES.staging,
+          token: settings.apiToken,
+          originPin: settings.originPin,
+          destinationPin: pincode,
+          mot: DELIVERY_MODES[mode],
+        }),
+      ),
+    );
+    if (results.every((r) => r.status === "rejected")) {
       return json({
         testError:
           "Delhivery API call failed. Check that the token matches the selected environment (staging tokens don't work on production and vice versa).",
       });
     }
+    const label = (m: string) => m.charAt(0).toUpperCase() + m.slice(1);
+    const lines = modes.map((mode, i) => {
+      const r = results[i];
+      const data: any = r.status === "fulfilled" ? r.value : null;
+      const tat = data && data.success && data.data ? data.data.tat : null;
+      if (typeof tat === "number" && tat >= 0) {
+        const eta = formatEta(computeEtaDate(tat, settings.bufferDays));
+        return `${label(mode)}: serviceable — transit ${tat} day(s), estimated delivery ${eta.etaText} (${eta.etaDate})`;
+      }
+      return `${label(mode)}: not serviceable from ${settings.originPin}`;
+    });
+    if (lines.every((l) => l.includes("not serviceable"))) {
+      return json({
+        testResult: `Delhivery responded, but ${pincode} is not serviceable from ${settings.originPin} (${settings.environment}). Note: staging supports very few pincodes.`,
+      });
+    }
+    return json({ testResult: lines.join(" · ") + "." });
   }
 
   const data = JSON.parse(formData.get("data") as string);
@@ -97,6 +112,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const environment = data.environment === "production" ? "production" : "staging";
   const PLACEMENTS = ["below-atc", "above-atc", "below-description"];
   const placement = PLACEMENTS.includes(data.placement) ? data.placement : "below-atc";
+  const MODES = ["standard", "express", "both"];
+  const deliveryMode = MODES.includes(data.deliveryMode) ? data.deliveryMode : "standard";
   const newToken = String(data.apiToken || "").trim();
 
   try {
@@ -110,6 +127,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         bufferDays,
         environment,
         placement,
+        deliveryMode,
       },
       update: {
         isEnabled: data.isEnabled,
@@ -119,6 +137,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         bufferDays,
         environment,
         placement,
+        deliveryMode,
       },
     });
     await bumpConfigVersion(session.shop);
@@ -149,6 +168,7 @@ export default function DeliveryEstimate() {
     bufferDays: String(loaderData.bufferDays),
     environment: loaderData.environment,
     placement: loaderData.placement,
+    deliveryMode: loaderData.deliveryMode,
   };
 
   const [enabled, setEnabled] = useState(initial.enabled);
@@ -157,6 +177,7 @@ export default function DeliveryEstimate() {
   const [bufferDays, setBufferDays] = useState(initial.bufferDays);
   const [environment, setEnvironment] = useState(initial.environment);
   const [placement, setPlacement] = useState(initial.placement);
+  const [deliveryMode, setDeliveryMode] = useState(initial.deliveryMode);
   const [testPincode, setTestPincode] = useState("");
   const [showSuccess, setShowSuccess] = useState(false);
 
@@ -166,7 +187,8 @@ export default function DeliveryEstimate() {
     originPin !== initial.originPin ||
     bufferDays !== initial.bufferDays ||
     environment !== initial.environment ||
-    placement !== initial.placement;
+    placement !== initial.placement ||
+    deliveryMode !== initial.deliveryMode;
 
   useEffect(() => {
     if (actionData?.success) {
@@ -184,6 +206,7 @@ export default function DeliveryEstimate() {
     setBufferDays(initial.bufferDays);
     setEnvironment(initial.environment);
     setPlacement(initial.placement);
+    setDeliveryMode(initial.deliveryMode);
   };
 
   const handleSave = () => {
@@ -194,6 +217,7 @@ export default function DeliveryEstimate() {
       bufferDays,
       environment,
       placement,
+      deliveryMode,
     };
     submit({ data: JSON.stringify(data) }, { method: "POST" });
   };
@@ -245,6 +269,17 @@ export default function DeliveryEstimate() {
                   value={placement}
                   onChange={setPlacement}
                   helpText="Where the PIN-code checker appears on your product pages"
+                />
+                <Select
+                  label="Delivery speed shown"
+                  options={[
+                    { label: "Standard delivery (surface)", value: "standard" },
+                    { label: "Express delivery (air)", value: "express" },
+                    { label: "Show both", value: "both" },
+                  ]}
+                  value={deliveryMode}
+                  onChange={setDeliveryMode}
+                  helpText='Which Delhivery shipping speed the estimate uses. "Show both" displays a standard and an express date side by side.'
                 />
               </BlockStack>
             </Card>
