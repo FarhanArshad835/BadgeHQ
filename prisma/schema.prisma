@@ -178,6 +178,7 @@ model OrderManageSettings {
   allowCancel      Boolean  @default(true)
   cancelScope      String   @default("unpaid") // "unpaid" | "all"
   allowAddressEdit Boolean  @default(true)
+  showOnPages      String   @default("[\"account\"]") // JSON array: "account" | "account-new" | "thank-you"
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 }

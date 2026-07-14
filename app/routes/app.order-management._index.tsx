@@ -10,6 +10,7 @@ import {
   Text,
   Select,
   Checkbox,
+  ChoiceList,
   Banner,
 } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
@@ -27,8 +28,24 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     allowCancel: settings?.allowCancel ?? true,
     cancelScope: settings?.cancelScope ?? "unpaid",
     allowAddressEdit: settings?.allowAddressEdit ?? true,
+    showOnPages: parsePages(settings?.showOnPages),
   });
 };
+
+const VALID_PAGES = ["account", "account-new", "thank-you"];
+
+function parsePages(raw: string | null | undefined): string[] {
+  try {
+    const arr = JSON.parse(raw ?? '["account"]');
+    if (Array.isArray(arr)) {
+      const clean = arr.filter((p) => VALID_PAGES.includes(p));
+      if (clean.length) return clean;
+    }
+  } catch {
+    // fall through to default
+  }
+  return ["account"];
+}
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -36,6 +53,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const data = JSON.parse(formData.get("data") as string);
 
   const cancelScope = data.cancelScope === "all" ? "all" : "unpaid";
+  // Whitelist the requested pages; always keep at least one so the widget has
+  // somewhere to show.
+  const pages = Array.isArray(data.showOnPages)
+    ? data.showOnPages.filter((p: unknown) => VALID_PAGES.includes(p as string))
+    : [];
+  const showOnPages = JSON.stringify(pages.length ? pages : ["account"]);
 
   try {
     await prisma.orderManageSettings.upsert({
@@ -46,12 +69,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         allowCancel: data.allowCancel,
         cancelScope,
         allowAddressEdit: data.allowAddressEdit,
+        showOnPages,
       },
       update: {
         isEnabled: data.isEnabled,
         allowCancel: data.allowCancel,
         cancelScope,
         allowAddressEdit: data.allowAddressEdit,
+        showOnPages,
       },
     });
     await bumpConfigVersion(session.shop);
@@ -71,19 +96,22 @@ export default function OrderManagement() {
     allowCancel: loaderData.allowCancel,
     cancelScope: loaderData.cancelScope,
     allowAddressEdit: loaderData.allowAddressEdit,
+    showOnPages: loaderData.showOnPages,
   };
 
   const [enabled, setEnabled] = useState(initial.enabled);
   const [allowCancel, setAllowCancel] = useState(initial.allowCancel);
   const [cancelScope, setCancelScope] = useState(initial.cancelScope);
   const [allowAddressEdit, setAllowAddressEdit] = useState(initial.allowAddressEdit);
+  const [showOnPages, setShowOnPages] = useState<string[]>(initial.showOnPages);
   const [showSuccess, setShowSuccess] = useState(false);
 
   const isDirty =
     enabled !== initial.enabled ||
     allowCancel !== initial.allowCancel ||
     cancelScope !== initial.cancelScope ||
-    allowAddressEdit !== initial.allowAddressEdit;
+    allowAddressEdit !== initial.allowAddressEdit ||
+    JSON.stringify(showOnPages) !== JSON.stringify(initial.showOnPages);
 
   useEffect(() => {
     if (actionData?.success) {
@@ -98,11 +126,20 @@ export default function OrderManagement() {
     setAllowCancel(initial.allowCancel);
     setCancelScope(initial.cancelScope);
     setAllowAddressEdit(initial.allowAddressEdit);
+    setShowOnPages(initial.showOnPages);
   };
 
   const handleSave = () => {
     submit(
-      { data: JSON.stringify({ isEnabled: enabled, allowCancel, cancelScope, allowAddressEdit }) },
+      {
+        data: JSON.stringify({
+          isEnabled: enabled,
+          allowCancel,
+          cancelScope,
+          allowAddressEdit,
+          showOnPages,
+        }),
+      },
       { method: "POST" },
     );
   };
@@ -138,6 +175,35 @@ export default function OrderManagement() {
                   helpText="When disabled, no buttons appear on customer order pages"
                   checked={enabled}
                   onChange={setEnabled}
+                />
+              </BlockStack>
+            </Card>
+
+            <Card>
+              <BlockStack gap="400">
+                <Text as="h2" variant="headingMd">Where to show</Text>
+                <ChoiceList
+                  allowMultiple
+                  title="Show the order buttons on"
+                  choices={[
+                    {
+                      label: "Customer account order page (classic)",
+                      value: "account",
+                      helpText: "The order page under your storefront's customer accounts. Works today.",
+                    },
+                    {
+                      label: "New customer account order page",
+                      value: "account-new",
+                      helpText: "Shopify's new customer accounts order page. Requires the app extension (coming soon).",
+                    },
+                    {
+                      label: "Thank-you page (after checkout)",
+                      value: "thank-you",
+                      helpText: "Shown right after purchase, including guest checkouts. Requires the app extension (coming soon).",
+                    },
+                  ]}
+                  selected={showOnPages}
+                  onChange={setShowOnPages}
                 />
               </BlockStack>
             </Card>

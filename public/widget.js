@@ -99,7 +99,16 @@
       });
     if (w.deliveryEstimate && w.deliveryEstimate.enabled && page === "product")
       renderDeliveryEstimate(w.deliveryEstimate);
-    if (w.orderManagement && w.orderManagement.enabled && page === "order")
+    // The classic customer-account order page maps to the "account" surface.
+    // Other surfaces (new customer account, thank-you) are served by the app
+    // UI extension, not this script.
+    if (
+      w.orderManagement &&
+      w.orderManagement.enabled &&
+      page === "order" &&
+      (!w.orderManagement.showOnPages ||
+        w.orderManagement.showOnPages.indexOf("account") !== -1)
+    )
       renderOrderActions();
     if (w.wishlist && w.wishlist.enabled) initWishlist(w.wishlist, page);
 

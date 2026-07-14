@@ -171,6 +171,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       allowCancel: orderManageSettings?.allowCancel ?? true,
       cancelScope: orderManageSettings?.cancelScope ?? "unpaid",
       allowAddressEdit: orderManageSettings?.allowAddressEdit ?? true,
+      showOnPages: orderManageSettings?.showOnPages
+        ? JSON.parse(orderManageSettings.showOnPages)
+        : ["account"],
     },
     wishlist: {
       enabled: Boolean(wishlistSettings?.isEnabled),
