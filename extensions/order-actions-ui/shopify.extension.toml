@@ -1,0 +1,20 @@
+api_version = "2025-01"
+
+[[extensions]]
+name = "BadgeHQ Order Actions"
+handle = "order-actions-ui"
+type = "ui_extension"
+
+  [extensions.capabilities]
+  # Required so the extension can fetch() our backend cancel endpoint.
+  network_access = true
+
+  # Thank-you page (post-purchase, may be a guest).
+  [[extensions.targeting]]
+  module = "./src/ThankYou.tsx"
+  target = "purchase.thank-you.block.render"
+
+  # New customer accounts order page (always logged in).
+  [[extensions.targeting]]
+  module = "./src/OrderStatus.tsx"
+  target = "customer-account.order-status.block.render"

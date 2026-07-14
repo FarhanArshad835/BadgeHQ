@@ -7,6 +7,11 @@
     "**/.client/**/*.ts",
     "**/.client/**/*.tsx"
   ],
+  "exclude": [
+    "node_modules",
+    "build",
+    "extensions"
+  ],
   "compilerOptions": {
     "lib": ["DOM", "DOM.Iterable", "ES2022"],
     "types": ["@shopify/app-bridge-types"],

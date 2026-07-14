@@ -8,6 +8,7 @@
 export type OrderSummary = {
   id: string;
   name: string;
+  createdAt: string | null;
   cancelledAt: string | null;
   displayFinancialStatus: string;
   fulfillmentCount: number;
@@ -31,11 +32,26 @@ export const ADDRESS_EDIT_ENABLED = false;
 const ORDER_FIELDS_BASE = `
   id
   name
+  createdAt
   cancelledAt
   displayFinancialStatus
   fulfillments { id }
   customer { id }
 `;
+
+/** Map a GraphQL order node onto the OrderSummary shape. */
+function toOrderSummary(node: any): OrderSummary {
+  return {
+    id: node.id,
+    name: node.name,
+    createdAt: node.createdAt ?? null,
+    cancelledAt: node.cancelledAt,
+    displayFinancialStatus: node.displayFinancialStatus || "",
+    fulfillmentCount: (node.fulfillments || []).length,
+    customerId: node.customer?.id ?? null,
+    shippingAddress: node.shippingAddress ?? null,
+  };
+}
 
 // Base + shippingAddress (Level-2 PCD). Only used when ADDRESS_EDIT_ENABLED.
 const ORDER_FIELDS_WITH_ADDRESS = `
@@ -65,16 +81,28 @@ export async function findOrderByName(admin: AdminGraphql, name: string): Promis
   const edges = body?.data?.orders?.edges ?? [];
   if (edges.length !== 1) return null;
 
-  const node = edges[0].node;
-  return {
-    id: node.id,
-    name: node.name,
-    cancelledAt: node.cancelledAt,
-    displayFinancialStatus: node.displayFinancialStatus || "",
-    fulfillmentCount: (node.fulfillments || []).length,
-    customerId: node.customer?.id ?? null,
-    shippingAddress: node.shippingAddress ?? null,
-  };
+  return toOrderSummary(edges[0].node);
+}
+
+/** Look up an order by its Admin gid (gid://shopify/Order/123). Used by the
+ * checkout/customer-account UI extension flow, where the extension gives us a
+ * gid rather than an order name. Validates the gid shape so a caller-supplied
+ * value can't be an arbitrary id. */
+export async function findOrderById(admin: AdminGraphql, gid: string): Promise<OrderSummary | null> {
+  if (!/^gid:\/\/shopify\/Order\/\d+$/.test(gid)) return null;
+
+  const fields = ADDRESS_EDIT_ENABLED ? ORDER_FIELDS_WITH_ADDRESS : ORDER_FIELDS_BASE;
+  const resp = await admin.graphql(
+    `query GetOrder($id: ID!) {
+      order(id: $id) { ${fields} }
+    }`,
+    { variables: { id: gid } },
+  );
+  const body = await resp.json();
+  const node = body?.data?.order;
+  if (!node) return null;
+
+  return toOrderSummary(node);
 }
 
 /** Ownership check with a distinct "protected" state. When the app has not
