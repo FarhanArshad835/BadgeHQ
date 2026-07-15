@@ -21,7 +21,8 @@ export async function fetchConfigDetailed(shop: string): Promise<ConfigResult> {
     const res = await fetch(CONFIG_ENDPOINT + "?shop=" + encodeURIComponent(shop));
     if (!res.ok) return { config: null, debug: "http-" + res.status };
     const data = await res.json();
-    const om = data && data.orderManagement;
+    // The API nests feature configs under `widgets`.
+    const om = data && data.widgets && data.widgets.orderManagement;
     if (!om) return { config: null, debug: "no-orderManagement-field" };
     return {
       config: {
