@@ -2328,12 +2328,20 @@
   function renderOrderActions() {
     if (document.getElementById("badgehq-order-actions")) return;
 
-    // Find the order name ("#172138") in the page heading.
-    var name = null;
-    var headings = document.querySelectorAll("h1, h2");
-    for (var i = 0; i < headings.length; i++) {
-      var m = headings[i].textContent.match(/#[\w-]+/);
-      if (m) { name = m[0]; break; }
+    // A merchant-placed "Order Actions" theme block gives us an explicit
+    // mount point and can carry the order name directly (Liquid: order.name).
+    var placedBlock = document.querySelector("[data-badgehq-order-actions]");
+
+    // Find the order name ("#172138"): the placed block's attribute first,
+    // then the page heading, then the document title.
+    var name = placedBlock && placedBlock.getAttribute("data-order-name");
+    name = name && name.trim();
+    if (!name) {
+      var headings = document.querySelectorAll("h1, h2");
+      for (var i = 0; i < headings.length; i++) {
+        var m = headings[i].textContent.match(/#[\w-]+/);
+        if (m) { name = m[0]; break; }
+      }
     }
     if (!name) {
       var t = (document.title || "").match(/#[\w-]+/);
@@ -2349,12 +2357,12 @@
       .then(function (info) {
         if (!info || !info.enabled) return;
         if (!info.cancellable && !info.addressEditable && info.reason !== "prepaid") return;
-        mountOrderActions(name, info);
+        mountOrderActions(name, info, placedBlock);
       })
       .catch(function () { /* proxy unreachable — stay silent */ });
   }
 
-  function mountOrderActions(name, info) {
+  function mountOrderActions(name, info, placedBlock) {
     if (document.getElementById("badgehq-order-actions")) return;
 
     if (!document.getElementById("badgehq-om-style")) {
@@ -2423,14 +2431,20 @@
     html += '<div class="badgehq-om__msg" data-om-msg aria-live="polite"></div>';
     root.innerHTML = html;
 
-    // Insert after the first heading's block, else prepend to main.
-    var h = document.querySelector("h1");
-    if (h && h.parentNode) {
-      h.parentNode.insertBefore(root, h.nextSibling);
+    // If the merchant placed the theme block, render inside it (exact
+    // position they chose). Otherwise auto-place after the order heading.
+    if (placedBlock) {
+      placedBlock.innerHTML = "";
+      placedBlock.appendChild(root);
     } else {
-      var main = document.querySelector("main, #MainContent");
-      if (main) main.prepend(root);
-      else return;
+      var h = document.querySelector("h1");
+      if (h && h.parentNode) {
+        h.parentNode.insertBefore(root, h.nextSibling);
+      } else {
+        var main = document.querySelector("main, #MainContent");
+        if (main) main.prepend(root);
+        else return;
+      }
     }
 
     var msgEl = root.querySelector("[data-om-msg]");

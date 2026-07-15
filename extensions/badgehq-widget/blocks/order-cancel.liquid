@@ -1,0 +1,27 @@
+{%- comment -%}
+  BadgeHQ: Order-actions (cancel / edit address) block for the customer's
+  order-status page. Merchant places this app block on the Order template in
+  the theme editor (like Codify's cancel button). widget.js hydrates it from
+  the BadgeHQ backend via the app proxy — the customer can cancel or edit the
+  address only while the order is unfulfilled, and only for their own order.
+
+  No network-access approval needed: this is a theme app block, not a
+  checkout UI extension. It renders on the classic Online Store order page
+  (not the checkout Thank-you page or New Customer Accounts pages).
+{%- endcomment -%}
+
+<script src="https://badgehq-widget.badgehq.workers.dev/widget.js" async></script>
+
+<div
+  data-badgehq-order-actions
+  {%- if order and order.name %} data-order-name="{{ order.name | escape }}"{%- endif %}
+  {{ block.shopify_attributes }}
+></div>
+
+{% schema %}
+{
+  "name": "Order Actions",
+  "target": "section",
+  "settings": []
+}
+{% endschema %}
