@@ -28,6 +28,9 @@ export function CancelBlock(props: {
 }) {
   const { surface, orderId, shop, getToken, ui } = props;
   const { BlockStack, Button, Banner, Text } = ui;
+  // TEMP DEBUG: surface what the extension actually receives so a blank block
+  // becomes diagnosable. Remove once confirmed working.
+  const [dbg, setDbg] = useState<string>("init");
   // Two independent gates: config visibility (merchant-level) and per-order
   // eligibility. `visible` starts null = "still deciding".
   const [visible, setVisible] = useState<boolean | null>(null);
@@ -42,20 +45,28 @@ export function CancelBlock(props: {
   useEffect(() => {
     let stop = false;
     (async () => {
-      if (!shop) return; // no shop yet — wait
+      if (!shop) { setDbg("no-shop orderId=" + (orderId ? "yes" : "null")); return; }
       const cfg = await fetchConfig(shop);
       if (stop) return;
+      if (!cfg) { setDbg("config-fetch-failed shop=" + shop); }
       const on =
         !!cfg &&
         cfg.enabled &&
         cfg.allowCancel &&
         cfg.showOnPages.indexOf(surface) !== -1;
+      if (cfg) {
+        setDbg(
+          "cfg enabled=" + cfg.enabled + " allowCancel=" + cfg.allowCancel +
+          " pages=[" + cfg.showOnPages.join(",") + "] surface=" + surface +
+          " orderId=" + (orderId ? "yes" : "null"),
+        );
+      }
       setVisible(on);
     })();
     return () => {
       stop = true;
     };
-  }, [shop, surface]);
+  }, [shop, surface, orderId]);
 
   // Gate 2: per-order eligibility. On failure we DON'T hide — we fall back to
   // an enabled button (the POST re-checks server-side and rejects safely), so
@@ -79,10 +90,10 @@ export function CancelBlock(props: {
     };
   }, [visible, orderId, getToken]);
 
-  // Only hide when config genuinely says the feature is off for this surface.
-  if (visible === false) return null;
-  // Still resolving config, or no order id yet — render nothing briefly.
-  if (visible === null || !orderId) return null;
+  // TEMP DEBUG: show why the block would be blank instead of returning null.
+  if (visible === false || visible === null || !orderId) {
+    return <Text>BadgeHQ debug: {dbg}</Text>;
+  }
 
   async function onCancel() {
     setBusy(true);
