@@ -83,8 +83,9 @@ export async function requestCancel(orderId: string, token: string): Promise<{ o
     });
     const data = await res.json().catch(() => ({}));
     if (res.ok && data && data.ok) return { ok: true };
-    return { ok: false, error: (data && data.error) || "cancel-failed" };
-  } catch {
-    return { ok: false, error: "network" };
+    // TEMP: surface the HTTP status + server error code for diagnosis.
+    return { ok: false, error: (data && data.error) || ("http-" + res.status) };
+  } catch (e: any) {
+    return { ok: false, error: "network:" + String(e && e.message ? e.message : e).slice(0, 40) };
   }
 }

@@ -160,6 +160,9 @@ function errorText(error?: string): string {
     case "not-enabled":
       return "Order cancellation isn’t available right now.";
     default:
-      return "Couldn’t cancel right now. Please try again.";
+      // TEMP: surface the raw error code for diagnosis.
+      return error
+        ? "Couldn’t cancel (" + error + ")."
+        : "Couldn’t cancel right now. Please try again.";
   }
 }
