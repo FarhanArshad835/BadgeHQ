@@ -34,15 +34,37 @@ const UNPAID_STATUSES = ["PENDING", "AUTHORIZED", "EXPIRED"];
 // leaked/guessed order gid).
 const GUEST_WINDOW_MS = 60 * 60 * 1000; // 60 minutes
 
+// CORS preflight for the checkout/customer-account extension. The browser
+// sends an unauthenticated OPTIONS before the real POST/GET (because of the
+// Authorization + Content-Type headers). authenticate.public.checkout throws
+// 410 on a tokenless request, which fails the preflight and makes the real
+// request "Failed to fetch" — so we answer OPTIONS ourselves, first.
+const CORS_PREFLIGHT_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Authorization, Content-Type",
+  "Access-Control-Max-Age": "86400",
+};
+
+function preflightIfOptions(request: Request): Response | null {
+  if (request.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: CORS_PREFLIGHT_HEADERS });
+  }
+  return null;
+}
+
 // GET ?orderId=gid -> eligibility for THIS order, so the extension can show a
 // greyed-out disabled Cancel button on cancelled/fulfilled/prepaid orders
 // instead of hiding it. Also serves the CORS preflight when no orderId given.
 export const loader = async ({ request }: LoaderFunctionArgs) => {
+  const pre = preflightIfOptions(request);
+  if (pre) return pre;
+
   const { cors, sessionToken } = await authenticate.public.checkout(request);
 
   const url = new URL(request.url);
   const orderId = url.searchParams.get("orderId") || "";
-  if (!orderId) return cors(json({ ok: true })); // preflight / no-op
+  if (!orderId) return cors(json({ ok: true })); // no-op
 
   const shop = String(sessionToken.dest || "").replace(/^https?:\/\//, "");
   const customerGid = sessionToken.sub ? String(sessionToken.sub) : null;
@@ -74,6 +96,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
+  const pre = preflightIfOptions(request);
+  if (pre) return pre;
+
   const { cors, sessionToken } = await authenticate.public.checkout(request);
 
   const shop = String(sessionToken.dest || "").replace(/^https?:\/\//, "");
