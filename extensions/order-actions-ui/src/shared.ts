@@ -10,26 +10,35 @@ export type OrderMgmtConfig = {
   showOnPages: string[];
 };
 
-// Fetch the merchant's order-management config for this shop. Returns null on
-// any failure so the extension simply renders nothing.
-export async function fetchConfig(shop: string): Promise<OrderMgmtConfig | null> {
+// Result carries an optional debug string so a fetch failure is diagnosable.
+export type ConfigResult = { config: OrderMgmtConfig | null; debug: string };
+
+// Fetch the merchant's order-management config for this shop. No custom headers
+// (keeps it a CORS "simple" request → no preflight, which some extension
+// network sandboxes block).
+export async function fetchConfigDetailed(shop: string): Promise<ConfigResult> {
   try {
-    const res = await fetch(CONFIG_ENDPOINT + "?shop=" + encodeURIComponent(shop), {
-      headers: { Accept: "application/json" },
-    });
-    if (!res.ok) return null;
+    const res = await fetch(CONFIG_ENDPOINT + "?shop=" + encodeURIComponent(shop));
+    if (!res.ok) return { config: null, debug: "http-" + res.status };
     const data = await res.json();
     const om = data && data.orderManagement;
-    if (!om) return null;
+    if (!om) return { config: null, debug: "no-orderManagement-field" };
     return {
-      enabled: Boolean(om.enabled),
-      allowCancel: om.allowCancel !== false,
-      cancelScope: om.cancelScope || "unpaid",
-      showOnPages: Array.isArray(om.showOnPages) ? om.showOnPages : ["account"],
+      config: {
+        enabled: Boolean(om.enabled),
+        allowCancel: om.allowCancel !== false,
+        cancelScope: om.cancelScope || "unpaid",
+        showOnPages: Array.isArray(om.showOnPages) ? om.showOnPages : ["account"],
+      },
+      debug: "ok",
     };
-  } catch {
-    return null;
+  } catch (e: any) {
+    return { config: null, debug: "fetch-threw:" + String(e && e.message ? e.message : e).slice(0, 60) };
   }
+}
+
+export async function fetchConfig(shop: string): Promise<OrderMgmtConfig | null> {
+  return (await fetchConfigDetailed(shop)).config;
 }
 
 export type Eligibility = {

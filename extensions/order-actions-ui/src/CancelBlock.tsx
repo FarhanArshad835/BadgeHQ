@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { fetchConfig, fetchEligibility, requestCancel } from "./shared";
+import { fetchConfigDetailed, fetchEligibility, requestCancel } from "./shared";
 
 type Surface = "thank-you" | "account-new";
 
@@ -46,9 +46,9 @@ export function CancelBlock(props: {
     let stop = false;
     (async () => {
       if (!shop) { setDbg("no-shop orderId=" + (orderId ? "yes" : "null")); return; }
-      const cfg = await fetchConfig(shop);
+      const { config: cfg, debug } = await fetchConfigDetailed(shop);
       if (stop) return;
-      if (!cfg) { setDbg("config-fetch-failed shop=" + shop); }
+      if (!cfg) { setDbg("config-fail(" + debug + ") shop=" + shop); }
       const on =
         !!cfg &&
         cfg.enabled &&
