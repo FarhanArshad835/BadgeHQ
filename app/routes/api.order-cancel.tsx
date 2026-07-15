@@ -53,6 +53,25 @@ function preflightIfOptions(request: Request): Response | null {
   return null;
 }
 
+// authenticate.public.checkout THROWS a Response (e.g. 401/410) when the
+// session token is missing/expired, and that thrown response has NO CORS
+// headers — so the browser reports "Failed to fetch" instead of the real
+// status. Wrap it so auth failures come back as a CORS-safe JSON error.
+async function authOrCorsError(request: Request) {
+  try {
+    const ctx = await authenticate.public.checkout(request);
+    return { ctx };
+  } catch (e) {
+    const status = e instanceof Response ? e.status : 401;
+    return {
+      errorResponse: json(
+        { error: "auth-failed", status },
+        { status: 200, headers: { ...CORS_PREFLIGHT_HEADERS, "Cache-Control": "no-store" } },
+      ),
+    };
+  }
+}
+
 // GET ?orderId=gid -> eligibility for THIS order, so the extension can show a
 // greyed-out disabled Cancel button on cancelled/fulfilled/prepaid orders
 // instead of hiding it. Also serves the CORS preflight when no orderId given.
@@ -60,7 +79,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const pre = preflightIfOptions(request);
   if (pre) return pre;
 
-  const { cors, sessionToken } = await authenticate.public.checkout(request);
+  const auth = await authOrCorsError(request);
+  if ("errorResponse" in auth) return auth.errorResponse;
+  const { cors, sessionToken } = auth.ctx;
 
   const url = new URL(request.url);
   const orderId = url.searchParams.get("orderId") || "";
@@ -99,7 +120,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const pre = preflightIfOptions(request);
   if (pre) return pre;
 
-  const { cors, sessionToken } = await authenticate.public.checkout(request);
+  const auth = await authOrCorsError(request);
+  if ("errorResponse" in auth) return auth.errorResponse;
+  const { cors, sessionToken } = auth.ctx;
 
   const shop = String(sessionToken.dest || "").replace(/^https?:\/\//, "");
   const customerGid = sessionToken.sub ? String(sessionToken.sub) : null;
