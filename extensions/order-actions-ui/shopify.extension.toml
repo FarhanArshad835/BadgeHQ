@@ -3,7 +3,6 @@ api_version = "2025-07"
 [[extensions]]
 name = "BadgeHQ Order Actions"
 handle = "order-actions-ui"
-uid = "45b24e1a-3e8f-425b-2e06-eb6bae6b910b291ca051"
 type = "ui_extension"
 
   [extensions.capabilities]
