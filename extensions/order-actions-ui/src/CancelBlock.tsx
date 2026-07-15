@@ -28,19 +28,21 @@ export function CancelBlock(props: {
 }) {
   const { surface, orderId, shop, getToken, ui } = props;
   const { BlockStack, Button, Banner, Text } = ui;
-  const [visible, setVisible] = useState(false);
-  const [cancellable, setCancellable] = useState(false);
+  // Two independent gates: config visibility (merchant-level) and per-order
+  // eligibility. `visible` starts null = "still deciding".
+  const [visible, setVisible] = useState<boolean | null>(null);
+  // eligState: "loading" | "cancellable" | "blocked" | "unknown"
+  const [eligState, setEligState] = useState<"loading" | "cancellable" | "blocked" | "unknown">("loading");
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<null | "ok" | "error">(null);
   const [message, setMessage] = useState("");
 
-  // Decide whether to render, and whether THIS order is cancellable, so we can
-  // show the button greyed-out/disabled on cancelled/fulfilled/prepaid orders.
+  // Gate 1: is the feature enabled for this surface? (merchant config)
   useEffect(() => {
     let stop = false;
     (async () => {
-      if (!orderId || !shop) return;
+      if (!shop) return; // no shop yet — wait
       const cfg = await fetchConfig(shop);
       if (stop) return;
       const on =
@@ -49,20 +51,38 @@ export function CancelBlock(props: {
         cfg.allowCancel &&
         cfg.showOnPages.indexOf(surface) !== -1;
       setVisible(on);
-      if (!on) return;
-      const token = await getToken();
-      if (stop || !token) return;
-      const elig = await fetchEligibility(orderId, token);
-      if (stop || !elig) return;
-      setCancellable(elig.cancellable);
-      setReason(elig.reason);
     })();
     return () => {
       stop = true;
     };
-  }, [orderId, shop, surface, getToken]);
+  }, [shop, surface]);
 
-  if (!visible || !orderId) return null;
+  // Gate 2: per-order eligibility. On failure we DON'T hide — we fall back to
+  // an enabled button (the POST re-checks server-side and rejects safely), so
+  // a transient fetch problem never makes the whole feature invisible.
+  useEffect(() => {
+    let stop = false;
+    (async () => {
+      if (visible !== true || !orderId) return;
+      setEligState("loading");
+      const token = await getToken();
+      if (stop) return;
+      if (!token) { setEligState("unknown"); return; }
+      const elig = await fetchEligibility(orderId, token);
+      if (stop) return;
+      if (!elig) { setEligState("unknown"); return; }
+      setReason(elig.reason);
+      setEligState(elig.cancellable ? "cancellable" : "blocked");
+    })();
+    return () => {
+      stop = true;
+    };
+  }, [visible, orderId, getToken]);
+
+  // Only hide when config genuinely says the feature is off for this surface.
+  if (visible === false) return null;
+  // Still resolving config, or no order id yet — render nothing briefly.
+  if (visible === null || !orderId) return null;
 
   async function onCancel() {
     setBusy(true);
@@ -93,8 +113,8 @@ export function CancelBlock(props: {
     );
   }
 
-  // Not cancellable — show a disabled button with a reason, rather than hiding.
-  if (!cancellable) {
+  // Blocked (cancelled/fulfilled/prepaid) — show a disabled button + reason.
+  if (eligState === "blocked") {
     const label =
       reason === "cancelled"
         ? "Order cancelled"
@@ -119,11 +139,13 @@ export function CancelBlock(props: {
     );
   }
 
+  // cancellable, still-loading, or eligibility-unknown -> show the active
+  // button (server re-checks on POST). Loading spinner while eligibility loads.
   return (
     <BlockStack spacing="base">
       {done === "error" ? <Banner status="critical">{message}</Banner> : null}
       <Text>Changed your mind? You can cancel this order while it’s still unfulfilled.</Text>
-      <Button kind="secondary" loading={busy} onPress={onCancel}>
+      <Button kind="secondary" loading={busy || eligState === "loading"} onPress={onCancel}>
         Cancel order
       </Button>
     </BlockStack>
