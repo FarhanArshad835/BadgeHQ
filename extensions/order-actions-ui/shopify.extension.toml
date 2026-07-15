@@ -6,11 +6,10 @@ handle = "order-actions-ui"
 type = "ui_extension"
 
   [extensions.capabilities]
-  # network_access temporarily removed so the app version can RELEASE without
-  # Shopify's network-access approval — which was blocking the whole version,
-  # including the Order Actions theme block. Re-add `network_access = true`
-  # and request approval in the Dev Dashboard when enabling this React
-  # extension's checkout Thank-you / New-Customer-Accounts surfaces.
+  # Network access is now allowed for the app (Dev Dashboard → Allow network
+  # access), so the extension can fetch() our backend cancel endpoint and the
+  # version can release.
+  network_access = true
 
   # Thank-you page (post-purchase, may be a guest).
   [[extensions.targeting]]
