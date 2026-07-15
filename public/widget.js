@@ -2356,7 +2356,10 @@
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (info) {
         if (!info || !info.enabled) return;
-        if (!info.cancellable && !info.addressEditable && info.reason !== "prepaid") return;
+        // Render whenever the merchant allows cancellation — even if this
+        // specific order can't be cancelled (cancelled/fulfilled/prepaid), so
+        // the button shows greyed-out with the reason instead of vanishing.
+        if (!info.allowCancel && !info.cancellable && !info.addressEditable) return;
         mountOrderActions(name, info, placedBlock);
       })
       .catch(function () { /* proxy unreachable — stay silent */ });
@@ -2401,10 +2404,22 @@
       );
     }
 
+    // Label for the disabled state, by reason.
+    var disabledLabel = "Cancel order";
+    if (info.reason === "cancelled") disabledLabel = "Order cancelled";
+    else if (info.reason === "fulfilled") disabledLabel = "Cancel unavailable";
+
     var html = "<h3>Manage this order</h3>";
     html += '<div class="badgehq-om__row">';
     if (info.cancellable) {
       html += '<button type="button" class="badgehq-om__btn badgehq-om__btn--danger" data-om-cancel>Cancel order</button>';
+    } else if (info.allowCancel) {
+      // Show the button greyed-out/disabled rather than hiding it, so the
+      // customer sees the action exists but isn't available for this order.
+      html +=
+        '<button type="button" class="badgehq-om__btn badgehq-om__btn--danger" disabled ' +
+        'aria-disabled="true" title="' + escapeDeHtml(disabledLabel) + '">' +
+        escapeDeHtml(disabledLabel) + "</button>";
     }
     if (info.addressEditable) {
       html += '<button type="button" class="badgehq-om__btn badgehq-om__btn--secondary" data-om-edit>Edit shipping address</button>';
@@ -2412,6 +2427,10 @@
     html += "</div>";
     if (!info.cancellable && info.reason === "prepaid") {
       html += '<p class="badgehq-om__msg">This order is prepaid — please contact us to cancel it.</p>';
+    } else if (!info.cancellable && info.reason === "fulfilled") {
+      html += '<p class="badgehq-om__msg">This order has been shipped and can no longer be cancelled.</p>';
+    } else if (!info.cancellable && info.reason === "cancelled") {
+      html += '<p class="badgehq-om__msg">This order has already been cancelled.</p>';
     }
     if (info.addressEditable) {
       html +=

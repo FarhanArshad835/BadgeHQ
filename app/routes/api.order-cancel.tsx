@@ -34,10 +34,43 @@ const UNPAID_STATUSES = ["PENDING", "AUTHORIZED", "EXPIRED"];
 // leaked/guessed order gid).
 const GUEST_WINDOW_MS = 60 * 60 * 1000; // 60 minutes
 
-// Preflight — authenticate.public.checkout handles the CORS/OPTIONS response.
+// GET ?orderId=gid -> eligibility for THIS order, so the extension can show a
+// greyed-out disabled Cancel button on cancelled/fulfilled/prepaid orders
+// instead of hiding it. Also serves the CORS preflight when no orderId given.
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { cors } = await authenticate.public.checkout(request);
-  return cors(json({ ok: true }));
+  const { cors, sessionToken } = await authenticate.public.checkout(request);
+
+  const url = new URL(request.url);
+  const orderId = url.searchParams.get("orderId") || "";
+  if (!orderId) return cors(json({ ok: true })); // preflight / no-op
+
+  const shop = String(sessionToken.dest || "").replace(/^https?:\/\//, "");
+  const customerGid = sessionToken.sub ? String(sessionToken.sub) : null;
+  if (!shop) return cors(json({ error: "no-shop" }, { status: 400 }));
+
+  const settings = await prisma.orderManageSettings.findUnique({ where: { shop } });
+  if (!settings?.isEnabled) return cors(json({ enabled: false }));
+
+  const { admin } = await unauthenticated.admin(shop);
+  const order = await findOrderById(admin, orderId);
+  if (!order) return cors(json({ error: "order-not-found" }, { status: 404 }));
+
+  // Same authorization as the cancel action.
+  if (customerGid) {
+    const bareId = customerGid.replace(/^gid:\/\/shopify\/Customer\//, "");
+    if (checkOwnership(order, bareId) !== "owner") {
+      return cors(json({ error: "not-owner" }, { status: 403 }));
+    }
+  } else {
+    const created = order.createdAt ? Date.parse(order.createdAt) : NaN;
+    const fresh = Number.isFinite(created) && Date.now() - created <= GUEST_WINDOW_MS;
+    if (!fresh) return cors(json({ error: "not-authorized" }, { status: 403 }));
+  }
+
+  const { cancellable, reason } = getEligibility(order, settings);
+  return cors(
+    json({ enabled: true, allowCancel: settings.allowCancel, cancellable, reason }),
+  );
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {

@@ -91,6 +91,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   return json(
     {
       enabled: true,
+      // Whether the merchant allows cancellation at all (used by the widget to
+      // show a greyed-out button on orders that can't be cancelled).
+      allowCancel: ctx.settings.allowCancel,
       cancellable,
       reason,
       addressEditable,

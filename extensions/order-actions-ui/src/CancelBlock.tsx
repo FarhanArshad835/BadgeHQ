@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { fetchConfig, requestCancel } from "./shared";
+import { fetchConfig, fetchEligibility, requestCancel } from "./shared";
 
 type Surface = "thank-you" | "account-new";
 
@@ -29,28 +29,38 @@ export function CancelBlock(props: {
   const { surface, orderId, shop, getToken, ui } = props;
   const { BlockStack, Button, Banner, Text } = ui;
   const [visible, setVisible] = useState(false);
+  const [cancellable, setCancellable] = useState(false);
+  const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<null | "ok" | "error">(null);
   const [message, setMessage] = useState("");
 
-  // Decide whether to render at all, based on merchant config for this surface.
+  // Decide whether to render, and whether THIS order is cancellable, so we can
+  // show the button greyed-out/disabled on cancelled/fulfilled/prepaid orders.
   useEffect(() => {
-    let cancelled = false;
+    let stop = false;
     (async () => {
       if (!orderId || !shop) return;
       const cfg = await fetchConfig(shop);
-      if (cancelled) return;
+      if (stop) return;
       const on =
         !!cfg &&
         cfg.enabled &&
         cfg.allowCancel &&
         cfg.showOnPages.indexOf(surface) !== -1;
       setVisible(on);
+      if (!on) return;
+      const token = await getToken();
+      if (stop || !token) return;
+      const elig = await fetchEligibility(orderId, token);
+      if (stop || !elig) return;
+      setCancellable(elig.cancellable);
+      setReason(elig.reason);
     })();
     return () => {
-      cancelled = true;
+      stop = true;
     };
-  }, [orderId, shop, surface]);
+  }, [orderId, shop, surface, getToken]);
 
   if (!visible || !orderId) return null;
 
@@ -80,6 +90,32 @@ export function CancelBlock(props: {
       <Banner status="success" title="Order cancelled">
         {message}
       </Banner>
+    );
+  }
+
+  // Not cancellable — show a disabled button with a reason, rather than hiding.
+  if (!cancellable) {
+    const label =
+      reason === "cancelled"
+        ? "Order cancelled"
+        : reason === "fulfilled"
+        ? "Cancel unavailable"
+        : "Cancel order";
+    const note =
+      reason === "cancelled"
+        ? "This order has already been cancelled."
+        : reason === "fulfilled"
+        ? "This order has been shipped and can no longer be cancelled."
+        : reason === "prepaid"
+        ? "This order is prepaid — please contact us to cancel it."
+        : "This order can’t be cancelled.";
+    return (
+      <BlockStack spacing="base">
+        <Text>{note}</Text>
+        <Button kind="secondary" disabled>
+          {label}
+        </Button>
+      </BlockStack>
     );
   }
 
