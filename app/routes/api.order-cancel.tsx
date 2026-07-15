@@ -53,6 +53,37 @@ function preflightIfOptions(request: Request): Response | null {
   return null;
 }
 
+// The extension sends the session token in the query string (GET) or JSON
+// body (POST) rather than the Authorization header, so the fetch stays a CORS
+// "simple" request with no preflight (the preflighted form is blocked by the
+// extension network sandbox -> "Failed to fetch"). authenticate.public.checkout
+// only reads the Authorization header, so we rebuild the request with the
+// header populated from wherever the token actually came in.
+async function withAuthHeader(request: Request): Promise<Request> {
+  if (request.headers.get("Authorization")) return request;
+
+  let token = new URL(request.url).searchParams.get("token") || "";
+  let rebuiltBody: string | undefined;
+  if (!token && request.method === "POST") {
+    const raw = await request.text();
+    rebuiltBody = raw;
+    try {
+      token = String(JSON.parse(raw)?.token || "");
+    } catch {
+      /* not JSON — leave token empty */
+    }
+  }
+  if (!token) return request;
+
+  const headers = new Headers(request.headers);
+  headers.set("Authorization", "Bearer " + token);
+  return new Request(request.url, {
+    method: request.method,
+    headers,
+    body: request.method === "POST" ? rebuiltBody : undefined,
+  });
+}
+
 // authenticate.public.checkout THROWS a Response (e.g. 401/410) when the
 // session token is missing/expired, and that thrown response has NO CORS
 // headers — so the browser reports "Failed to fetch" instead of the real
@@ -79,7 +110,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const pre = preflightIfOptions(request);
   if (pre) return pre;
 
-  const auth = await authOrCorsError(request);
+  const authed = await withAuthHeader(request);
+  const auth = await authOrCorsError(authed);
   if ("errorResponse" in auth) return auth.errorResponse;
   const { cors, sessionToken } = auth.ctx;
 
@@ -120,21 +152,26 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const pre = preflightIfOptions(request);
   if (pre) return pre;
 
-  const auth = await authOrCorsError(request);
+  const authed = await withAuthHeader(request);
+
+  // Read orderId from a clone BEFORE auth (auth may consume the body).
+  // The body is JSON sent with a text/plain content-type, so parse manually.
+  let orderId = "";
+  try {
+    const body = JSON.parse(await authed.clone().text());
+    orderId = String(body?.orderId || "");
+  } catch {
+    orderId = "";
+  }
+
+  const auth = await authOrCorsError(authed);
   if ("errorResponse" in auth) return auth.errorResponse;
   const { cors, sessionToken } = auth.ctx;
 
   const shop = String(sessionToken.dest || "").replace(/^https?:\/\//, "");
   const customerGid = sessionToken.sub ? String(sessionToken.sub) : null;
   if (!shop) return cors(json({ error: "no-shop" }, { status: 400 }));
-
-  let orderId = "";
-  try {
-    const body = await request.json();
-    orderId = String(body?.orderId || "");
-  } catch {
-    return cors(json({ error: "bad-request" }, { status: 400 }));
-  }
+  if (!orderId) return cors(json({ error: "bad-request" }, { status: 400 }));
 
   const settings = await prisma.orderManageSettings.findUnique({ where: { shop } });
   if (!settings?.isEnabled || !settings.allowCancel) {
