@@ -1,7 +1,9 @@
 import {
   reactExtension,
   useApi,
+  useShop,
   useSessionToken,
+  useSubscription,
   BlockStack,
   Button,
   Banner,
@@ -14,20 +16,18 @@ export default reactExtension("purchase.thank-you.block.render", () => <ThankYou
 function ThankYou() {
   const api = useApi();
   const sessionToken = useSessionToken();
+  const shop = useShop();
 
-  // On the thank-you page the order id comes from the order-confirmation API.
-  const orderId =
-    (api as any)?.orderConfirmation?.current?.order?.id ??
-    (api as any)?.orderConfirmation?.current?.id ??
-    null;
-
-  const shop = (api as any)?.shop?.myshopifyDomain ?? "";
+  // orderConfirmation is a subscription; the created order's gid is at
+  // orderConfirmation.order.id.
+  const orderConfirmation = useSubscription((api as any).orderConfirmation);
+  const orderId = orderConfirmation?.order?.id ?? null;
 
   return (
     <CancelBlock
       surface="thank-you"
       orderId={orderId}
-      shop={shop}
+      shop={shop?.myshopifyDomain ?? ""}
       getToken={() => sessionToken.get()}
       ui={{ BlockStack, Button, Banner, Text }}
     />

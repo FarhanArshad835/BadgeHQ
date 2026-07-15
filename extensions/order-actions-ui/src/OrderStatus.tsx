@@ -1,6 +1,7 @@
 import {
   reactExtension,
-  useApi,
+  useOrder,
+  useShop,
   useSessionToken,
   BlockStack,
   Button,
@@ -14,20 +15,18 @@ export default reactExtension("customer-account.order-status.block.render", () =
 ));
 
 function OrderStatus() {
-  const api = useApi();
   const sessionToken = useSessionToken();
+  const shop = useShop();
 
-  // On the customer-account order page the order id is on the order API object.
-  const orderId =
-    (api as any)?.order?.current?.id ?? (api as any)?.order?.id ?? null;
-
-  const shop = (api as any)?.shop?.myshopifyDomain ?? "";
+  // useOrder() returns the current order subscription; its gid is order.id.
+  const order = useOrder();
+  const orderId = order?.id ?? null;
 
   return (
     <CancelBlock
       surface="account-new"
       orderId={orderId}
-      shop={shop}
+      shop={shop?.myshopifyDomain ?? ""}
       getToken={() => sessionToken.get()}
       ui={{ BlockStack, Button, Banner, Text }}
     />
