@@ -90,8 +90,9 @@ async function corsSafe(fn: () => Promise<Response>): Promise<Response> {
   try {
     return await fn();
   } catch (e: any) {
+    // Put the message in `error` itself — that's what the extension displays.
     return json(
-      { error: "server-error", detail: String(e?.message || e).slice(0, 200) },
+      { error: "server: " + String(e?.message || e).slice(0, 160) },
       { status: 200, headers: { ...CORS_PREFLIGHT_HEADERS, "Cache-Control": "no-store" } },
     );
   }
