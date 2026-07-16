@@ -91,8 +91,11 @@ async function corsSafe(fn: () => Promise<Response>): Promise<Response> {
     return await fn();
   } catch (e: any) {
     // Put the message in `error` itself — that's what the extension displays.
+    // `enabled:false` makes the eligibility GET parse as "unknown" (button
+    // stays active) instead of "blocked", so the POST can run and surface
+    // this same message on click.
     return json(
-      { error: "server: " + String(e?.message || e).slice(0, 160) },
+      { enabled: false, error: "server: " + String(e?.message || e).slice(0, 160) },
       { status: 200, headers: { ...CORS_PREFLIGHT_HEADERS, "Cache-Control": "no-store" } },
     );
   }
