@@ -53,54 +53,34 @@ function preflightIfOptions(request: Request): Response | null {
   return null;
 }
 
-// The extension sends the session token in the query string (GET) or JSON
-// body (POST) rather than the Authorization header, so the fetch stays a CORS
-// "simple" request with no preflight (the preflighted form is blocked by the
-// extension network sandbox -> "Failed to fetch"). authenticate.public.checkout
-// only reads the Authorization header, so we rebuild the request with the
-// header populated from wherever the token actually came in.
-async function withAuthHeader(request: Request): Promise<Request> {
-  if (request.headers.get("Authorization")) return request;
+// One endpoint serves BOTH the thank-you page (checkout session token) and the
+// new-customer-accounts order page (customer-account session token). The two
+// tokens verify with different helpers, so try each. Whichever succeeds gives
+// { sessionToken, cors }. authenticate.public.* THROWS a Response (401/410)
+// with NO CORS headers on a bad token — surfacing as "Failed to fetch" — so we
+// catch and return a CORS-safe JSON error instead.
+async function authOrCorsError(request: Request) {
+  const customerAccount = (authenticate.public as any)["customer-account"];
+  const attempts = [
+    () => authenticate.public.checkout(request.clone()),
+    ...(typeof customerAccount === "function" ? [() => customerAccount(request.clone())] : []),
+  ];
 
-  let token = new URL(request.url).searchParams.get("token") || "";
-  let rebuiltBody: string | undefined;
-  if (!token && request.method === "POST") {
-    const raw = await request.text();
-    rebuiltBody = raw;
+  let lastStatus = 401;
+  for (const attempt of attempts) {
     try {
-      token = String(JSON.parse(raw)?.token || "");
-    } catch {
-      /* not JSON — leave token empty */
+      const ctx = await attempt();
+      return { ctx };
+    } catch (e) {
+      if (e instanceof Response) lastStatus = e.status;
     }
   }
-  if (!token) return request;
-
-  const headers = new Headers(request.headers);
-  headers.set("Authorization", "Bearer " + token);
-  return new Request(request.url, {
-    method: request.method,
-    headers,
-    body: request.method === "POST" ? rebuiltBody : undefined,
-  });
-}
-
-// authenticate.public.checkout THROWS a Response (e.g. 401/410) when the
-// session token is missing/expired, and that thrown response has NO CORS
-// headers — so the browser reports "Failed to fetch" instead of the real
-// status. Wrap it so auth failures come back as a CORS-safe JSON error.
-async function authOrCorsError(request: Request) {
-  try {
-    const ctx = await authenticate.public.checkout(request);
-    return { ctx };
-  } catch (e) {
-    const status = e instanceof Response ? e.status : 401;
-    return {
-      errorResponse: json(
-        { error: "auth-failed", status },
-        { status: 200, headers: { ...CORS_PREFLIGHT_HEADERS, "Cache-Control": "no-store" } },
-      ),
-    };
-  }
+  return {
+    errorResponse: json(
+      { error: "auth-failed", status: lastStatus },
+      { status: 200, headers: { ...CORS_PREFLIGHT_HEADERS, "Cache-Control": "no-store" } },
+    ),
+  };
 }
 
 // GET ?orderId=gid -> eligibility for THIS order, so the extension can show a
@@ -110,8 +90,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const pre = preflightIfOptions(request);
   if (pre) return pre;
 
-  const authed = await withAuthHeader(request);
-  const auth = await authOrCorsError(authed);
+  const auth = await authOrCorsError(request);
   if ("errorResponse" in auth) return auth.errorResponse;
   const { cors, sessionToken } = auth.ctx;
 
@@ -152,19 +131,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const pre = preflightIfOptions(request);
   if (pre) return pre;
 
-  const authed = await withAuthHeader(request);
-
-  // Read orderId from a clone BEFORE auth (auth may consume the body).
-  // The body is JSON sent with a text/plain content-type, so parse manually.
+  // Read orderId from a clone so auth (which also reads the request) is unaffected.
   let orderId = "";
   try {
-    const body = JSON.parse(await authed.clone().text());
+    const body = await request.clone().json();
     orderId = String(body?.orderId || "");
   } catch {
     orderId = "";
   }
 
-  const auth = await authOrCorsError(authed);
+  const auth = await authOrCorsError(request);
   if ("errorResponse" in auth) return auth.errorResponse;
   const { cors, sessionToken } = auth.ctx;
 

@@ -53,12 +53,12 @@ export type Eligibility = {
 // greyed-out disabled button on orders that can't be cancelled.
 export async function fetchEligibility(orderId: string, token: string): Promise<Eligibility | null> {
   try {
-    // No custom headers -> CORS "simple" request -> NO preflight. Token goes
-    // in the query string. (The Authorization-header form triggers a preflight
-    // that the extension network sandbox blocks -> "Failed to fetch".)
-    const res = await fetch(
-      CANCEL_ENDPOINT + "?orderId=" + encodeURIComponent(orderId) + "&token=" + encodeURIComponent(token),
-    );
+    // Documented pattern: direct fetch + Bearer session token. The backend
+    // answers the CORS preflight (OPTIONS 204, ACAO:*, no redirect), so this
+    // succeeds from the sandboxed (null-origin) extension.
+    const res = await fetch(CANCEL_ENDPOINT + "?orderId=" + encodeURIComponent(orderId), {
+      headers: { Authorization: "Bearer " + token },
+    });
     if (!res.ok) return null;
     const d = await res.json();
     if (!d || d.enabled === false) return null;
@@ -73,16 +73,18 @@ export async function fetchEligibility(orderId: string, token: string): Promise<
   }
 }
 
-// POST the cancel request. Sent as a CORS "simple" request: token in the body,
-// Content-Type text/plain, no Authorization header -> no preflight. A
-// preflighted POST (application/json + Authorization) is blocked by the
-// extension network sandbox and surfaces as "Failed to fetch".
+// POST the cancel request with the session-token JWT in the Authorization
+// header (Shopify's documented extension->backend pattern). The backend
+// answers the OPTIONS preflight, so this works from the null-origin sandbox.
 export async function requestCancel(orderId: string, token: string): Promise<{ ok: boolean; error?: string }> {
   try {
     const res = await fetch(CANCEL_ENDPOINT, {
       method: "POST",
-      headers: { "Content-Type": "text/plain;charset=UTF-8" },
-      body: JSON.stringify({ orderId, token }),
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer " + token,
+      },
+      body: JSON.stringify({ orderId }),
     });
     const data = await res.json().catch(() => ({}));
     if (res.ok && data && data.ok) return { ok: true };
