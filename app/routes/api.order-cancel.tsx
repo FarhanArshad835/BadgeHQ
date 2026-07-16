@@ -83,16 +83,33 @@ async function authOrCorsError(request: Request) {
   };
 }
 
+// TEMP: any unhandled exception becomes a Remix 500 with NO CORS headers,
+// which the extension can only see as "Failed to fetch". Catch everything and
+// return the real message (CORS-safe) so the crash is diagnosable on-screen.
+async function corsSafe(fn: () => Promise<Response>): Promise<Response> {
+  try {
+    return await fn();
+  } catch (e: any) {
+    return json(
+      { error: "server-error", detail: String(e?.message || e).slice(0, 200) },
+      { status: 200, headers: { ...CORS_PREFLIGHT_HEADERS, "Cache-Control": "no-store" } },
+    );
+  }
+}
+
 // GET ?orderId=gid -> eligibility for THIS order, so the extension can show a
 // greyed-out disabled Cancel button on cancelled/fulfilled/prepaid orders
 // instead of hiding it. Also serves the CORS preflight when no orderId given.
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const pre = preflightIfOptions(request);
   if (pre) return pre;
+  return corsSafe(() => loaderImpl(request));
+};
 
+async function loaderImpl(request: Request): Promise<Response> {
   const auth = await authOrCorsError(request);
-  if ("errorResponse" in auth) return auth.errorResponse;
-  const { cors, sessionToken } = auth.ctx;
+  if (auth.errorResponse) return auth.errorResponse;
+  const { cors, sessionToken } = auth.ctx!;
 
   const url = new URL(request.url);
   const orderId = url.searchParams.get("orderId") || "";
@@ -125,12 +142,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   return cors(
     json({ enabled: true, allowCancel: settings.allowCancel, cancellable, reason }),
   );
-};
+}
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const pre = preflightIfOptions(request);
   if (pre) return pre;
+  return corsSafe(() => actionImpl(request));
+};
 
+async function actionImpl(request: Request): Promise<Response> {
   // Read orderId from a clone so auth (which also reads the request) is unaffected.
   let orderId = "";
   try {
@@ -141,8 +161,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   const auth = await authOrCorsError(request);
-  if ("errorResponse" in auth) return auth.errorResponse;
-  const { cors, sessionToken } = auth.ctx;
+  if (auth.errorResponse) return auth.errorResponse;
+  const { cors, sessionToken } = auth.ctx!;
 
   const shop = String(sessionToken.dest || "").replace(/^https?:\/\//, "");
   const customerGid = sessionToken.sub ? String(sessionToken.sub) : null;
