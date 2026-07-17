@@ -10,27 +10,29 @@ api_version = "2025-01"
 name = "BadgeHQ back in stock"
 type = "flow_trigger"
 handle = "badgehq-back-in-stock"
+
+uid = "548a71aa-1f6c-e344-4780-c9fdc8670cbdf06fb5f5"
 description = "Fires when a product a customer asked to be notified about is back in stock."
 
   [settings]
 
     # The shopper to email. Sent as `customer_id` in the trigger payload.
     # Field keys allow only alphabetic characters and spaces.
-    [[settings.fields]]
+    [[settings.field]]
     type = "customer_reference"
 
-    [[settings.fields]]
-    type = "string"
+    [[settings.field]]
+    type = "single_line_text_field"
     key = "Product title"
 
-    [[settings.fields]]
-    type = "string"
+    [[settings.field]]
+    type = "single_line_text_field"
     key = "Variant title"
 
-    [[settings.fields]]
-    type = "string"
+    [[settings.field]]
+    type = "single_line_text_field"
     key = "Product URL"
 
-    [[settings.fields]]
-    type = "string"
+    [[settings.field]]
+    type = "single_line_text_field"
     key = "Product image"
