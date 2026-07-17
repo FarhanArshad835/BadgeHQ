@@ -68,6 +68,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     deliveryEstimateCount,
     orderManagementCount,
     wishlistCount,
+    backInStockCount,
     themeExtensionEnabled,
     currentPlan,
   ] = await Promise.all([
@@ -80,6 +81,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     prisma.deliverySettings.count({ where: { shop, isEnabled: true } }),
     prisma.orderManageSettings.count({ where: { shop, isEnabled: true } }),
     prisma.wishlistSettings.count({ where: { shop, isEnabled: true } }),
+    prisma.backInStockSettings.count({ where: { shop, isEnabled: true } }),
     checkThemeExtensionEnabled(shop, accessToken),
     getShopPlan(shop),
   ]);
@@ -99,6 +101,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       deliveryEstimates: deliveryEstimateCount,
       orderManagements: orderManagementCount,
       wishlists: wishlistCount,
+      backInStock: backInStockCount,
     },
     isEnabled: themeExtensionEnabled,
     themeEditorUrl,
@@ -161,6 +164,12 @@ const features = [
     description: "Let shoppers save products and sync their wishlist across devices",
     route: "/app/wishlist",
     key: "wishlists" as const,
+  },
+  {
+    title: "Back in Stock",
+    description: "Email shoppers when a sold-out product is available again",
+    route: "/app/back-in-stock",
+    key: "backInStock" as const,
   },
 ];
 

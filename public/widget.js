@@ -111,6 +111,8 @@
     )
       renderOrderActions();
     if (w.wishlist && w.wishlist.enabled) initWishlist(w.wishlist, page);
+    if (w.backInStock && w.backInStock.enabled && page === "product")
+      initBackInStock(w.backInStock);
 
     if (page === "product") setupProductRerenderWatch(data, page);
     else setupCardRerenderWatch(data, page);
@@ -3023,5 +3025,369 @@
     if (cfg.showOnCards) wlDecorateCards(cfg);
     if (cfg.showOnProduct && page === "product") wlMountProductButton(cfg, 0);
     wlRenderPage(cfg);
+  }
+
+  /* ===================== BACK IN STOCK ===================== */
+  // Shows a "notify me" form when the selected variant is sold out. Sending is
+  // Shopify-native (Flow trigger -> marketing automation -> Shopify Email), so
+  // signing up also subscribes the shopper — the form says so before they
+  // submit. Sold-out detection prefers the theme's own variant data and falls
+  // back to the ATC button's `disabled` state, which every theme sets.
+  var BIS_ENDPOINT = API_ORIGIN + "/api/back-in-stock";
+  var BIS_KEY_PREFIX = "badgehq_bis_";
+  var bisCfg = null;
+  var bisHiddenBtn = null; // ATC button we hid for the replace-button placement
+
+  function bisRoot() {
+    // Scope to the main product; excludes quick-add drawers and featured
+    // product sections that reuse <product-form>.
+    return (
+      document.querySelector("product-info[data-main-product]") ||
+      document.querySelector("product-info") ||
+      document.querySelector(".product__info-container, .product-form, main") ||
+      document.body
+    );
+  }
+
+  function bisAtcButton(root) {
+    return root.querySelector(
+      "product-form button[type='submit'], form[action*='/cart/add'] button[type='submit'], " +
+      ".product-form__submit, button[name='add'], [data-add-to-cart]"
+    );
+  }
+
+  function bisCurrentVariantId(root) {
+    var input = root.querySelector("input[name='id']");
+    if (input && /^\d+$/.test(input.value || "")) return input.value;
+    var m = window.location.search.match(/[?&]variant=(\d+)/);
+    if (m) return m[1];
+    try {
+      var meta = window.ShopifyAnalytics && window.ShopifyAnalytics.meta;
+      if (meta && meta.selectedVariantId) return String(meta.selectedVariantId);
+      if (meta && meta.product && meta.product.variants && meta.product.variants.length === 1)
+        return String(meta.product.variants[0].id);
+    } catch (e) {}
+    return null;
+  }
+
+  function bisProductId() {
+    try {
+      var meta = window.ShopifyAnalytics && window.ShopifyAnalytics.meta;
+      if (meta && meta.product && meta.product.id) return String(meta.product.id);
+    } catch (e) {}
+    return null;
+  }
+
+  // Is the current variant sold out? Prefer the theme's inlined variant JSON;
+  // fall back to the ATC button being disabled.
+  function bisIsSoldOut(root) {
+    var variantId = bisCurrentVariantId(root);
+    try {
+      var sel = root.querySelector("[data-selected-variant]");
+      if (sel && sel.innerHTML) {
+        var v = JSON.parse(sel.innerHTML);
+        if (v && typeof v.available === "boolean") return !v.available;
+      }
+      var all = root.querySelector("[data-all-variants]");
+      if (all && all.innerHTML && variantId) {
+        var list = JSON.parse(all.innerHTML);
+        for (var i = 0; i < list.length; i++) {
+          if (String(list[i].id) === String(variantId)) return !list[i].available;
+        }
+      }
+    } catch (e) {}
+    var btn = bisAtcButton(root);
+    return !!(btn && btn.hasAttribute("disabled"));
+  }
+
+  // Preorder products render a disabled button too — don't offer "notify me"
+  // there. Detect by comparing the button label to the theme's sold-out string.
+  function bisIsPreorder(root) {
+    try {
+      var btn = bisAtcButton(root);
+      var strings = window.variantStrings;
+      if (!btn || !strings || !strings.soldOut) return false;
+      var label = (btn.textContent || "").trim().toLowerCase();
+      if (!label) return false;
+      var soldOut = String(strings.soldOut).trim().toLowerCase();
+      var unavailable = String(strings.unavailable || "").trim().toLowerCase();
+      // Disabled, but the label is neither "sold out" nor "unavailable" ->
+      // some other state (preorder, quantity rule) we shouldn't hijack.
+      return label !== soldOut && (!unavailable || label !== unavailable);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function bisAlreadySignedUp(variantId) {
+    try {
+      return localStorage.getItem(BIS_KEY_PREFIX + variantId) === "1";
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function bisRemember(variantId) {
+    try {
+      localStorage.setItem(BIS_KEY_PREFIX + variantId, "1");
+    } catch (e) {}
+  }
+
+  function bisInjectStyle(cfg) {
+    if (document.getElementById("badgehq-bis-style")) return;
+    var style = document.createElement("style");
+    style.id = "badgehq-bis-style";
+    style.textContent =
+      ".badgehq-bis{margin:12px 0;}" +
+      ".badgehq-bis__btn{width:100%;display:flex;align-items:center;justify-content:center;gap:8px;" +
+      "padding:12px 18px;font:inherit;font-weight:600;cursor:pointer;background:transparent;color:inherit;" +
+      "border:1px solid rgba(0,0,0,0.6);border-radius:var(--buttons-radius,6px);box-sizing:border-box;}" +
+      ".badgehq-bis__panel{display:none;margin-top:10px;padding:14px;border:1px solid rgba(0,0,0,0.12);" +
+      "border-radius:var(--buttons-radius,6px);}" +
+      ".badgehq-bis__panel.is-open{display:block;}" +
+      ".badgehq-bis__heading{font-weight:600;margin:0 0 8px;}" +
+      ".badgehq-bis__row{display:flex;gap:8px;align-items:stretch;}" +
+      ".badgehq-bis__input{flex:1 1 auto;min-width:0;padding:10px 12px;font:inherit;box-sizing:border-box;" +
+      "color:rgb(var(--color-foreground,18 18 18));background:rgb(var(--color-background,255 255 255));" +
+      "border:1px solid rgba(var(--color-foreground,18 18 18),0.25);border-radius:var(--inputs-radius,4px);}" +
+      ".badgehq-bis__submit{flex:none;padding:10px 18px;font:inherit;font-weight:600;cursor:pointer;" +
+      "color:rgb(var(--color-button-text,255 255 255));background:rgb(var(--color-button,18 18 18));" +
+      "border:1px solid transparent;border-radius:var(--buttons-radius,4px);}" +
+      ".badgehq-bis__submit:disabled{opacity:0.6;cursor:default;}" +
+      ".badgehq-bis__note{margin:8px 0 0;font-size:0.85em;opacity:0.75;line-height:1.4;}" +
+      ".badgehq-bis__msg{margin:8px 0 0;line-height:1.4;}" +
+      ".badgehq-bis__msg--ok{color:#157a3d;}" +
+      ".badgehq-bis__msg--err{color:#c62828;}";
+    document.head.appendChild(style);
+  }
+
+  // Style our button like the theme's ATC button (secondary variant), the same
+  // way the delivery/wishlist widgets do.
+  function bisStyleLikeAtc(btn, root) {
+    var atc = bisAtcButton(root);
+    if (!atc) return;
+    try {
+      var abs = window.getComputedStyle(atc);
+      var abr = atc.getBoundingClientRect();
+      btn.style.borderRadius = abs.borderRadius;
+      btn.style.fontSize = abs.fontSize;
+      btn.style.fontWeight = abs.fontWeight;
+      btn.style.fontFamily = abs.fontFamily;
+      btn.style.letterSpacing = abs.letterSpacing;
+      btn.style.textTransform = abs.textTransform;
+      if (abr.height > 0) btn.style.minHeight = Math.round(abr.height) + "px";
+      var bg = abs.backgroundColor;
+      if (bg && bg !== "rgba(0, 0, 0, 0)" && bg !== "transparent") {
+        btn.style.borderColor = bg;
+        btn.style.color = bg;
+      }
+    } catch (e) {}
+  }
+
+  function bisRemove() {
+    var el = document.getElementById("badgehq-back-in-stock");
+    if (el) el.remove();
+    // Restore the ATC button if the replace-button placement hid it.
+    if (bisHiddenBtn) {
+      bisHiddenBtn.style.display = "";
+      bisHiddenBtn = null;
+    }
+  }
+
+  function bisMount(cfg, attempt) {
+    attempt = attempt || 0;
+    if (document.getElementById("badgehq-back-in-stock")) return;
+
+    var root = bisRoot();
+    var variantId = bisCurrentVariantId(root);
+    var productId = bisProductId();
+    if (!variantId || !productId) {
+      if (attempt < 12) setTimeout(function () { bisMount(cfg, attempt + 1); }, 400);
+      return;
+    }
+
+    var atc = bisAtcButton(root);
+    // Anchor outside the <form> so our email input is never submitted to
+    // /cart/add. .product__buy-buttons is the Release theme's wrapper; the
+    // form's parent is the generic fallback.
+    var anchor =
+      root.querySelector(".product__buy-buttons") ||
+      (atc && atc.closest("form")) ||
+      root.querySelector(".product-form__buttons, form[action*='/cart/add'], .product-form");
+    if (!anchor || !anchor.parentNode) {
+      if (attempt < 12) setTimeout(function () { bisMount(cfg, attempt + 1); }, 400);
+      return;
+    }
+
+    bisInjectStyle(cfg);
+
+    var wrap = document.createElement("div");
+    wrap.id = "badgehq-back-in-stock";
+    wrap.className = "badgehq-bis";
+    wrap.setAttribute("data-bis-variant", variantId);
+
+    if (bisAlreadySignedUp(variantId)) {
+      wrap.innerHTML = '<p class="badgehq-bis__msg badgehq-bis__msg--ok">' +
+        escapeDeHtml(cfg.successText) + "</p>";
+    } else {
+      wrap.innerHTML =
+        '<button type="button" class="badgehq-bis__btn" data-bis-open>' +
+        escapeDeHtml(cfg.buttonText) + "</button>" +
+        '<div class="badgehq-bis__panel" data-bis-panel>' +
+        '<p class="badgehq-bis__heading">' + escapeDeHtml(cfg.headingText) + "</p>" +
+        '<div class="badgehq-bis__row">' +
+        '<input class="badgehq-bis__input" type="email" inputmode="email" autocomplete="email" ' +
+        'placeholder="you@example.com" aria-label="' + escapeDeHtml(cfg.headingText) + '" data-bis-email>' +
+        '<button type="button" class="badgehq-bis__submit" data-bis-submit>Notify me</button>' +
+        "</div>" +
+        '<p class="badgehq-bis__note">' + escapeDeHtml(cfg.consentText) + "</p>" +
+        '<div class="badgehq-bis__msg" data-bis-msg aria-live="polite"></div>' +
+        "</div>";
+    }
+
+    // Placement.
+    if (cfg.placement === "replace-button" && atc) {
+      atc.style.display = "none";
+      bisHiddenBtn = atc;
+      if (atc.parentNode) atc.parentNode.insertBefore(wrap, atc.nextSibling);
+      else anchor.parentNode.insertBefore(wrap, anchor.nextSibling);
+    } else if (cfg.placement === "above-atc") {
+      anchor.parentNode.insertBefore(wrap, anchor);
+    } else {
+      anchor.parentNode.insertBefore(wrap, anchor.nextSibling);
+    }
+
+    var openBtn = wrap.querySelector("[data-bis-open]");
+    if (openBtn) {
+      bisStyleLikeAtc(openBtn, root);
+      var panel = wrap.querySelector("[data-bis-panel]");
+      openBtn.addEventListener("click", function () {
+        panel.classList.toggle("is-open");
+        var input = wrap.querySelector("[data-bis-email]");
+        if (panel.classList.contains("is-open") && input) input.focus();
+      });
+    }
+
+    var submit = wrap.querySelector("[data-bis-submit]");
+    if (submit) {
+      submit.addEventListener("click", function () {
+        bisSubmit(wrap, cfg, variantId, productId);
+      });
+      var emailInput = wrap.querySelector("[data-bis-email]");
+      emailInput.addEventListener("keydown", function (e) {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          bisSubmit(wrap, cfg, variantId, productId);
+        }
+      });
+    }
+  }
+
+  function bisSubmit(wrap, cfg, variantId, productId) {
+    var input = wrap.querySelector("[data-bis-email]");
+    var submit = wrap.querySelector("[data-bis-submit]");
+    var msg = wrap.querySelector("[data-bis-msg]");
+    var email = (input.value || "").trim();
+
+    function setMsg(kind, text) {
+      msg.className = "badgehq-bis__msg" + (kind ? " badgehq-bis__msg--" + kind : "");
+      msg.textContent = text;
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
+      setMsg("err", "Please enter a valid email address.");
+      input.focus();
+      return;
+    }
+
+    submit.disabled = true;
+    setMsg("", "Signing you up…");
+
+    fetch(BIS_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        shop: SHOP,
+        variantId: variantId,
+        productId: productId,
+        email: email,
+      }),
+    })
+      .then(function (r) { return r.json().catch(function () { return {}; }); })
+      .then(function (data) {
+        if (data && data.ok) {
+          bisRemember(variantId);
+          wrap.innerHTML = '<p class="badgehq-bis__msg badgehq-bis__msg--ok">' +
+            escapeDeHtml(cfg.successText) + "</p>";
+        } else {
+          submit.disabled = false;
+          setMsg("err", "Couldn’t sign you up right now. Please try again.");
+        }
+      })
+      .catch(function () {
+        submit.disabled = false;
+        setMsg("err", "Couldn’t sign you up right now. Please try again.");
+      });
+  }
+
+  // Show the form only while the selected variant is sold out.
+  function bisSync(cfg) {
+    var root = bisRoot();
+    var soldOut = bisIsSoldOut(root) && !bisIsPreorder(root);
+    var existing = document.getElementById("badgehq-back-in-stock");
+    var variantId = bisCurrentVariantId(root);
+
+    if (!soldOut) {
+      if (existing) bisRemove();
+      return;
+    }
+    // Sold out: (re)mount if missing, or if the shopper switched to a
+    // different sold-out variant.
+    if (existing && existing.getAttribute("data-bis-variant") !== String(variantId)) {
+      bisRemove();
+      existing = null;
+    }
+    if (!existing) bisMount(cfg, 0);
+  }
+
+  function initBackInStock(cfg) {
+    bisCfg = cfg;
+    bisSync(cfg);
+
+    // Themes re-render the buy buttons on variant change. Prefer the theme's
+    // own pub/sub (Dawn/Release expose it globally); the MutationObserver on
+    // the ATC button's disabled state is the universal fallback and also
+    // covers nil-variant and quantity-rule cases where no event fires.
+    try {
+      if (typeof window.subscribe === "function" && window.PUB_SUB_EVENTS) {
+        window.subscribe(window.PUB_SUB_EVENTS.variantChange, function () {
+          setTimeout(function () { bisSync(cfg); }, 50);
+        });
+      }
+    } catch (e) {}
+
+    var debounce = null;
+    if (window.MutationObserver) {
+      var observer = new MutationObserver(function () {
+        clearTimeout(debounce);
+        debounce = setTimeout(function () { bisSync(cfg); }, 300);
+      });
+      observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ["disabled"],
+      });
+    }
+
+    // Combined-listing product swaps replace the whole subtree.
+    document.addEventListener("product-info:loaded", function () {
+      bisHiddenBtn = null;
+      setTimeout(function () { bisSync(cfg); }, 100);
+    });
+    document.addEventListener("shopify:section:load", function () {
+      bisHiddenBtn = null;
+      setTimeout(function () { bisSync(cfg); }, 100);
+    });
   }
 })();

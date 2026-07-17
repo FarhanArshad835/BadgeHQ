@@ -8,7 +8,7 @@ embedded = true
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "read_products,write_products,write_script_tags,read_script_tags,read_themes,read_orders,write_orders"
+scopes = "read_products,write_products,write_script_tags,read_script_tags,read_themes,read_orders,write_orders,read_inventory,write_customers"
 
 [auth]
 redirect_urls = [
@@ -30,6 +30,11 @@ api_version = "2025-01"
   [[webhooks.subscriptions]]
   topics = [ "app/scopes_update" ]
   uri = "/webhooks/app/scopes_update"
+
+  # Back in Stock: fires when a variant's stock level changes at any location.
+  [[webhooks.subscriptions]]
+  topics = [ "inventory_levels/update" ]
+  uri = "/webhooks/inventory/update"
 
 [app_proxy]
 url = "https://badge-hq.vercel.app"

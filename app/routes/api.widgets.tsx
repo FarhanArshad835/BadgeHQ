@@ -61,6 +61,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     deliverySettings,
     orderManageSettings,
     wishlistSettings,
+    backInStockSettings,
   ] = await Promise.all([
     prisma.trustBadge.findMany({ where: { shop, isEnabled: true } }),
     prisma.productBadge.findMany({ where: { shop, isActive: true }, orderBy: [{ priority: "desc" }, { createdAt: "desc" }] }),
@@ -71,6 +72,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     prisma.deliverySettings.findUnique({ where: { shop } }),
     prisma.orderManageSettings.findUnique({ where: { shop } }),
     prisma.wishlistSettings.findUnique({ where: { shop } }),
+    prisma.backInStockSettings.findUnique({ where: { shop } }),
   ]);
 
   const globalSettings = appSettings
@@ -174,6 +176,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       showOnPages: orderManageSettings?.showOnPages
         ? JSON.parse(orderManageSettings.showOnPages)
         : ["account"],
+    },
+    backInStock: {
+      enabled: Boolean(backInStockSettings?.isEnabled),
+      placement: backInStockSettings?.placement ?? "below-atc",
+      buttonText: backInStockSettings?.buttonText ?? "Notify me when available",
+      headingText: backInStockSettings?.headingText ?? "Get notified when this is back",
+      consentText:
+        backInStockSettings?.consentText ??
+        "We'll email you when it's back in stock. You'll also receive our emails — unsubscribe anytime.",
+      successText: backInStockSettings?.successText ?? "Done! We'll email you when it's back in stock.",
     },
     wishlist: {
       enabled: Boolean(wishlistSettings?.isEnabled),

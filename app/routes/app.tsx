@@ -58,6 +58,7 @@ export default function App() {
         <Link to="/app/delivery-estimate">Delivery Estimate</Link>
         <Link to="/app/order-management">Order Management</Link>
         <Link to="/app/wishlist">Wishlist</Link>
+        <Link to="/app/back-in-stock">Back in Stock</Link>
         <Link to="/app/global-settings">Settings</Link>
         <Link to="/app/pricing">Pricing</Link>
       </NavMenu>

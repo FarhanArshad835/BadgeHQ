@@ -1,0 +1,36 @@
+api_version = "2025-01"
+
+# Flow custom trigger fired when a variant a shopper is waiting on comes back
+# in stock. Shopify has no API to email a shopper directly, so this trigger is
+# how the notification reaches them: the merchant builds ONE marketing
+# automation (this trigger -> Send marketing email) and Shopify Email does the
+# sending. The customer_reference property is what lets that automation address
+# the shopper — a marketing automation cannot be built without it.
+[[extensions]]
+name = "BadgeHQ back in stock"
+type = "flow_trigger"
+handle = "badgehq-back-in-stock"
+description = "Fires when a product a customer asked to be notified about is back in stock."
+
+  [settings]
+
+    # The shopper to email. Sent as `customer_id` in the trigger payload.
+    # Field keys allow only alphabetic characters and spaces.
+    [[settings.fields]]
+    type = "customer_reference"
+
+    [[settings.fields]]
+    type = "string"
+    key = "Product title"
+
+    [[settings.fields]]
+    type = "string"
+    key = "Variant title"
+
+    [[settings.fields]]
+    type = "string"
+    key = "Product URL"
+
+    [[settings.fields]]
+    type = "string"
+    key = "Product image"
