@@ -187,8 +187,9 @@ export default function BackInStockPage() {
                 </Text>
                 <List type="number">
                   <List.Item>
-                    In Shopify admin go to <strong>Automations</strong> (Marketing → Automations)
-                    and create a custom automation.
+                    In Shopify admin open <strong>Automations</strong> (under
+                    Marketing, or Messaging → Automations on newer stores) and click
+                    <strong> Create automation</strong>.
                   </List.Item>
                   <List.Item>
                     Choose the trigger <strong>BadgeHQ back in stock</strong>.
