@@ -6,8 +6,12 @@
  * admin page; it never reaches /api/widgets or the browser.
  */
 
+// gemini-2.0-flash was shut down on 2026-06-01 and now 404s. 2.5-flash is the
+// current stable best-price-performance model. If this ever 404s again the
+// error surfaces as "bad-model" so the cause is obvious in the admin Test.
+const GEMINI_MODEL = "gemini-2.5-flash";
 const GEMINI_URL =
-  "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
+  `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 // Caps are enforced server-side; the widget also trims, but never trust it.
 export const MAX_MESSAGE_CHARS = 1000;
@@ -107,8 +111,16 @@ export async function callGemini(opts: {
     if (!res.ok) {
       // Log server-side only — the upstream body can echo the key back.
       const detail = await res.text().catch(() => "");
-      console.error("[ai-replies] gemini", res.status, detail.slice(0, 300));
-      return { ok: false, error: res.status === 400 || res.status === 403 ? "bad-key" : "upstream" };
+      console.error("[ai-replies] gemini", GEMINI_MODEL, res.status, detail.slice(0, 300));
+      // 404 = the model id is gone/renamed (Google retires these). Distinct
+      // from a key problem so the admin Test points at the real cause.
+      const error =
+        res.status === 404
+          ? "bad-model"
+          : res.status === 400 || res.status === 403
+          ? "bad-key"
+          : "upstream";
+      return { ok: false, error };
     }
 
     const data = await res.json();
