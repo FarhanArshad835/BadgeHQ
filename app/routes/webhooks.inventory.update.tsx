@@ -15,6 +15,7 @@ import {
   fireRestockTrigger,
   resolveInventoryItem,
   toGid,
+  upsertSubscribedCustomer,
 } from "../utils/back-in-stock.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -45,16 +46,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     const notified: string[] = [];
     for (const sub of waiting) {
-      // No customer record means the shopper was never subscribed, so the
-      // marketing automation can't reach them — leave the row unnotified so it
-      // shows up in the admin list rather than being silently dropped.
-      if (!sub.customerId) continue;
-      const ok = await fireRestockTrigger(
-        admin,
-        shop,
-        toGid("Customer", sub.customerId),
-        variant,
-      );
+      // Signups whose subscribe failed at the time (e.g. the app's customer
+      // scopes weren't approved yet) have no customerId. Retry it now rather
+      // than skipping them forever — otherwise those shoppers never hear back.
+      let customerId = sub.customerId;
+      if (!customerId) {
+        customerId = await upsertSubscribedCustomer(admin, sub.email);
+        if (customerId) {
+          await prisma.backInStockSubscription.update({
+            where: { id: sub.id },
+            data: { customerId },
+          });
+        }
+      }
+      if (!customerId) continue; // still unreachable; stays visible in admin
+
+      const ok = await fireRestockTrigger(admin, shop, toGid("Customer", customerId), variant);
       if (ok) notified.push(sub.id);
     }
 

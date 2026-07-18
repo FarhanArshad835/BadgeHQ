@@ -60,18 +60,31 @@ export async function upsertSubscribedCustomer(
       { variables: { q: `email:${email}` } },
     );
     const body = await found.json();
+    if (body?.errors) {
+      console.error("[back-in-stock] customer lookup failed:", JSON.stringify(body.errors).slice(0, 300));
+    }
     const existing = body?.data?.customers?.edges?.[0]?.node?.id;
     if (existing) {
-      await admin.graphql(
+      const upd = await admin.graphql(
         `mutation SubscribeCustomer($input: CustomerInput!) {
-          customerUpdate(input: $input) { userErrors { message } }
+          customerUpdate(input: $input) { userErrors { field message } }
         }`,
         { variables: { input: { id: existing, emailMarketingConsent: consent } } },
       );
+      const updBody = await upd.json();
+      const updErrs = updBody?.data?.customerUpdate?.userErrors || [];
+      if (updErrs.length || updBody?.errors) {
+        console.error(
+          "[back-in-stock] customerUpdate rejected:",
+          JSON.stringify(updErrs.length ? updErrs : updBody.errors).slice(0, 300),
+        );
+      }
+      // Return the id regardless: the customer exists, so the automation can
+      // still address them even if consent couldn't be updated.
       return existing;
     }
-  } catch {
-    // fall through to create
+  } catch (e: any) {
+    console.error("[back-in-stock] customer lookup threw:", String(e?.message || e).slice(0, 200));
   }
 
   try {
@@ -85,8 +98,19 @@ export async function upsertSubscribedCustomer(
       { variables: { input: { email, emailMarketingConsent: consent } } },
     );
     const body = await resp.json();
-    return body?.data?.customerCreate?.customer?.id ?? null;
-  } catch {
+    const id = body?.data?.customerCreate?.customer?.id ?? null;
+    if (!id) {
+      // Most likely causes: write_customers not approved, or Protected
+      // Customer Data not granted. Log it — silently returning null is what
+      // made this invisible before.
+      console.error(
+        "[back-in-stock] customerCreate failed:",
+        JSON.stringify(body?.data?.customerCreate?.userErrors || body?.errors || body).slice(0, 400),
+      );
+    }
+    return id;
+  } catch (e: any) {
+    console.error("[back-in-stock] customerCreate threw:", String(e?.message || e).slice(0, 200));
     return null;
   }
 }
