@@ -148,6 +148,24 @@ export default {
       return new Response(null, { status: 204, headers: CORS_HEADERS });
     }
 
+    // Back-in-stock signup. A write, so it must NOT be cached and must be
+    // forwarded verbatim (method + body) to the origin, unlike the read-only
+    // proxies below.
+    if (url.pathname === "/api/back-in-stock") {
+      const upstream = await fetch(`${ORIGIN}/api/back-in-stock`, {
+        method: request.method,
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: request.method === "POST" ? await request.text() : undefined,
+      });
+      const headers = new Headers();
+      headers.set("Content-Type", "application/json");
+      headers.set("Cache-Control", "no-store");
+      headers.set("Access-Control-Allow-Origin", "*");
+      headers.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+      headers.set("Access-Control-Allow-Headers", "Content-Type");
+      return new Response(upstream.body, { status: upstream.status, headers });
+    }
+
     // Cache-bust hook: the Remix app calls this after every admin save so
     // storefronts fetch the new config immediately instead of waiting out
     // the edge TTL. Authenticated with the BUMP_SECRET worker secret.
@@ -188,7 +206,7 @@ export default {
           widget_hash: WIDGET_HASH,
           widget_built_at: WIDGET_BUILT_AT,
           widget_bytes: WIDGET_SOURCE.length,
-          routes: ["/widget.js", "/health", "/api/widgets", "/api/products/inventory", "/api/delivery-edd", "/internal/bump"],
+          routes: ["/widget.js", "/health", "/api/widgets", "/api/products/inventory", "/api/delivery-edd", "/api/back-in-stock", "/internal/bump"],
           origin: ORIGIN,
           cache_ttl_by_path_seconds: CACHE_TTL_BY_PATH,
         }),
