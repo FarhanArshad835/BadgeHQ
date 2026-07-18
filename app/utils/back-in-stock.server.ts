@@ -159,12 +159,12 @@ export async function fireRestockTrigger(
           // extensions/badgehq-flow/shopify.extension.toml exactly.
           payload: {
             customer_id: customerGid,
-            "Product title": v.productTitle,
-            "Variant title": v.variantTitle,
-            "Product URL": v.productHandle
+            producttitle: v.productTitle,
+            varianttitle: v.variantTitle,
+            producturl: v.productHandle
               ? `https://${shop}/products/${v.productHandle}?variant=${v.variantId}`
               : "",
-            "Product image": v.productImage,
+            productimage: v.productImage,
           },
         },
       },

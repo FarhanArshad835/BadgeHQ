@@ -17,22 +17,27 @@ description = "Fires when a product a customer asked to be notified about is bac
   [settings]
 
     # The shopper to email. Sent as `customer_id` in the trigger payload.
-    # Field keys allow only alphabetic characters and spaces.
+    #
+    # Keys are single words on purpose: Shopify only allows alphabetic
+    # characters and spaces, and a key with a space is ambiguous to reference
+    # in the Liquid of a marketing email. Single words map cleanly to
+    # {{ producttitle }} etc. Payload keys in fireRestockTrigger() must match
+    # these exactly.
     [[settings.field]]
     type = "customer_reference"
 
     [[settings.field]]
     type = "single_line_text_field"
-    key = "Product title"
+    key = "producttitle"
 
     [[settings.field]]
     type = "single_line_text_field"
-    key = "Variant title"
+    key = "varianttitle"
 
     [[settings.field]]
     type = "single_line_text_field"
-    key = "Product URL"
+    key = "producturl"
 
     [[settings.field]]
     type = "single_line_text_field"
-    key = "Product image"
+    key = "productimage"
