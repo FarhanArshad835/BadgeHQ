@@ -107,18 +107,51 @@ export async function upsertSubscribedCustomer(
     );
     const body = await resp.json();
     const id = body?.data?.customerCreate?.customer?.id ?? null;
-    if (!id) {
-      // Most likely causes: write_customers not approved, or Protected
-      // Customer Data not granted. Capture it — silently returning null is
-      // what made this invisible before.
-      lastSubscribeError = JSON.stringify(
-        body?.data?.customerCreate?.userErrors?.length
-          ? body.data.customerCreate.userErrors
-          : body?.errors || body,
-      ).slice(0, 300);
-      console.error("[back-in-stock] customerCreate failed:", lastSubscribeError);
+    if (id) return id;
+
+    const errs = body?.data?.customerCreate?.userErrors || [];
+    const taken = errs.some((e: any) => /already been taken/i.test(e?.message || ""));
+
+    // The customer exists but the `customers(query:)` search above didn't find
+    // them — that search depends on the search index and on Protected Customer
+    // Data access, so it can come back empty for real customers. Look them up
+    // by exact identifier instead, then subscribe them.
+    if (taken) {
+      const byId = await admin.graphql(
+        `query CustomerByEmail($id: CustomerIdentifierInput!) {
+          customerByIdentifier(identifier: $id) { id }
+        }`,
+        { variables: { id: { emailAddress: email } } },
+      );
+      const byIdBody = await byId.json();
+      const existingId = byIdBody?.data?.customerByIdentifier?.id ?? null;
+      if (existingId) {
+        const upd = await admin.graphql(
+          `mutation SubscribeExisting($input: CustomerInput!) {
+            customerUpdate(input: $input) { userErrors { field message } }
+          }`,
+          { variables: { input: { id: existingId, emailMarketingConsent: consent } } },
+        );
+        const updBody = await upd.json();
+        const updErrs = updBody?.data?.customerUpdate?.userErrors || [];
+        if (updErrs.length) {
+          lastSubscribeError = "consent-update: " + JSON.stringify(updErrs).slice(0, 200);
+          console.error("[back-in-stock] customerUpdate rejected:", lastSubscribeError);
+        }
+        // Return the id either way — the customer exists, so the marketing
+        // automation can address them.
+        return existingId;
+      }
+      lastSubscribeError =
+        "customer exists but could not be looked up: " +
+        JSON.stringify(byIdBody?.errors || byIdBody).slice(0, 200);
+      console.error("[back-in-stock]", lastSubscribeError);
+      return null;
     }
-    return id;
+
+    lastSubscribeError = JSON.stringify(errs.length ? errs : body?.errors || body).slice(0, 300);
+    console.error("[back-in-stock] customerCreate failed:", lastSubscribeError);
+    return null;
   } catch (e: any) {
     lastSubscribeError = "threw: " + String(e?.message || e).slice(0, 200);
     console.error("[back-in-stock] customerCreate threw:", lastSubscribeError);
