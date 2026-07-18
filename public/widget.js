@@ -3080,17 +3080,82 @@
 
   // Is the current variant sold out? Prefer the theme's inlined variant JSON;
   // fall back to the ATC button being disabled.
+  // Authoritative per-variant stock, fetched once per product and cached.
+  // /products/<handle>.js is a public storefront endpoint every theme serves,
+  // and unlike the theme's inlined variant JSON it carries inventory_quantity,
+  // inventory_management and inventory_policy — the only way to distinguish
+  // "out of stock" from "0 but still sellable (continue selling)".
+  var bisVariantData = null;
+  var bisVariantFetch = null;
+
+  function bisProductHandle() {
+    var m = window.location.pathname.match(/\/products\/([^/?#]+)/);
+    return m ? m[1] : null;
+  }
+
+  function bisLoadVariants(done) {
+    if (bisVariantData) { done(bisVariantData); return; }
+    if (bisVariantFetch) { bisVariantFetch.push(done); return; }
+    var handle = bisProductHandle();
+    if (!handle) { done(null); return; }
+    bisVariantFetch = [done];
+    fetch("/products/" + encodeURIComponent(handle) + ".js")
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (p) {
+        bisVariantData = (p && p.variants) || null;
+        var queue = bisVariantFetch || [];
+        bisVariantFetch = null;
+        for (var i = 0; i < queue.length; i++) queue[i](bisVariantData);
+      })
+      .catch(function () {
+        var queue = bisVariantFetch || [];
+        bisVariantFetch = null;
+        for (var i = 0; i < queue.length; i++) queue[i](null);
+      });
+  }
+
+  // True only when the variant is genuinely unavailable to buy. A variant with
+  // inventory_policy "continue" is still purchasable at 0 stock, so it must NOT
+  // offer a notify form (the theme keeps Add to Cart enabled for it too).
+  function bisVariantSoldOut(variants, variantId) {
+    if (!variants || !variantId) return null;
+    for (var i = 0; i < variants.length; i++) {
+      var v = variants[i];
+      if (String(v.id) !== String(variantId)) continue;
+      if (v.available === false) return true;
+      if (
+        v.inventory_management === "shopify" &&
+        typeof v.inventory_quantity === "number" &&
+        v.inventory_quantity <= 0 &&
+        v.inventory_policy !== "continue"
+      ) {
+        return true;
+      }
+      return false;
+    }
+    return null;
+  }
+
+  // Synchronous best-effort read, used before the product JSON arrives and as
+  // the fallback when it can't be fetched. Note: never compare the button's
+  // LABEL — themes retranslate "Sold out" (jmlooks renders "Restocking soon"),
+  // so only the disabled attribute is trustworthy.
   function bisIsSoldOut(root) {
     var variantId = bisCurrentVariantId(root);
+    var known = bisVariantSoldOut(bisVariantData, variantId);
+    if (known !== null) return known;
     try {
       var sel = root.querySelector("[data-selected-variant]");
       if (sel && sel.innerHTML) {
         var v = JSON.parse(sel.innerHTML);
         if (v && typeof v.available === "boolean") return !v.available;
       }
-      var all = root.querySelector("[data-all-variants]");
-      if (all && all.innerHTML && variantId) {
-        var list = JSON.parse(all.innerHTML);
+      var all = root.querySelector(
+        "[data-all-variants], variant-radios script[type='application/json'], " +
+        "variant-selects script[type='application/json']"
+      );
+      if (all && all.textContent && variantId) {
+        var list = JSON.parse(all.textContent);
         for (var i = 0; i < list.length; i++) {
           if (String(list[i].id) === String(variantId)) return !list[i].available;
         }
@@ -3098,25 +3163,6 @@
     } catch (e) {}
     var btn = bisAtcButton(root);
     return !!(btn && btn.hasAttribute("disabled"));
-  }
-
-  // Preorder products render a disabled button too — don't offer "notify me"
-  // there. Detect by comparing the button label to the theme's sold-out string.
-  function bisIsPreorder(root) {
-    try {
-      var btn = bisAtcButton(root);
-      var strings = window.variantStrings;
-      if (!btn || !strings || !strings.soldOut) return false;
-      var label = (btn.textContent || "").trim().toLowerCase();
-      if (!label) return false;
-      var soldOut = String(strings.soldOut).trim().toLowerCase();
-      var unavailable = String(strings.unavailable || "").trim().toLowerCase();
-      // Disabled, but the label is neither "sold out" nor "unavailable" ->
-      // some other state (preorder, quantity rule) we shouldn't hijack.
-      return label !== soldOut && (!unavailable || label !== unavailable);
-    } catch (e) {
-      return false;
-    }
   }
 
   function bisAlreadySignedUp(variantId) {
@@ -3333,7 +3379,7 @@
   // Show the form only while the selected variant is sold out.
   function bisSync(cfg) {
     var root = bisRoot();
-    var soldOut = bisIsSoldOut(root) && !bisIsPreorder(root);
+    var soldOut = bisIsSoldOut(root);
     var existing = document.getElementById("badgehq-back-in-stock");
     var variantId = bisCurrentVariantId(root);
 
@@ -3353,6 +3399,10 @@
   function initBackInStock(cfg) {
     bisCfg = cfg;
     bisSync(cfg);
+
+    // Fetch authoritative inventory once, then re-evaluate: this is what tells
+    // a genuinely sold-out variant apart from a continue-selling one.
+    bisLoadVariants(function () { bisSync(cfg); });
 
     // Themes re-render the buy buttons on variant change. Prefer the theme's
     // own pub/sub (Dawn/Release expose it globally); the MutationObserver on
