@@ -10,34 +10,33 @@ api_version = "2025-01"
 name = "BadgeHQ back in stock"
 type = "flow_trigger"
 handle = "badgehq-back-in-stock"
-
-uid = "548a71aa-1f6c-e344-4780-c9fdc8670cbdf06fb5f5"
 description = "Fires when a product a customer asked to be notified about is back in stock."
 
-  [settings]
+# Per Shopify's docs this is a TOP-LEVEL table (not nested under [[extensions]])
+# and the array is [[settings.fields]] — plural. Getting either wrong makes
+# Shopify silently drop every field, leaving only `shop` in Flow's variable
+# picker and breaking the "Send marketing email" action with "Customer needed".
+[settings]
 
-    # The shopper to email. Sent as `customer_id` in the trigger payload.
-    #
-    # Keys are single words on purpose: Shopify only allows alphabetic
-    # characters and spaces, and a key with a space is ambiguous to reference
-    # in the Liquid of a marketing email. Single words map cleanly to
-    # {{ producttitle }} etc. Payload keys in fireRestockTrigger() must match
-    # these exactly.
-    [[settings.field]]
-    type = "customer_reference"
+  # The shopper to email. Sent as `customer_id` in the trigger payload.
+  [[settings.fields]]
+  type = "customer_reference"
 
-    [[settings.field]]
-    type = "single_line_text_field"
-    key = "producttitle"
+  # Keys are single words: Shopify allows only alphabetic characters and
+  # spaces, and a key with a space is ambiguous in the email's Liquid.
+  # Payload keys in fireRestockTrigger() must match these exactly.
+  [[settings.fields]]
+  type = "single_line_text_field"
+  key = "producttitle"
 
-    [[settings.field]]
-    type = "single_line_text_field"
-    key = "varianttitle"
+  [[settings.fields]]
+  type = "single_line_text_field"
+  key = "varianttitle"
 
-    [[settings.field]]
-    type = "single_line_text_field"
-    key = "producturl"
+  [[settings.fields]]
+  type = "single_line_text_field"
+  key = "producturl"
 
-    [[settings.field]]
-    type = "single_line_text_field"
-    key = "productimage"
+  [[settings.fields]]
+  type = "single_line_text_field"
+  key = "productimage"
