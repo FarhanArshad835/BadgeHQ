@@ -69,6 +69,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     orderManagementCount,
     wishlistCount,
     backInStockCount,
+    aiRepliesCount,
     themeExtensionEnabled,
     currentPlan,
   ] = await Promise.all([
@@ -82,6 +83,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     prisma.orderManageSettings.count({ where: { shop, isEnabled: true } }),
     prisma.wishlistSettings.count({ where: { shop, isEnabled: true } }),
     prisma.backInStockSettings.count({ where: { shop, isEnabled: true } }),
+    prisma.aiReplySettings.count({ where: { shop, isEnabled: true } }),
     checkThemeExtensionEnabled(shop, accessToken),
     getShopPlan(shop),
   ]);
@@ -102,6 +104,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       orderManagements: orderManagementCount,
       wishlists: wishlistCount,
       backInStock: backInStockCount,
+      aiReplies: aiRepliesCount,
     },
     isEnabled: themeExtensionEnabled,
     themeEditorUrl,
@@ -170,6 +173,12 @@ const features = [
     description: "Email shoppers when a sold-out product is available again",
     route: "/app/back-in-stock",
     key: "backInStock" as const,
+  },
+  {
+    title: "Automated Replies",
+    description: "AI chat that answers shopper questions from your store info",
+    route: "/app/ai-replies",
+    key: "aiReplies" as const,
   },
 ];
 

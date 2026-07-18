@@ -236,6 +236,22 @@ model BackInStockSubscription {
   @@index([shop])
 }
 
+model AiReplySettings {
+  id           String   @id @default(cuid())
+  shop         String   @unique
+  isEnabled    Boolean  @default(false)
+  apiKey       String   @default("") // merchant's Gemini key — server-side only
+  knowledge    String   @default("") // policies/FAQ text the bot may answer from
+  botName      String   @default("Support")
+  greeting     String   @default("Hi! Ask me about shipping, returns or sizing.")
+  supportEmail String   @default("")
+  supportUrl   String   @default("")
+  accentColor  String   @default("#111111")
+  position     String   @default("bottom-right") // bottom-right | bottom-left
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
 model ShopPlan {
   id        String   @id @default(cuid())
   shop      String   @unique

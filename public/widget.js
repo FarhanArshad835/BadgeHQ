@@ -113,6 +113,8 @@
     if (w.wishlist && w.wishlist.enabled) initWishlist(w.wishlist, page);
     if (w.backInStock && w.backInStock.enabled && page === "product")
       initBackInStock(w.backInStock);
+    // Chat belongs on every page, so no page gate here.
+    if (w.aiReplies && w.aiReplies.enabled) initAiReplies(w.aiReplies);
 
     if (page === "product") setupProductRerenderWatch(data, page);
     else setupCardRerenderWatch(data, page);
@@ -3457,5 +3459,183 @@
       bisHiddenBtn = null;
       setTimeout(function () { bisSync(cfg); }, 100);
     });
+  }
+
+  /* ===================== AI REPLIES (chat) ===================== */
+  // Floating chat bubble that answers from the merchant's knowledge text via
+  // /api/ai-reply. The merchant's Gemini key never reaches the browser, and the
+  // transcript lives only in sessionStorage — nothing is stored server-side.
+  var AI_ENDPOINT = API_ORIGIN + "/api/ai-reply";
+  var AI_KEY = "badgehq_ai_chat";
+  var AI_MAX_TURNS = 10;
+  var AI_MAX_CHARS = 1000;
+
+  function aiLoadHistory() {
+    try {
+      var raw = JSON.parse(sessionStorage.getItem(AI_KEY) || "[]");
+      return Object.prototype.toString.call(raw) === "[object Array]" ? raw.slice(-AI_MAX_TURNS) : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function aiSaveHistory(history) {
+    try {
+      sessionStorage.setItem(AI_KEY, JSON.stringify(history.slice(-AI_MAX_TURNS)));
+    } catch (e) {}
+  }
+
+  function initAiReplies(cfg) {
+    if (document.getElementById("badgehq-ai-chat")) return;
+
+    var accent = cfg.accentColor || "#111111";
+    var side = cfg.position === "bottom-left" ? "left:20px;" : "right:20px;";
+    var history = aiLoadHistory();
+
+    if (!document.getElementById("badgehq-ai-style")) {
+      var style = document.createElement("style");
+      style.id = "badgehq-ai-style";
+      style.textContent =
+        ".badgehq-ai-bubble{position:fixed;bottom:20px;" + side +
+        "z-index:9992;width:56px;height:56px;display:flex;align-items:center;justify-content:center;" +
+        "border:none;border-radius:50%;cursor:pointer;background:" + accent + ";color:#fff;" +
+        "box-shadow:0 4px 14px rgba(0,0,0,0.25);}" +
+        ".badgehq-ai-panel{position:fixed;bottom:88px;" + side +
+        "z-index:9992;width:340px;max-width:calc(100vw - 32px);height:460px;max-height:calc(100vh - 120px);" +
+        "display:none;flex-direction:column;overflow:hidden;background:#fff;color:#1a1a1a;" +
+        "border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,0.22);font-size:14px;line-height:1.5;}" +
+        ".badgehq-ai-panel.is-open{display:flex;}" +
+        ".badgehq-ai-head{display:flex;align-items:center;justify-content:space-between;gap:8px;" +
+        "padding:12px 14px;background:" + accent + ";color:#fff;font-weight:600;}" +
+        ".badgehq-ai-close{background:none;border:none;color:#fff;font-size:20px;line-height:1;cursor:pointer;padding:0 4px;}" +
+        ".badgehq-ai-log{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px;}" +
+        ".badgehq-ai-msg{max-width:85%;padding:9px 12px;border-radius:12px;white-space:pre-wrap;word-wrap:break-word;}" +
+        ".badgehq-ai-msg--bot{align-self:flex-start;background:#f1f1f3;border-bottom-left-radius:4px;}" +
+        ".badgehq-ai-msg--user{align-self:flex-end;background:" + accent + ";color:#fff;border-bottom-right-radius:4px;}" +
+        ".badgehq-ai-foot{display:flex;gap:8px;padding:10px;border-top:1px solid rgba(0,0,0,0.08);}" +
+        ".badgehq-ai-input{flex:1 1 auto;min-width:0;padding:9px 11px;font:inherit;box-sizing:border-box;" +
+        "border:1px solid rgba(0,0,0,0.2);border-radius:8px;}" +
+        ".badgehq-ai-send{flex:none;padding:9px 14px;font:inherit;font-weight:600;cursor:pointer;" +
+        "background:" + accent + ";color:#fff;border:none;border-radius:8px;}" +
+        ".badgehq-ai-send:disabled{opacity:0.55;cursor:default;}" +
+        ".badgehq-ai-help{padding:0 14px 10px;font-size:12px;}" +
+        ".badgehq-ai-help a{color:" + accent + ";}" +
+        "@media (max-width:480px){.badgehq-ai-panel{left:12px;right:12px;width:auto;bottom:84px;height:70vh;}}";
+      document.head.appendChild(style);
+    }
+
+    var wrap = document.createElement("div");
+    wrap.id = "badgehq-ai-chat";
+    wrap.innerHTML =
+      '<div class="badgehq-ai-panel" data-ai-panel role="dialog" aria-label="' +
+      escapeDeHtml(cfg.botName || "Support") + '">' +
+      '<div class="badgehq-ai-head"><span>' + escapeDeHtml(cfg.botName || "Support") + "</span>" +
+      '<button type="button" class="badgehq-ai-close" data-ai-close aria-label="Close chat">&times;</button></div>' +
+      '<div class="badgehq-ai-log" data-ai-log aria-live="polite"></div>' +
+      aiContactHtml(cfg) +
+      '<div class="badgehq-ai-foot">' +
+      '<input class="badgehq-ai-input" data-ai-input type="text" maxlength="' + AI_MAX_CHARS +
+      '" placeholder="Ask a question…" aria-label="Your message">' +
+      '<button type="button" class="badgehq-ai-send" data-ai-send>Send</button>' +
+      "</div></div>" +
+      '<button type="button" class="badgehq-ai-bubble" data-ai-toggle aria-label="Chat with us">' +
+      '<svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor" aria-hidden="true">' +
+      '<path d="M12 3C6.9 3 3 6.6 3 11c0 2.2 1 4.2 2.7 5.6L5 21l4.6-2.3c.8.2 1.6.3 2.4.3 5.1 0 9-3.6 9-8s-3.9-8-9-8Z"/>' +
+      "</svg></button>";
+    document.body.appendChild(wrap);
+
+    var panel = wrap.querySelector("[data-ai-panel]");
+    var log = wrap.querySelector("[data-ai-log]");
+    var input = wrap.querySelector("[data-ai-input]");
+    var sendBtn = wrap.querySelector("[data-ai-send]");
+
+    function addMsg(role, text) {
+      var el = document.createElement("div");
+      el.className = "badgehq-ai-msg badgehq-ai-msg--" + (role === "user" ? "user" : "bot");
+      el.textContent = text;
+      log.appendChild(el);
+      log.scrollTop = log.scrollHeight;
+      return el;
+    }
+
+    // Replay this session's conversation, or greet.
+    if (history.length) {
+      for (var i = 0; i < history.length; i++) {
+        addMsg(history[i].role === "user" ? "user" : "bot", history[i].text);
+      }
+    } else if (cfg.greeting) {
+      addMsg("bot", cfg.greeting);
+    }
+
+    wrap.querySelector("[data-ai-toggle]").addEventListener("click", function () {
+      panel.classList.toggle("is-open");
+      if (panel.classList.contains("is-open")) {
+        input.focus();
+        log.scrollTop = log.scrollHeight;
+      }
+    });
+    wrap.querySelector("[data-ai-close]").addEventListener("click", function () {
+      panel.classList.remove("is-open");
+    });
+
+    function send() {
+      var text = (input.value || "").trim().slice(0, AI_MAX_CHARS);
+      if (!text) return;
+      input.value = "";
+      addMsg("user", text);
+      history.push({ role: "user", text: text });
+      aiSaveHistory(history);
+
+      sendBtn.disabled = true;
+      var pending = addMsg("bot", "…");
+
+      fetch(AI_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          shop: SHOP,
+          message: text,
+          // Exclude the turn we just added; the server appends it.
+          history: history.slice(0, -1).slice(-AI_MAX_TURNS),
+        }),
+      })
+        .then(function (r) { return r.json().catch(function () { return {}; }); })
+        .then(function (data) {
+          var reply = (data && data.text) || "Sorry — I couldn't answer that.";
+          pending.textContent = reply;
+          if (data && data.ok) {
+            history.push({ role: "model", text: reply });
+            aiSaveHistory(history);
+          }
+        })
+        .catch(function () {
+          pending.textContent = "Sorry — I couldn't reach support just now. Please try again.";
+        })
+        .finally(function () {
+          sendBtn.disabled = false;
+          log.scrollTop = log.scrollHeight;
+          input.focus();
+        });
+    }
+
+    sendBtn.addEventListener("click", send);
+    input.addEventListener("keydown", function (e) {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        send();
+      }
+    });
+  }
+
+  function aiContactHtml(cfg) {
+    var bits = [];
+    if (cfg.supportEmail) {
+      bits.push('<a href="mailto:' + escapeDeHtml(cfg.supportEmail) + '">' + escapeDeHtml(cfg.supportEmail) + "</a>");
+    }
+    if (cfg.supportUrl) {
+      bits.push('<a href="' + escapeDeHtml(cfg.supportUrl) + '" target="_blank" rel="noopener">Message us</a>');
+    }
+    if (!bits.length) return "";
+    return '<div class="badgehq-ai-help">Need a person? ' + bits.join(" &middot; ") + "</div>";
   }
 })();

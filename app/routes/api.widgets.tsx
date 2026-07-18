@@ -62,6 +62,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     orderManageSettings,
     wishlistSettings,
     backInStockSettings,
+    aiReplySettings,
   ] = await Promise.all([
     prisma.trustBadge.findMany({ where: { shop, isEnabled: true } }),
     prisma.productBadge.findMany({ where: { shop, isActive: true }, orderBy: [{ priority: "desc" }, { createdAt: "desc" }] }),
@@ -73,6 +74,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     prisma.orderManageSettings.findUnique({ where: { shop } }),
     prisma.wishlistSettings.findUnique({ where: { shop } }),
     prisma.backInStockSettings.findUnique({ where: { shop } }),
+    prisma.aiReplySettings.findUnique({ where: { shop } }),
   ]);
 
   const globalSettings = appSettings
@@ -176,6 +178,17 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       showOnPages: orderManageSettings?.showOnPages
         ? JSON.parse(orderManageSettings.showOnPages)
         : ["account"],
+    },
+    aiReplies: {
+      // Requires a key to be usable — and the key itself never leaves the
+      // server, exactly like the Delhivery token.
+      enabled: Boolean(aiReplySettings?.isEnabled && aiReplySettings?.apiKey),
+      botName: aiReplySettings?.botName ?? "Support",
+      greeting: aiReplySettings?.greeting ?? "Hi! Ask me about shipping, returns or sizing.",
+      supportEmail: aiReplySettings?.supportEmail ?? "",
+      supportUrl: aiReplySettings?.supportUrl ?? "",
+      accentColor: aiReplySettings?.accentColor ?? "#111111",
+      position: aiReplySettings?.position ?? "bottom-right",
     },
     backInStock: {
       enabled: Boolean(backInStockSettings?.isEnabled),
