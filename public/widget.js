@@ -3161,6 +3161,10 @@
         }
       }
     } catch (e) {}
+    // Last resort. NOTE: on themes that re-render via the Section Rendering
+    // API this attribute lags the shopper's click by a network round-trip, so
+    // it can briefly describe the PREVIOUS variant. It's only used until the
+    // product JSON above resolves, which then wins for good.
     var btn = bisAtcButton(root);
     return !!(btn && btn.hasAttribute("disabled"));
   }
@@ -3415,6 +3419,20 @@
         });
       }
     } catch (e) {}
+
+    // Radio/select changes fire IMMEDIATELY, before the theme's section fetch
+    // resolves. Since our stock map is local, we can settle on the right state
+    // without waiting for (or trusting) the theme's re-render.
+    document.addEventListener("change", function (e) {
+      var t = e.target;
+      if (!t || !t.closest) return;
+      if (
+        t.closest("variant-radios, variant-selects, product-variant-selects, .product-form__input") ||
+        (t.name === "id" && t.closest("form[action*='/cart/add']"))
+      ) {
+        setTimeout(function () { bisSync(cfg); }, 0);
+      }
+    });
 
     var debounce = null;
     if (window.MutationObserver) {
