@@ -57,7 +57,8 @@ export function buildSystemPrompt(s: AiSettings): string {
       ? `7. For order-specific problems, complaints, payment issues or anything you cannot answer, tell them to contact the team: ${contact}.`
       : "7. For order-specific problems, complaints or payment issues, tell them to contact the store's support team.",
     "",
-    "Reply in plain text. Do not use markdown formatting.",
+    "Reply in plain text. Do not use markdown formatting, EXCEPT links.",
+    "For any link, always use markdown with a short human label — [Returns portal](https://example.com/returns), never a bare URL and never 'click here'. Only link to URLs that appear in the store information above.",
   ].join("\n");
 }
 

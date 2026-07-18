@@ -3511,6 +3511,7 @@
         ".badgehq-ai-log{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px;}" +
         ".badgehq-ai-msg{max-width:85%;padding:9px 12px;border-radius:12px;white-space:pre-wrap;word-wrap:break-word;}" +
         ".badgehq-ai-msg--bot{align-self:flex-start;background:#f1f1f3;border-bottom-left-radius:4px;}" +
+        ".badgehq-ai-msg--bot a{color:" + accent + ";text-decoration:underline;font-weight:600;overflow-wrap:anywhere;}" +
         ".badgehq-ai-msg--user{align-self:flex-end;background:" + accent + ";color:#fff;border-bottom-right-radius:4px;}" +
         ".badgehq-ai-foot{display:flex;gap:8px;padding:10px;border-top:1px solid rgba(0,0,0,0.08);}" +
         ".badgehq-ai-input{flex:1 1 auto;min-width:0;padding:9px 11px;font:inherit;box-sizing:border-box;" +
@@ -3549,10 +3550,41 @@
     var input = wrap.querySelector("[data-ai-input]");
     var sendBtn = wrap.querySelector("[data-ai-send]");
 
+    // Render a bot reply, turning markdown [label](url) into real links.
+    // Built as DOM nodes (never innerHTML) because the text comes from an LLM:
+    // anything that isn't a recognised link stays literal text, so injected
+    // markup can't execute. Only safe schemes are linkified.
+    var AI_LINK_RE = /\[([^\]\n]{1,80})\]\((https?:\/\/[^\s)]+|mailto:[^\s)]+|tel:[^\s)]+)\)/g;
+
+    function aiFillText(el, text) {
+      var last = 0;
+      var m;
+      AI_LINK_RE.lastIndex = 0;
+      while ((m = AI_LINK_RE.exec(text)) !== null) {
+        if (m.index > last) {
+          el.appendChild(document.createTextNode(text.slice(last, m.index)));
+        }
+        var a = document.createElement("a");
+        a.href = m[2];
+        a.textContent = m[1];
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+        el.appendChild(a);
+        last = m.index + m[0].length;
+      }
+      if (last < text.length) {
+        el.appendChild(document.createTextNode(text.slice(last)));
+      }
+    }
+
     function addMsg(role, text) {
       var el = document.createElement("div");
       el.className = "badgehq-ai-msg badgehq-ai-msg--" + (role === "user" ? "user" : "bot");
-      el.textContent = text;
+      if (role === "user") {
+        el.textContent = text; // never linkify shopper input
+      } else {
+        aiFillText(el, text);
+      }
       log.appendChild(el);
       log.scrollTop = log.scrollHeight;
       return el;
@@ -3602,7 +3634,8 @@
         .then(function (r) { return r.json().catch(function () { return {}; }); })
         .then(function (data) {
           var reply = (data && data.text) || "Sorry — I couldn't answer that.";
-          pending.textContent = reply;
+          pending.textContent = "";
+          aiFillText(pending, reply);
           if (data && data.ok) {
             history.push({ role: "model", text: reply });
             aiSaveHistory(history);
