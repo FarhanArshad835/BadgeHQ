@@ -18,7 +18,11 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import prisma from "../db.server";
 import { unauthenticated } from "../shopify.server";
-import { isValidEmail, upsertSubscribedCustomer } from "../utils/back-in-stock.server";
+import {
+  getLastSubscribeError,
+  isValidEmail,
+  upsertSubscribedCustomer,
+} from "../utils/back-in-stock.server";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -81,17 +85,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     customerId = await upsertSubscribedCustomer(admin, email);
     if (!customerId) subscribeError = "customer-not-created";
 
-    // TEMP DIAGNOSTIC: report the scopes Shopify actually granted. A missing
-    // write_customers here (vs. present in shopify.app.toml) means the
-    // merchant hasn't re-approved the app, which silently denies
-    // customerCreate and leaves signups as "not subscribed".
+    // TEMP DIAGNOSTIC: surface Shopify's actual rejection reason.
     if (!customerId) {
-      const session = await prisma.session.findFirst({
-        where: { shop },
-        orderBy: { expires: "desc" },
-        select: { scope: true },
-      });
-      subscribeError = "granted-scopes: " + (session?.scope || "none");
+      subscribeError = getLastSubscribeError() || "customer-not-created";
     }
   } catch (e: any) {
     customerId = null;

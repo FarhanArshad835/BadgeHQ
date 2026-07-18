@@ -41,10 +41,18 @@ export function toBareId(gid: string): string {
  * automation silently skips them and the shopper never hears about the restock.
  * Returns the customer gid, or null if Shopify rejected it.
  */
+// TEMP: last failure reason from upsertSubscribedCustomer, surfaced by the
+// signup endpoint so the cause is visible without server-log access.
+let lastSubscribeError: string | null = null;
+export function getLastSubscribeError(): string | null {
+  return lastSubscribeError;
+}
+
 export async function upsertSubscribedCustomer(
   admin: AdminGraphql,
   email: string,
 ): Promise<string | null> {
+  lastSubscribeError = null;
   const consent = {
     marketingState: "SUBSCRIBED",
     marketingOptInLevel: "SINGLE_OPT_IN",
@@ -101,16 +109,19 @@ export async function upsertSubscribedCustomer(
     const id = body?.data?.customerCreate?.customer?.id ?? null;
     if (!id) {
       // Most likely causes: write_customers not approved, or Protected
-      // Customer Data not granted. Log it — silently returning null is what
-      // made this invisible before.
-      console.error(
-        "[back-in-stock] customerCreate failed:",
-        JSON.stringify(body?.data?.customerCreate?.userErrors || body?.errors || body).slice(0, 400),
-      );
+      // Customer Data not granted. Capture it — silently returning null is
+      // what made this invisible before.
+      lastSubscribeError = JSON.stringify(
+        body?.data?.customerCreate?.userErrors?.length
+          ? body.data.customerCreate.userErrors
+          : body?.errors || body,
+      ).slice(0, 300);
+      console.error("[back-in-stock] customerCreate failed:", lastSubscribeError);
     }
     return id;
   } catch (e: any) {
-    console.error("[back-in-stock] customerCreate threw:", String(e?.message || e).slice(0, 200));
+    lastSubscribeError = "threw: " + String(e?.message || e).slice(0, 200);
+    console.error("[back-in-stock] customerCreate threw:", lastSubscribeError);
     return null;
   }
 }

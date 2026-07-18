@@ -1,4 +1,5 @@
 api_version = "2025-01"
+uid = "548a71aa-1f6c-e344-4780-c9fdc8670cbdf06fb5f5"
 
 # Flow custom trigger fired when a variant a shopper is waiting on comes back
 # in stock. Shopify has no API to email a shopper directly, so this trigger is
