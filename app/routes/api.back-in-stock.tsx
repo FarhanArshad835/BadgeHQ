@@ -75,11 +75,27 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   // them. Best-effort: if Shopify rejects it we still record the signup, and
   // the admin's subscriber list shows who couldn't be subscribed.
   let customerId: string | null = null;
+  let subscribeError: string | null = null;
   try {
     const { admin } = await unauthenticated.admin(shop);
     customerId = await upsertSubscribedCustomer(admin, email);
-  } catch {
+    if (!customerId) subscribeError = "customer-not-created";
+
+    // TEMP DIAGNOSTIC: report the scopes Shopify actually granted. A missing
+    // write_customers here (vs. present in shopify.app.toml) means the
+    // merchant hasn't re-approved the app, which silently denies
+    // customerCreate and leaves signups as "not subscribed".
+    if (!customerId) {
+      const session = await prisma.session.findFirst({
+        where: { shop },
+        orderBy: { expires: "desc" },
+        select: { scope: true },
+      });
+      subscribeError = "granted-scopes: " + (session?.scope || "none");
+    }
+  } catch (e: any) {
     customerId = null;
+    subscribeError = "threw: " + String(e?.message || e).slice(0, 120);
   }
 
   try {
@@ -94,5 +110,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return json({ error: "save-failed" }, { status: 500, headers: NO_STORE });
   }
 
-  return json({ ok: true }, { headers: NO_STORE });
+  // `subscribed` tells the caller whether Shopify Email will actually be able
+  // to reach this shopper. subscribeError is TEMP diagnostics.
+  return json(
+    { ok: true, subscribed: Boolean(customerId), subscribeError },
+    { headers: NO_STORE },
+  );
 };
