@@ -3039,6 +3039,8 @@
   var BIS_KEY_PREFIX = "badgehq_bis_";
   var bisCfg = null;
   var bisHiddenBtn = null; // ATC button we hid for the replace-button placement
+  var bisWrappedParent = null; // parent whose flex-wrap we overrode
+  var bisWrappedParentFlexWrap = ""; // its previous inline value, to restore
 
   function bisRoot() {
     // Scope to the main product; excludes quick-add drawers and featured
@@ -3198,8 +3200,9 @@
       "border-radius:var(--buttons-radius,6px);}" +
       ".badgehq-bis__panel.is-open{display:block;}" +
       ".badgehq-bis__heading{font-weight:600;margin:0 0 8px;}" +
-      ".badgehq-bis__row{display:flex;gap:8px;align-items:stretch;}" +
-      ".badgehq-bis__input{flex:1 1 auto;min-width:0;padding:10px 12px;font:inherit;box-sizing:border-box;" +
+      /* Wrap rather than squash if the widget lands in a narrow container. */
+      ".badgehq-bis__row{display:flex;gap:8px;align-items:stretch;flex-wrap:wrap;}" +
+      ".badgehq-bis__input{flex:1 1 12ch;min-width:12ch;padding:10px 12px;font:inherit;box-sizing:border-box;" +
       "color:rgb(var(--color-foreground,18 18 18));background:rgb(var(--color-background,255 255 255));" +
       "border:1px solid rgba(var(--color-foreground,18 18 18),0.25);border-radius:var(--inputs-radius,4px);}" +
       ".badgehq-bis__submit{flex:none;padding:10px 18px;font:inherit;font-weight:600;cursor:pointer;" +
@@ -3253,8 +3256,39 @@
     } catch (e) {}
   }
 
+  // Make the widget span its parent's full width even when it was inserted
+  // into a flex/grid slot that was sized for a single button.
+  function bisClaimFullWidth(wrap) {
+    try {
+      var parent = wrap.parentNode;
+      if (!parent || parent.nodeType !== 1) return;
+      var ps = window.getComputedStyle(parent);
+      wrap.style.width = "100%";
+      wrap.style.maxWidth = "100%";
+      wrap.style.minWidth = "0";
+      if (ps.display === "flex" || ps.display === "inline-flex") {
+        wrap.style.flex = "1 1 100%";
+        // A row of buttons would otherwise keep us on the same line.
+        if (ps.flexWrap === "nowrap") {
+          bisWrappedParent = parent;
+          bisWrappedParentFlexWrap = parent.style.flexWrap;
+          parent.style.flexWrap = "wrap";
+        }
+      } else if (ps.display === "grid" || ps.display === "inline-grid") {
+        wrap.style.gridColumn = "1 / -1";
+      }
+    } catch (e) {}
+  }
+
   function bisRemove() {
     var el = document.getElementById("badgehq-back-in-stock");
+    // Undo the parent's flex-wrap override before leaving, so the theme's
+    // button row goes back exactly as it was.
+    if (el && bisWrappedParent) {
+      bisWrappedParent.style.flexWrap = bisWrappedParentFlexWrap;
+      bisWrappedParent = null;
+      bisWrappedParentFlexWrap = "";
+    }
     if (el) el.remove();
     // Restore the ATC button if the replace-button placement hid it.
     if (bisHiddenBtn) {
@@ -3318,8 +3352,16 @@
     if (cfg.placement === "replace-button" && atc) {
       atc.style.display = "none";
       bisHiddenBtn = atc;
-      if (atc.parentNode) atc.parentNode.insertBefore(wrap, atc.nextSibling);
-      else anchor.parentNode.insertBefore(wrap, anchor.nextSibling);
+      if (atc.parentNode) {
+        atc.parentNode.insertBefore(wrap, atc.nextSibling);
+        // We're now sitting in the slot the ATC button occupied. That slot is
+        // often a flex/grid cell sized for a button, which squeezes the form
+        // into a narrow column (one word per line, unusable input). Claim the
+        // full row instead.
+        bisClaimFullWidth(wrap);
+      } else {
+        anchor.parentNode.insertBefore(wrap, anchor.nextSibling);
+      }
     } else if (cfg.placement === "above-atc") {
       anchor.parentNode.insertBefore(wrap, anchor);
     } else {
