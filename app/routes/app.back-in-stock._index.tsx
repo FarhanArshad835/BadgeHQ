@@ -62,10 +62,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     notifiedCount,
     subscribers: subs.map((s) => ({
       id: s.id,
-      email: s.email,
       phone: s.phone,
       variantId: s.variantId,
-      subscribed: Boolean(s.customerId),
       notified: Boolean(s.notifiedAt),
       createdAt: s.createdAt.toISOString().slice(0, 10),
     })),
@@ -271,11 +269,10 @@ export default function BackInStockPage() {
   const handleTest = () => submit({ intent: "test", testPhone }, { method: "POST" });
 
   const rows = d.subscribers.map((s) => [
-    s.phone ? "+91 " + s.phone : "—",
-    s.email,
+    "+91 " + s.phone,
     s.variantId,
     s.createdAt,
-    s.notified ? "Notified" : s.phone ? "Waiting" : "Waiting (no WhatsApp number)",
+    s.notified ? "Notified" : "Waiting",
   ]);
 
   return (
@@ -482,27 +479,14 @@ export default function BackInStockPage() {
                   <Text as="p" tone="subdued">No signups yet.</Text>
                 ) : (
                   <DataTable
-                    columnContentTypes={["text", "text", "text", "text", "text"]}
-                    headings={["WhatsApp", "Email", "Variant", "Signed up", "Status"]}
+                    columnContentTypes={["text", "text", "text", "text"]}
+                    headings={["WhatsApp", "Variant", "Signed up", "Status"]}
                     rows={rows}
                   />
                 )}
-                <Text as="p" tone="subdued">
-                  "Waiting (no WhatsApp number)" means the shopper signed up before the
-                  WhatsApp field existed, so they can't be messaged — reach out by email.
-                </Text>
               </BlockStack>
             </Card>
 
-            <Banner tone="info" title="Optional: also send an email">
-              <Text as="p">
-                BadgeHQ still fires a Shopify Flow trigger ("BadgeHQ back in stock") on
-                every restock, so if you build a marketing automation with a "Send
-                marketing email" action it will send alongside WhatsApp. This only reaches
-                email-marketing subscribers and is entirely optional — WhatsApp works on
-                its own.
-              </Text>
-            </Banner>
           </BlockStack>
         </Layout.Section>
       </Layout>

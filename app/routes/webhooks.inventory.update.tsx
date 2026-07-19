@@ -2,17 +2,12 @@
  * inventory_levels/update webhook — the restock trigger for Back in Stock.
  *
  * Shopify pushes here whenever a variant's stock changes at any location. When
- * stock goes positive we WhatsApp every waiting shopper via Interakt, using the
- * number they typed into the storefront form. That is first-party data, so
- * notifying reads no Shopify customer records and needs no Protected Customer
- * Data access.
+ * stock goes positive we WhatsApp every waiting shopper, using the number they
+ * typed into the storefront form. That is first-party data, so this path reads
+ * no Shopify customer records and needs no Protected Customer Data access.
  *
- * `notifiedAt` is set ONLY for shoppers Interakt accepted, so anyone we
+ * `notifiedAt` is set ONLY for shoppers the provider accepted, so anyone we
  * couldn't reach is retried on the next restock instead of being lost.
- *
- * Mirroring shoppers into the customer list + firing the Flow trigger (for
- * merchants who built the marketing automation) is an optional BONUS, gated on
- * the shop actually granting write_customers. It never affects notifiedAt.
  *
  * Must return 2xx quickly — Shopify retries non-2xx.
  */
@@ -22,12 +17,8 @@ import prisma from "../db.server";
 import {
   buildProductUrl,
   canDeliverWhatsApp,
-  fireRestockTrigger,
-  hasWriteCustomers,
   resolveInventoryItem,
   sendRestockWhatsApp,
-  toGid,
-  upsertSubscribedCustomer,
 } from "../utils/back-in-stock.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -45,7 +36,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (!settings?.isEnabled) return new Response();
 
   // No way to deliver yet — leave everyone waiting so they're notified on the
-  // next restock once the merchant finishes Interakt setup. Bail before
+  // next restock once the merchant finishes WhatsApp setup. Bail before
   // spending any Shopify API calls.
   if (!canDeliverWhatsApp(settings)) {
     console.log(`BadgeHQ: ${shop} restock but WhatsApp not configured — nobody notified`);
@@ -66,13 +57,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
     if (!waiting.length) return new Response();
 
-    // Checked once per batch, not per shopper.
-    const canMirrorCustomers = await hasWriteCustomers(admin);
-
     const notified: string[] = [];
     let failures = 0;
     for (const sub of waiting) {
-      // Delivery: WhatsApp. This alone decides whether they count as notified.
       const wa = await sendRestockWhatsApp({
         settings,
         phone: sub.phone,
@@ -81,29 +68,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       });
       if (wa.ok) notified.push(sub.id);
       else failures++;
-
-      // Bonus, only if the shop granted write_customers: mirror them into the
-      // customer list and fire the Flow trigger for the marketing automation.
-      // Deliberately does NOT gate notifiedAt.
-      if (canMirrorCustomers) {
-        try {
-          let customerId = sub.customerId;
-          if (!customerId) {
-            customerId = await upsertSubscribedCustomer(admin, sub.email);
-            if (customerId) {
-              await prisma.backInStockSubscription.update({
-                where: { id: sub.id },
-                data: { customerId },
-              });
-            }
-          }
-          if (customerId) {
-            await fireRestockTrigger(admin, shop, toGid("Customer", customerId), variant);
-          }
-        } catch {
-          // Bonus path only — never let it affect delivery accounting.
-        }
-      }
     }
 
     if (notified.length) {

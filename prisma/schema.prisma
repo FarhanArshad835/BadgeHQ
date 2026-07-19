@@ -240,13 +240,11 @@ model BackInStockSubscription {
   shop       String
   variantId  String
   productId  String
-  email      String
-  phone      String    @default("") // WhatsApp number; "" = legacy row, unreachable
-  customerId String?
-  notifiedAt DateTime? // set ONLY once Interakt accepted the WhatsApp message
+  phone      String // WhatsApp number — the shopper's identity here
+  notifiedAt DateTime? // set ONLY once the provider accepted the message
   createdAt  DateTime  @default(now())
 
-  @@unique([shop, variantId, email])
+  @@unique([shop, variantId, phone])
   @@index([shop, variantId])
   @@index([shop])
 }

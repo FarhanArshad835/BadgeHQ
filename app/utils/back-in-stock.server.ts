@@ -1,15 +1,13 @@
 /**
  * Back-in-stock server helpers.
  *
- * Delivery is WhatsApp (Interakt or DoubleTick). The shopper types their own
- * number into the storefront form, so notifying them reads NO Shopify customer
- * records and needs no Protected Customer Data access. `notifiedAt` is set only
- * when the provider accepts the message, so a failure is retried next restock.
+ * Delivery is WhatsApp (Interakt or DoubleTick) and nothing else. The shopper
+ * types their own number into the storefront form, so that number is their
+ * identity here — we read NO Shopify customer records, which is why this
+ * feature needs no Protected Customer Data access at all.
  *
- * Mirroring the shopper into Shopify's customer list (and firing the Flow
- * trigger for merchants who built the marketing automation) is an optional
- * BONUS: it runs only when the shop actually granted write_customers, and it
- * never affects whether a shopper counts as notified.
+ * `notifiedAt` is set only when the provider accepts the message, so anyone we
+ * couldn't reach is retried on the next restock instead of being lost.
  */
 import { sendWhatsAppTemplate } from "./whatsapp.server";
 
@@ -17,18 +15,9 @@ type AdminGraphql = {
   graphql: (query: string, opts?: { variables?: any }) => Promise<Response>;
 };
 
-export const FLOW_TRIGGER_HANDLE = "badgehq-back-in-stock";
-
-// Deliberately permissive but sane; Shopify does the real validation on create.
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
-
-export function isValidEmail(email: string): boolean {
-  return email.length <= 254 && EMAIL_RE.test(email);
-}
-
 /** Bare numeric id -> gid. Accepts either form. */
 export function toGid(
-  kind: "ProductVariant" | "Product" | "Customer" | "InventoryItem",
+  kind: "ProductVariant" | "Product" | "InventoryItem",
   id: string,
 ): string {
   return String(id).startsWith("gid://") ? String(id) : `gid://shopify/${kind}/${id}`;
@@ -38,123 +27,6 @@ export function toGid(
 export function toBareId(gid: string): string {
   const m = String(gid).match(/(\d+)\s*$/);
   return m ? m[1] : String(gid);
-}
-
-/**
- * Find an existing customer by email, else create one. Either way ensure they
- * are subscribed to email marketing — without that, Shopify Email's marketing
- * automation silently skips them and the shopper never hears about the restock.
- * Returns the customer gid, or null if Shopify rejected it.
- */
-export async function upsertSubscribedCustomer(
-  admin: AdminGraphql,
-  email: string,
-): Promise<string | null> {
-  let lastSubscribeError: string | null = null;
-  const consent = {
-    marketingState: "SUBSCRIBED",
-    marketingOptInLevel: "SINGLE_OPT_IN",
-    consentUpdatedAt: new Date().toISOString(),
-  };
-
-  // Existing customer? (email search is exact-match here)
-  try {
-    const found = await admin.graphql(
-      `query FindCustomer($q: String!) {
-        customers(first: 1, query: $q) { edges { node { id } } }
-      }`,
-      { variables: { q: `email:${email}` } },
-    );
-    const body = await found.json();
-    if (body?.errors) {
-      console.error("[back-in-stock] customer lookup failed:", JSON.stringify(body.errors).slice(0, 300));
-    }
-    const existing = body?.data?.customers?.edges?.[0]?.node?.id;
-    if (existing) {
-      const upd = await admin.graphql(
-        `mutation SubscribeCustomer($input: CustomerInput!) {
-          customerUpdate(input: $input) { userErrors { field message } }
-        }`,
-        { variables: { input: { id: existing, emailMarketingConsent: consent } } },
-      );
-      const updBody = await upd.json();
-      const updErrs = updBody?.data?.customerUpdate?.userErrors || [];
-      if (updErrs.length || updBody?.errors) {
-        console.error(
-          "[back-in-stock] customerUpdate rejected:",
-          JSON.stringify(updErrs.length ? updErrs : updBody.errors).slice(0, 300),
-        );
-      }
-      // Return the id regardless: the customer exists, so the automation can
-      // still address them even if consent couldn't be updated.
-      return existing;
-    }
-  } catch (e: any) {
-    console.error("[back-in-stock] customer lookup threw:", String(e?.message || e).slice(0, 200));
-  }
-
-  try {
-    const resp = await admin.graphql(
-      `mutation CreateCustomer($input: CustomerInput!) {
-        customerCreate(input: $input) {
-          customer { id }
-          userErrors { field message }
-        }
-      }`,
-      { variables: { input: { email, emailMarketingConsent: consent } } },
-    );
-    const body = await resp.json();
-    const id = body?.data?.customerCreate?.customer?.id ?? null;
-    if (id) return id;
-
-    const errs = body?.data?.customerCreate?.userErrors || [];
-    const taken = errs.some((e: any) => /already been taken/i.test(e?.message || ""));
-
-    // The customer exists but the `customers(query:)` search above didn't find
-    // them — that search depends on the search index and on Protected Customer
-    // Data access, so it can come back empty for real customers. Look them up
-    // by exact identifier instead, then subscribe them.
-    if (taken) {
-      const byId = await admin.graphql(
-        `query CustomerByEmail($id: CustomerIdentifierInput!) {
-          customerByIdentifier(identifier: $id) { id }
-        }`,
-        { variables: { id: { emailAddress: email } } },
-      );
-      const byIdBody = await byId.json();
-      const existingId = byIdBody?.data?.customerByIdentifier?.id ?? null;
-      if (existingId) {
-        const upd = await admin.graphql(
-          `mutation SubscribeExisting($input: CustomerInput!) {
-            customerUpdate(input: $input) { userErrors { field message } }
-          }`,
-          { variables: { input: { id: existingId, emailMarketingConsent: consent } } },
-        );
-        const updBody = await upd.json();
-        const updErrs = updBody?.data?.customerUpdate?.userErrors || [];
-        if (updErrs.length) {
-          lastSubscribeError = "consent-update: " + JSON.stringify(updErrs).slice(0, 200);
-          console.error("[back-in-stock] customerUpdate rejected:", lastSubscribeError);
-        }
-        // Return the id either way — the customer exists, so the marketing
-        // automation can address them.
-        return existingId;
-      }
-      lastSubscribeError =
-        "customer exists but could not be looked up: " +
-        JSON.stringify(byIdBody?.errors || byIdBody).slice(0, 200);
-      console.error("[back-in-stock]", lastSubscribeError);
-      return null;
-    }
-
-    lastSubscribeError = JSON.stringify(errs.length ? errs : body?.errors || body).slice(0, 300);
-    console.error("[back-in-stock] customerCreate failed:", lastSubscribeError);
-    return null;
-  } catch (e: any) {
-    lastSubscribeError = "threw: " + String(e?.message || e).slice(0, 200);
-    console.error("[back-in-stock] customerCreate threw:", lastSubscribeError);
-    return null;
-  }
 }
 
 export type RestockedVariant = {
@@ -183,23 +55,6 @@ export function buildProductUrl(shop: string, v: RestockedVariant): string {
 export function buildButtonSuffix(v: RestockedVariant): string {
   if (!v.productHandle) return "";
   return `${v.productHandle}?variant=${v.variantId}`.slice(0, 128);
-}
-
-/**
- * Does this shop actually grant write_customers? Checked live so a shop that
- * never approved it makes ZERO customer API calls. Failure = assume no.
- */
-export async function hasWriteCustomers(admin: AdminGraphql): Promise<boolean> {
-  try {
-    const resp = await admin.graphql(
-      `query { currentAppInstallation { accessScopes { handle } } }`,
-    );
-    const body = await resp.json();
-    const scopes = body?.data?.currentAppInstallation?.accessScopes ?? [];
-    return scopes.some((s: any) => s?.handle === "write_customers");
-  } catch {
-    return false;
-  }
 }
 
 /**
@@ -232,8 +87,9 @@ export function canDeliverWhatsApp(s: WhatsAppConfig | null | undefined): boolea
 }
 
 /**
- * Notify one shopper on WhatsApp that a variant is back. Template body must be
- * {{1}} product, {{2}} variant, {{3}} product URL.
+ * Notify one shopper on WhatsApp that a variant is back. The approved template
+ * must have an image header, two body variables ({{1}} product, {{2}} variant)
+ * and a dynamic URL button.
  */
 export async function sendRestockWhatsApp(opts: {
   settings: WhatsAppConfig;
@@ -306,48 +162,5 @@ export async function resolveInventoryItem(
     };
   } catch {
     return null;
-  }
-}
-
-/**
- * Fire the Flow custom trigger for one subscriber. The `customer_id` property
- * is what lets the merchant's marketing automation address the shopper.
- * Returns true only when Shopify accepted the trigger.
- */
-export async function fireRestockTrigger(
-  admin: AdminGraphql,
-  shop: string,
-  customerGid: string,
-  v: RestockedVariant,
-): Promise<boolean> {
-  try {
-    const resp = await admin.graphql(
-      `mutation FireBackInStock($handle: String!, $payload: JSON!) {
-        flowTriggerReceive(handle: $handle, payload: $payload) {
-          userErrors { field message }
-        }
-      }`,
-      {
-        variables: {
-          handle: FLOW_TRIGGER_HANDLE,
-          // Keys must match the field keys declared in
-          // extensions/badgehq-flow/shopify.extension.toml exactly.
-          payload: {
-            customer_id: customerGid,
-            producttitle: v.productTitle,
-            varianttitle: v.variantTitle,
-            producturl: v.productHandle
-              ? `https://${shop}/products/${v.productHandle}?variant=${v.variantId}`
-              : "",
-            productimage: v.productImage,
-          },
-        },
-      },
-    );
-    const body = await resp.json();
-    const errs = body?.data?.flowTriggerReceive?.userErrors || [];
-    return errs.length === 0;
-  } catch {
-    return false;
   }
 }
