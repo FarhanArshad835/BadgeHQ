@@ -21,6 +21,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { bumpConfigVersion } from "../utils/config-version.server";
 import { buildSystemPrompt, callGemini } from "../utils/ai-replies.server";
+import { generateWebhookToken } from "../utils/whatsapp-ai.server";
 
 const POSITIONS = ["bottom-right", "bottom-left"];
 
@@ -39,6 +40,19 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     supportUrl: s?.supportUrl ?? "",
     accentColor: s?.accentColor ?? "#111111",
     position: s?.position ?? "bottom-right",
+
+    // WhatsApp (Interakt) inbound replies. Secrets follow the same rule as the
+    // Gemini key: only ever "is one saved" plus the last 4 characters.
+    waReplyEnabled: s?.waReplyEnabled ?? false,
+    hasWaKey: Boolean(s?.waApiKey),
+    waKeyPreview: s?.waApiKey ? s.waApiKey.slice(-4) : "",
+    hasWaSecret: Boolean(s?.waWebhookSecret),
+    // Built from the app's own URL, never the request host — inside the Shopify
+    // admin the request arrives on the embedded-app host, which would produce a
+    // webhook URL that silently never receives anything.
+    webhookUrl: s?.waWebhookToken
+      ? `${(process.env.SHOPIFY_APP_URL || "").replace(/\/$/, "")}/webhooks/interakt/${s.waWebhookToken}`
+      : "",
   });
 };
 
@@ -72,6 +86,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
   }
 
+  // Generate or rotate the per-shop webhook token. Rotation immediately breaks
+  // the old URL, so the UI warns before calling this.
+  if (formData.get("intent") === "rotate-token") {
+    const token = generateWebhookToken();
+    await prisma.aiReplySettings.upsert({
+      where: { shop },
+      create: { shop, waWebhookToken: token },
+      update: { waWebhookToken: token },
+    });
+    return json({ success: true, tokenRotated: true });
+  }
+
   const data = JSON.parse(formData.get("data") as string);
   const text = (v: unknown, fallback: string, max = 300) => {
     const str = String(v ?? "").trim();
@@ -84,10 +110,37 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   const newKey = String(data.apiKey || "").trim();
+  const newWaKey = String(data.waApiKey || "").trim();
+  const newWaSecret = String(data.waWebhookSecret || "").trim();
+
+  // Enabling WhatsApp replies without both credentials would fail closed on
+  // every message — the merchant would just see silence. Refuse instead.
+  const wantsWa = Boolean(data.waReplyEnabled);
+  if (wantsWa) {
+    const existing = await prisma.aiReplySettings.findUnique({ where: { shop } });
+    const willHaveKey = newWaKey || existing?.waApiKey;
+    const willHaveSecret = newWaSecret || existing?.waWebhookSecret;
+    if (!willHaveKey || !willHaveSecret) {
+      return json(
+        {
+          error:
+            "To reply on WhatsApp you need both the Interakt API key and the webhook secret. Add them, then turn this on.",
+        },
+        { status: 400 },
+      );
+    }
+    if (!existing?.waWebhookToken) {
+      return json(
+        { error: "Generate the webhook URL first, then paste it into Interakt." },
+        { status: 400 },
+      );
+    }
+  }
 
   try {
     const values = {
       isEnabled: Boolean(data.isEnabled),
+      waReplyEnabled: wantsWa,
       knowledge: String(data.knowledge ?? "").slice(0, 20000),
       botName: text(data.botName, "Support", 60),
       greeting: text(data.greeting, "Hi! Ask me about shipping, returns or sizing.", 300),
@@ -99,8 +152,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     await prisma.aiReplySettings.upsert({
       where: { shop },
       // Empty key field means "keep the saved key".
-      create: { shop, apiKey: newKey, ...values },
-      update: { ...(newKey ? { apiKey: newKey } : {}), ...values },
+      create: { shop, apiKey: newKey, waApiKey: newWaKey, waWebhookSecret: newWaSecret, ...values },
+      update: {
+        ...(newKey ? { apiKey: newKey } : {}),
+        ...(newWaKey ? { waApiKey: newWaKey } : {}),
+        ...(newWaSecret ? { waWebhookSecret: newWaSecret } : {}),
+        ...values,
+      },
     });
     await bumpConfigVersion(shop);
     return json({ success: true });
@@ -114,6 +172,7 @@ type ActionData = {
   error?: string;
   testResult?: string;
   testError?: string;
+  tokenRotated?: boolean;
 };
 
 export default function AiRepliesPage() {
@@ -133,9 +192,15 @@ export default function AiRepliesPage() {
     supportUrl: d.supportUrl,
     accentColor: d.accentColor,
     position: d.position,
+    waReplyEnabled: d.waReplyEnabled,
+    waApiKey: "",
+    waWebhookSecret: "",
   };
 
   const [enabled, setEnabled] = useState(initial.enabled);
+  const [waReplyEnabled, setWaReplyEnabled] = useState(initial.waReplyEnabled);
+  const [waApiKey, setWaApiKey] = useState(initial.waApiKey);
+  const [waWebhookSecret, setWaWebhookSecret] = useState(initial.waWebhookSecret);
   const [apiKey, setApiKey] = useState(initial.apiKey);
   const [knowledge, setKnowledge] = useState(initial.knowledge);
   const [botName, setBotName] = useState(initial.botName);
@@ -156,12 +221,17 @@ export default function AiRepliesPage() {
     supportEmail !== initial.supportEmail ||
     supportUrl !== initial.supportUrl ||
     accentColor !== initial.accentColor ||
-    position !== initial.position;
+    position !== initial.position ||
+    waReplyEnabled !== initial.waReplyEnabled ||
+    waApiKey !== initial.waApiKey ||
+    waWebhookSecret !== initial.waWebhookSecret;
 
   useEffect(() => {
     if (actionData?.success) {
       setShowSuccess(true);
       setApiKey("");
+      setWaApiKey("");
+      setWaWebhookSecret("");
       const t = setTimeout(() => setShowSuccess(false), 3000);
       return () => clearTimeout(t);
     }
@@ -177,6 +247,9 @@ export default function AiRepliesPage() {
     setSupportUrl(initial.supportUrl);
     setAccentColor(initial.accentColor);
     setPosition(initial.position);
+    setWaReplyEnabled(initial.waReplyEnabled);
+    setWaApiKey(initial.waApiKey);
+    setWaWebhookSecret(initial.waWebhookSecret);
   };
 
   const handleSave = () => {
@@ -192,6 +265,9 @@ export default function AiRepliesPage() {
           supportUrl,
           accentColor,
           position,
+          waReplyEnabled,
+          waApiKey,
+          waWebhookSecret,
         }),
       },
       { method: "POST" },
@@ -199,6 +275,7 @@ export default function AiRepliesPage() {
   };
 
   const handleTest = () => submit({ intent: "test", testQuestion }, { method: "POST" });
+  const handleRotateToken = () => submit({ intent: "rotate-token" }, { method: "POST" });
 
   return (
     <Page>
@@ -228,7 +305,9 @@ export default function AiRepliesPage() {
                 </List>
                 <Text as="p" tone="subdued">
                   Replies are billed to your own Google account. Your key is stored securely
-                  and never sent to the storefront. Conversations aren't saved.
+                  and never sent to the storefront. Storefront chats aren't saved. WhatsApp
+                  conversations are kept for 24 hours so the assistant can follow the thread,
+                  then deleted automatically.
                 </Text>
               </BlockStack>
             </Banner>
@@ -306,6 +385,106 @@ export default function AiRepliesPage() {
                   </div>
                   <Button onClick={handleTest} loading={busy}>Test</Button>
                 </InlineStack>
+              </BlockStack>
+            </Card>
+
+            <Card>
+              <BlockStack gap="400">
+                <Text as="h2" variant="headingMd">Reply on WhatsApp (Interakt)</Text>
+                <Text as="p" tone="subdued">
+                  When a customer messages your Interakt WhatsApp number, the assistant
+                  answers using the same store information as the storefront chat. Replies
+                  sent within 24 hours of the customer's message are free on WhatsApp — you
+                  only pay for Gemini usage.
+                </Text>
+
+                <Banner tone="info">
+                  <BlockStack gap="200">
+                    <Text as="p">
+                      <strong>Needs Interakt's Growth or Advanced plan</strong> — inbound
+                      webhooks aren't available on lower plans.
+                    </Text>
+                    <List type="number">
+                      <List.Item>Paste your Interakt API key and webhook secret below (Interakt → Settings → Developer Settings).</List.Item>
+                      <List.Item>Generate the webhook URL, then add it in Interakt's Developer Settings.</List.Item>
+                      <List.Item>Save, then turn on <strong>Reply to WhatsApp messages</strong>.</List.Item>
+                    </List>
+                  </BlockStack>
+                </Banner>
+
+                <TextField
+                  label="Interakt API key"
+                  value={waApiKey}
+                  onChange={setWaApiKey}
+                  autoComplete="off"
+                  type="password"
+                  placeholder={d.hasWaKey ? "••••••••" : "Paste your Interakt API key"}
+                  helpText={
+                    d.hasWaKey
+                      ? `Saved key ending in ${d.waKeyPreview} — enter a new key to replace it. If you use Back in Stock, this is the same key.`
+                      : "From Interakt → Settings → Developer Settings. The same key used for Back in Stock."
+                  }
+                />
+
+                <TextField
+                  label="Webhook secret"
+                  value={waWebhookSecret}
+                  onChange={setWaWebhookSecret}
+                  autoComplete="off"
+                  type="password"
+                  placeholder={d.hasWaSecret ? "••••••••" : "Paste the secret key from Interakt"}
+                  helpText={
+                    d.hasWaSecret
+                      ? "A secret is saved — enter a new one to replace it. Used to verify messages really came from Interakt."
+                      : "Set in Interakt when you add the webhook. Without it, messages are rejected."
+                  }
+                />
+
+                {d.webhookUrl ? (
+                  <BlockStack gap="200">
+                    <TextField
+                      label="Webhook URL"
+                      value={d.webhookUrl}
+                      onChange={() => {}}
+                      autoComplete="off"
+                      readOnly
+                      selectTextOnFocus
+                      helpText="Paste this into Interakt → Developer Settings → Webhooks. Keep it private — anyone with this URL and your secret could message your customers."
+                    />
+                    <InlineStack gap="200">
+                      <Button onClick={handleRotateToken} loading={busy}>
+                        Generate a new URL
+                      </Button>
+                      <Text as="span" tone="subdued" variant="bodySm">
+                        The old URL stops working immediately — you'd need to update Interakt.
+                      </Text>
+                    </InlineStack>
+                  </BlockStack>
+                ) : (
+                  <InlineStack gap="200" blockAlign="center">
+                    <Button onClick={handleRotateToken} loading={busy}>
+                      Generate webhook URL
+                    </Button>
+                    <Text as="span" tone="subdued" variant="bodySm">
+                      Create the address Interakt will send messages to.
+                    </Text>
+                  </InlineStack>
+                )}
+
+                <Checkbox
+                  label="Reply to WhatsApp messages"
+                  helpText="Needs the API key, webhook secret and webhook URL above. Replies usually arrive within a minute."
+                  checked={waReplyEnabled}
+                  onChange={setWaReplyEnabled}
+                />
+
+                <Text as="p" tone="subdued" variant="bodySm">
+                  Customers can send <strong>stop</strong>, <strong>agent</strong> or{" "}
+                  <strong>human</strong> to pause the assistant so your team can take over in
+                  Interakt's inbox; <strong>start</strong> resumes it. Replying from Interakt
+                  yourself does not pause it automatically. Photos and voice notes are
+                  ignored, and only Indian (+91) numbers are supported.
+                </Text>
               </BlockStack>
             </Card>
 
