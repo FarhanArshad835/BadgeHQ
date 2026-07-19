@@ -3215,10 +3215,7 @@
       "min-width:12ch;padding:10px 12px;font:inherit;box-sizing:border-box;" +
       "color:rgb(var(--color-foreground,18 18 18));background:rgb(var(--color-background,255 255 255));" +
       "border:1px solid rgba(var(--color-foreground,18 18 18),0.25);border-radius:var(--inputs-radius,4px);}" +
-      /* The placeholder states the expected format, which is longer than the
-         value it hints at — shrink it so it isn't clipped on narrow screens.
-         Only the hint scales down; typed digits keep the inherited size. */
-      ".badgehq-bis__input::placeholder{font-size:0.82em;opacity:0.7;}" +
+      ".badgehq-bis__input::placeholder{opacity:0.6;}" +
       ".badgehq-bis__submit{flex:none;padding:10px 18px;font:inherit;font-weight:600;cursor:pointer;" +
       "color:rgb(var(--color-button-text,255 255 255));background:rgb(var(--color-button,18 18 18));" +
       "border:1px solid transparent;border-radius:var(--buttons-radius,4px);}" +
@@ -3371,7 +3368,7 @@
         '<input class="badgehq-bis__input" type="tel" inputmode="numeric" autocomplete="tel" ' +
         // "WhatsApp number" alone left shoppers unsure whether to include +91,
         // spaces or a leading zero — state the expected format instead.
-        'maxlength="10" placeholder="Enter your 10-digit mobile number" ' +
+        'maxlength="10" placeholder="10-digit mobile number" ' +
         'aria-label="Your WhatsApp number, 10 digits without the country code" data-bis-phone>' +
         '<button type="button" class="badgehq-bis__submit" data-bis-submit>Notify me</button>' +
         "</div>" +
