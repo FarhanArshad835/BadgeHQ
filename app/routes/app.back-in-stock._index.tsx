@@ -97,7 +97,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       templateName: s.waTemplateName,
       languageCode: s.waLanguageCode || "en",
       fromNumber: s.waFromNumber,
-      bodyValues: ["Test product", "Test variant", `https://${session.shop}`],
+      bodyValues: ["Test product", "Test variant"],
       headerImageUrl: s.waFallbackImage || undefined,
       // Exercises the dynamic URL button too, so a template misconfiguration
       // shows up in the test rather than on a real restock.
@@ -409,7 +409,7 @@ export default function BackInStockPage() {
                   onChange={setWaTemplateName}
                   autoComplete="off"
                   placeholder="back_in_stock"
-                  helpText={`An approved template with an IMAGE header, three body variables ({{1}} product, {{2}} variant, {{3}} product link) and a dynamic URL button whose base URL is https://${d.shop}/products/`}
+                  helpText={`An approved template with an IMAGE header, two body variables ({{1}} product, {{2}} variant) and a dynamic URL button whose base URL is https://${d.shop}/products/`}
                 />
                 <TextField
                   label="Fallback image URL"

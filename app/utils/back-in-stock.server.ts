@@ -246,7 +246,6 @@ export async function sendRestockWhatsApp(opts: {
   if (!opts.phone) return { ok: false, error: "no-phone" };
 
   const title = clean(opts.variant.productTitle, "Your item");
-  const url = opts.variant.productUrl || buildProductUrl(opts.shop, opts.variant);
 
   const res = await sendWhatsAppTemplate({
     provider: s.waProvider,
@@ -255,12 +254,14 @@ export async function sendRestockWhatsApp(opts: {
     templateName: s.waTemplateName,
     languageCode: s.waLanguageCode || "en",
     fromNumber: s.waFromNumber,
+    // TWO body variables only — the product link lives on the URL button, so
+    // the template body has no {{3}}. Meta rejects a send whose value count
+    // doesn't match the approved template exactly.
     bodyValues: [
       title,
       // A single-variant product has no meaningful variant title — reuse the
       // product title rather than sending an empty (rejected) variable.
       clean(opts.variant.variantTitle, title),
-      clean(url, "our store"),
     ],
     // Products with no featured image fall back to the merchant's image, so a
     // single image template covers every send (Meta rejects an empty header).
