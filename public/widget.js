@@ -3203,7 +3203,12 @@
       ".badgehq-bis__heading{font-weight:600;margin:0 0 8px;}" +
       /* Wrap rather than squash if the widget lands in a narrow container. */
       ".badgehq-bis__row{display:flex;gap:8px;align-items:stretch;flex-wrap:wrap;}" +
-      ".badgehq-bis__input{flex:1 1 12ch;min-width:12ch;padding:10px 12px;font:inherit;box-sizing:border-box;" +
+      /* Fill the row. Themes often set a width/max-width on `input`, which
+         would otherwise pin this to a narrow box, so the flex sizing is
+         declared !important — this is the shopper-facing input and it must be
+         usable on every theme. 12ch is only a floor for very narrow parents. */
+      ".badgehq-bis__input{flex:1 1 auto !important;width:auto !important;max-width:none !important;" +
+      "min-width:12ch;padding:10px 12px;font:inherit;box-sizing:border-box;" +
       "color:rgb(var(--color-foreground,18 18 18));background:rgb(var(--color-background,255 255 255));" +
       "border:1px solid rgba(var(--color-foreground,18 18 18),0.25);border-radius:var(--inputs-radius,4px);}" +
       ".badgehq-bis__submit{flex:none;padding:10px 18px;font:inherit;font-weight:600;cursor:pointer;" +
