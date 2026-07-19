@@ -197,8 +197,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       headingText: backInStockSettings?.headingText ?? "Get notified when this is back",
       consentText:
         backInStockSettings?.consentText ??
-        "We'll email you when it's back in stock. You'll also receive our emails — unsubscribe anytime.",
-      successText: backInStockSettings?.successText ?? "Done! We'll email you when it's back in stock.",
+        "We'll message you on WhatsApp when it's back in stock.",
+      successText:
+        backInStockSettings?.successText ?? "Done! We'll WhatsApp you when it's back in stock.",
     },
     wishlist: {
       enabled: Boolean(wishlistSettings?.isEnabled),

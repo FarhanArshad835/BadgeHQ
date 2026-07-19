@@ -1,12 +1,17 @@
 /**
  * Back-in-stock server helpers.
  *
- * Sending is Shopify-native: we never send email ourselves. On restock we fire
- * a Flow custom trigger (flowTriggerReceive) carrying the Customer property,
- * which the merchant's marketing automation turns into a Shopify Email send.
- * That path only reaches email-marketing subscribers, which is why the signup
- * subscribes the shopper (with an explicit notice in the storefront form).
+ * Delivery is WhatsApp via Interakt. The shopper types their own number into
+ * the storefront form, so notifying them reads NO Shopify customer records and
+ * needs no Protected Customer Data access. `notifiedAt` is set only when
+ * Interakt accepts the message, so a failure is retried on the next restock.
+ *
+ * Mirroring the shopper into Shopify's customer list (and firing the Flow
+ * trigger for merchants who built the marketing automation) is an optional
+ * BONUS: it runs only when the shop actually granted write_customers, and it
+ * never affects whether a shopper counts as notified.
  */
+import { sendWhatsAppTemplate } from "./whatsapp.server";
 
 type AdminGraphql = {
   graphql: (query: string, opts?: { variables?: any }) => Promise<Response>;
@@ -41,18 +46,11 @@ export function toBareId(gid: string): string {
  * automation silently skips them and the shopper never hears about the restock.
  * Returns the customer gid, or null if Shopify rejected it.
  */
-// TEMP: last failure reason from upsertSubscribedCustomer, surfaced by the
-// signup endpoint so the cause is visible without server-log access.
-let lastSubscribeError: string | null = null;
-export function getLastSubscribeError(): string | null {
-  return lastSubscribeError;
-}
-
 export async function upsertSubscribedCustomer(
   admin: AdminGraphql,
   email: string,
 ): Promise<string | null> {
-  lastSubscribeError = null;
+  let lastSubscribeError: string | null = null;
   const consent = {
     marketingState: "SUBSCRIBED",
     marketingOptInLevel: "SINGLE_OPT_IN",
@@ -166,7 +164,97 @@ export type RestockedVariant = {
   variantTitle: string;
   productHandle: string;
   productImage: string;
+  productUrl?: string;
 };
+
+/** Canonical storefront URL for the restocked variant. "" when no handle. */
+export function buildProductUrl(shop: string, v: RestockedVariant): string {
+  return v.productHandle
+    ? `https://${shop}/products/${v.productHandle}?variant=${v.variantId}`
+    : "";
+}
+
+/**
+ * Does this shop actually grant write_customers? Checked live so a shop that
+ * never approved it makes ZERO customer API calls. Failure = assume no.
+ */
+export async function hasWriteCustomers(admin: AdminGraphql): Promise<boolean> {
+  try {
+    const resp = await admin.graphql(
+      `query { currentAppInstallation { accessScopes { handle } } }`,
+    );
+    const body = await resp.json();
+    const scopes = body?.data?.currentAppInstallation?.accessScopes ?? [];
+    return scopes.some((s: any) => s?.handle === "write_customers");
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * WhatsApp/Meta rejects a template send when any body variable is empty, and
+ * newlines/tabs are not allowed either. Flatten whitespace and fall back to a
+ * non-empty value. Shopify's single-variant placeholder "Default Title" is
+ * treated as empty — it is meaningless to a shopper.
+ */
+function clean(value: unknown, fallback: string): string {
+  const v = String(value ?? "").replace(/\s+/g, " ").trim();
+  return v && v.toLowerCase() !== "default title" ? v : fallback;
+}
+
+export type WhatsAppConfig = {
+  waEnabled: boolean;
+  waProvider: string;
+  waApiKey: string;
+  waTemplateName: string;
+  waLanguageCode: string;
+  waFromNumber: string;
+};
+
+/** True when this shop can actually deliver a WhatsApp message. */
+export function canDeliverWhatsApp(s: WhatsAppConfig | null | undefined): boolean {
+  if (!s?.waEnabled || !s.waApiKey || !s.waTemplateName) return false;
+  // DoubleTick additionally needs the sender number.
+  if (s.waProvider === "doubletick" && !s.waFromNumber) return false;
+  return true;
+}
+
+/**
+ * Notify one shopper on WhatsApp that a variant is back. Template body must be
+ * {{1}} product, {{2}} variant, {{3}} product URL.
+ */
+export async function sendRestockWhatsApp(opts: {
+  settings: WhatsAppConfig;
+  phone: string;
+  shop: string;
+  variant: RestockedVariant;
+}): Promise<{ ok: boolean; error?: string }> {
+  const s = opts.settings;
+  if (!canDeliverWhatsApp(s)) return { ok: false, error: "whatsapp-not-configured" };
+  if (!opts.phone) return { ok: false, error: "no-phone" };
+
+  const title = clean(opts.variant.productTitle, "Your item");
+  const url = opts.variant.productUrl || buildProductUrl(opts.shop, opts.variant);
+
+  const res = await sendWhatsAppTemplate({
+    provider: s.waProvider,
+    apiKey: s.waApiKey,
+    phone: opts.phone,
+    templateName: s.waTemplateName,
+    languageCode: s.waLanguageCode || "en",
+    fromNumber: s.waFromNumber,
+    bodyValues: [
+      title,
+      // A single-variant product has no meaningful variant title — reuse the
+      // product title rather than sending an empty (rejected) variable.
+      clean(opts.variant.variantTitle, title),
+      clean(url, "our store"),
+    ],
+    callbackData: `bis:${opts.variant.variantId}`,
+  });
+
+  return res.ok ? { ok: true } : { ok: false, error: res.error };
+}
 
 /** Resolve an inventory_item_id (from the webhook) to its variant + product. */
 export async function resolveInventoryItem(

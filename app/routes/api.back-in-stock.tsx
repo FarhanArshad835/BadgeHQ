@@ -2,15 +2,15 @@
  * Public back-in-stock signup endpoint.
  * Called from the storefront (widget.js) when a shopper asks to be notified
  * about a sold-out variant:
- *   POST /api/back-in-stock  { shop, variantId, productId, email }
+ *   POST /api/back-in-stock  { shop, variantId, productId, email, phone }
  *
- * Sending is Shopify-native (Flow trigger -> marketing automation -> Shopify
- * Email), and that path only reaches email-marketing subscribers — so signing
- * up also subscribes the shopper. The storefront form states this explicitly
- * before they submit.
+ * Delivery is WhatsApp (Interakt) to the number the shopper types here —
+ * first-party data, so nothing about notifying them reads Shopify customer
+ * records. Mirroring them into the customer list is an optional bonus, gated
+ * on the shop having granted write_customers.
  *
  * Responses:
- *   200 { ok: true }
+ *   200 { ok: true, reachable, subscribed }
  *   200 { enabled: false }        — feature off for this shop; widget stays quiet
  *   400 { error: "..." }          — bad input
  */
@@ -18,11 +18,8 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import prisma from "../db.server";
 import { unauthenticated } from "../shopify.server";
-import {
-  getLastSubscribeError,
-  isValidEmail,
-  upsertSubscribedCustomer,
-} from "../utils/back-in-stock.server";
+import { isValidEmail, upsertSubscribedCustomer } from "../utils/back-in-stock.server";
+import { toIndianTenDigit } from "../utils/whatsapp.server";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -59,6 +56,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const variantId = String(body?.variantId || "").trim();
   const productId = String(body?.productId || "").trim();
   const email = String(body?.email || "").trim().toLowerCase();
+  // Normalised to bare 10 digits; "" when missing or not a valid Indian mobile.
+  // Deliberately NOT rejected server-side: an older cached widget sends no
+  // phone, and recording the signup beats erroring (the row shows as
+  // unreachable in the admin list).
+  const phone = toIndianTenDigit(body?.phone);
 
   if (!/^[a-z0-9][a-z0-9.-]*\.myshopify\.com$/.test(shop)) {
     return json({ error: "bad-shop" }, { status: 400, headers: NO_STORE });
@@ -75,41 +77,44 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return json({ enabled: false }, { status: 200, headers: NO_STORE });
   }
 
-  // Subscribe the shopper so the merchant's marketing automation can reach
-  // them. Best-effort: if Shopify rejects it we still record the signup, and
-  // the admin's subscriber list shows who couldn't be subscribed.
+  // OPTIONAL bonus: mirror the shopper into Shopify's customer list so the
+  // merchant's marketing automation can also reach them. Runs ONLY when this
+  // shop granted write_customers — a shop without it makes zero customer API
+  // calls. Delivery is WhatsApp and never depends on this.
+  //
+  // The granted scopes are read from the stored session rather than a live
+  // GraphQL call: this is the shopper's request path, so latency matters.
   let customerId: string | null = null;
-  let subscribeError: string | null = null;
   try {
-    const { admin } = await unauthenticated.admin(shop);
-    customerId = await upsertSubscribedCustomer(admin, email);
-    if (!customerId) subscribeError = "customer-not-created";
-
-    // TEMP DIAGNOSTIC: surface Shopify's actual rejection reason.
-    if (!customerId) {
-      subscribeError = getLastSubscribeError() || "customer-not-created";
+    const session = await prisma.session.findFirst({
+      where: { shop },
+      orderBy: { expires: "desc" },
+    });
+    if ((session?.scope || "").includes("write_customers")) {
+      const { admin } = await unauthenticated.admin(shop);
+      customerId = await upsertSubscribedCustomer(admin, email);
     }
-  } catch (e: any) {
-    customerId = null;
-    subscribeError = "threw: " + String(e?.message || e).slice(0, 120);
+  } catch {
+    customerId = null; // never block the signup on the bonus path
   }
 
   try {
     await prisma.backInStockSubscription.upsert({
       where: { shop_variantId_email: { shop, variantId, email } },
-      create: { shop, variantId, productId, email, customerId },
+      create: { shop, variantId, productId, email, phone, customerId },
       // Re-signup after a previous notification: clear notifiedAt so they're
-      // told again next time it restocks.
-      update: { productId, customerId, notifiedAt: null },
+      // told again next time it restocks. Only overwrite the phone when a new
+      // one was supplied, so an old widget can't blank a good number.
+      update: { productId, customerId, notifiedAt: null, ...(phone ? { phone } : {}) },
     });
   } catch {
     return json({ error: "save-failed" }, { status: 500, headers: NO_STORE });
   }
 
-  // `subscribed` tells the caller whether Shopify Email will actually be able
-  // to reach this shopper. subscribeError is TEMP diagnostics.
+  // `reachable` = we have a WhatsApp number (the real delivery signal).
+  // `subscribed` = the optional Shopify-customer mirror succeeded.
   return json(
-    { ok: true, subscribed: Boolean(customerId), subscribeError },
+    { ok: true, reachable: Boolean(phone), subscribed: Boolean(customerId) },
     { headers: NO_STORE },
   );
 };

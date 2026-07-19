@@ -3288,6 +3288,10 @@
         '<div class="badgehq-bis__panel" data-bis-panel>' +
         '<p class="badgehq-bis__heading">' + escapeDeHtml(cfg.headingText) + "</p>" +
         '<div class="badgehq-bis__row">' +
+        '<input class="badgehq-bis__input" type="tel" inputmode="numeric" autocomplete="tel" ' +
+        'maxlength="10" placeholder="WhatsApp number" aria-label="WhatsApp number" data-bis-phone>' +
+        "</div>" +
+        '<div class="badgehq-bis__row">' +
         '<input class="badgehq-bis__input" type="email" inputmode="email" autocomplete="email" ' +
         'placeholder="you@example.com" aria-label="' + escapeDeHtml(cfg.headingText) + '" data-bis-email>' +
         '<button type="button" class="badgehq-bis__submit" data-bis-submit>Notify me</button>' +
@@ -3315,7 +3319,7 @@
       var panel = wrap.querySelector("[data-bis-panel]");
       openBtn.addEventListener("click", function () {
         panel.classList.toggle("is-open");
-        var input = wrap.querySelector("[data-bis-email]");
+        var input = wrap.querySelector("[data-bis-phone]") || wrap.querySelector("[data-bis-email]");
         if (panel.classList.contains("is-open") && input) input.focus();
       });
     }
@@ -3325,27 +3329,46 @@
       submit.addEventListener("click", function () {
         bisSubmit(wrap, cfg, variantId, productId);
       });
-      var emailInput = wrap.querySelector("[data-bis-email]");
-      emailInput.addEventListener("keydown", function (e) {
+      var onEnter = function (e) {
         if (e.key === "Enter") {
           e.preventDefault();
           bisSubmit(wrap, cfg, variantId, productId);
         }
-      });
+      };
+      var emailInput = wrap.querySelector("[data-bis-email]");
+      emailInput.addEventListener("keydown", onEnter);
+      var phoneField = wrap.querySelector("[data-bis-phone]");
+      if (phoneField) {
+        phoneField.addEventListener("keydown", onEnter);
+        phoneField.addEventListener("input", function () {
+          phoneField.value = phoneField.value.replace(/\D/g, "").slice(0, 10);
+        });
+      }
     }
   }
 
   function bisSubmit(wrap, cfg, variantId, productId) {
     var input = wrap.querySelector("[data-bis-email]");
+    var phoneInput = wrap.querySelector("[data-bis-phone]");
     var submit = wrap.querySelector("[data-bis-submit]");
     var msg = wrap.querySelector("[data-bis-msg]");
     var email = (input.value || "").trim();
+    // Accept "+91 98765 43210" / "098765 43210" / "9876543210".
+    var phone = (phoneInput ? phoneInput.value || "" : "").replace(/\D/g, "");
+    if (phone.length > 10 && phone.indexOf("91") === 0) phone = phone.slice(2);
+    if (phone.length === 11 && phone.charAt(0) === "0") phone = phone.slice(1);
 
     function setMsg(kind, text) {
       msg.className = "badgehq-bis__msg" + (kind ? " badgehq-bis__msg--" + kind : "");
       msg.textContent = text;
     }
 
+    // WhatsApp is how we actually notify them, so the number is required here.
+    if (phoneInput && !/^[6-9]\d{9}$/.test(phone)) {
+      setMsg("err", "Please enter a valid 10-digit WhatsApp number.");
+      phoneInput.focus();
+      return;
+    }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
       setMsg("err", "Please enter a valid email address.");
       input.focus();
@@ -3363,6 +3386,7 @@
         variantId: variantId,
         productId: productId,
         email: email,
+        phone: phone,
       }),
     })
       .then(function (r) { return r.json().catch(function () { return {}; }); })

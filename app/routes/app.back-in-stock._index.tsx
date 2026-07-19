@@ -14,13 +14,14 @@ import {
   Checkbox,
   Banner,
   Badge,
+  Button,
   DataTable,
-  List,
 } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { bumpConfigVersion } from "../utils/config-version.server";
+import { sendWhatsAppTemplate, toIndianTenDigit } from "../utils/whatsapp.server";
 
 const PLACEMENTS = ["below-atc", "above-atc", "replace-button"];
 
@@ -45,14 +46,22 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     buttonText: settings?.buttonText ?? "Notify me when available",
     headingText: settings?.headingText ?? "Get notified when this is back",
     consentText:
-      settings?.consentText ??
-      "We'll email you when it's back in stock. You'll also receive our emails — unsubscribe anytime.",
-    successText: settings?.successText ?? "Done! We'll email you when it's back in stock.",
+      settings?.consentText ?? "We'll message you on WhatsApp when it's back in stock.",
+    successText: settings?.successText ?? "Done! We'll WhatsApp you when it's back in stock.",
+    // The raw provider key never leaves the server — only whether one is saved.
+    waEnabled: settings?.waEnabled ?? false,
+    waProvider: settings?.waProvider ?? "interakt",
+    hasWaKey: Boolean(settings?.waApiKey),
+    waKeyPreview: settings?.waApiKey ? settings.waApiKey.slice(-4) : "",
+    waTemplateName: settings?.waTemplateName ?? "",
+    waLanguageCode: settings?.waLanguageCode ?? "en",
+    waFromNumber: settings?.waFromNumber ?? "",
     waitingCount,
     notifiedCount,
     subscribers: subs.map((s) => ({
       id: s.id,
       email: s.email,
+      phone: s.phone,
       variantId: s.variantId,
       subscribed: Boolean(s.customerId),
       notified: Boolean(s.notifiedAt),
@@ -64,6 +73,36 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const formData = await request.formData();
+
+  // Test send — uses the SAVED key so the merchant can verify setup without
+  // re-pasting it, and without waiting for a real restock.
+  if (formData.get("intent") === "test") {
+    const s = await prisma.backInStockSettings.findUnique({ where: { shop: session.shop } });
+    if (!s?.waApiKey || !s.waTemplateName) {
+      return json({ testError: "Save your API key and template name first." });
+    }
+    if (s.waProvider === "doubletick" && !s.waFromNumber) {
+      return json({ testError: "DoubleTick needs your sender number. Save it first." });
+    }
+    const phone = toIndianTenDigit(formData.get("testPhone"));
+    if (!phone) {
+      return json({ testError: "Enter a valid 10-digit Indian mobile number." });
+    }
+    const res = await sendWhatsAppTemplate({
+      provider: s.waProvider,
+      apiKey: s.waApiKey,
+      phone,
+      templateName: s.waTemplateName,
+      languageCode: s.waLanguageCode || "en",
+      fromNumber: s.waFromNumber,
+      bodyValues: ["Test product", "Test variant", `https://${session.shop}`],
+      callbackData: "bis:test",
+    });
+    return res.ok
+      ? json({ testResult: `Sent to ${phone}. Check WhatsApp — it can take a few seconds.` })
+      : json({ testError: `Send failed: ${res.error}` });
+  }
+
   const data = JSON.parse(formData.get("data") as string);
 
   const placement = PLACEMENTS.includes(data.placement) ? data.placement : "below-atc";
@@ -71,6 +110,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const s = String(v ?? "").trim();
     return s ? s.slice(0, 300) : fallback;
   };
+
+  const newKey = String(data.waApiKey || "").trim();
+  const waProvider = data.waProvider === "doubletick" ? "doubletick" : "interakt";
+  // WhatsApp template names are lowercase alphanumeric + underscore.
+  const templateName = String(data.waTemplateName || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, "")
+    .slice(0, 100);
+  const languageCode = String(data.waLanguageCode || "en").trim().slice(0, 10) || "en";
+  const fromNumber = String(data.waFromNumber || "").trim().replace(/[^\d+]/g, "").slice(0, 20);
 
   try {
     const values = {
@@ -80,9 +130,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       headingText: text(data.headingText, "Get notified when this is back"),
       consentText: text(
         data.consentText,
-        "We'll email you when it's back in stock. You'll also receive our emails — unsubscribe anytime.",
+        "We'll message you on WhatsApp when it's back in stock.",
       ),
-      successText: text(data.successText, "Done! We'll email you when it's back in stock."),
+      successText: text(data.successText, "Done! We'll WhatsApp you when it's back in stock."),
+      waEnabled: Boolean(data.waEnabled),
+      waProvider,
+      // Empty key field means "keep the saved key".
+      ...(newKey ? { waApiKey: newKey } : {}),
+      waTemplateName: templateName,
+      waLanguageCode: languageCode,
+      waFromNumber: fromNumber,
     };
     await prisma.backInStockSettings.upsert({
       where: { shop: session.shop },
@@ -98,7 +155,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
 export default function BackInStockPage() {
   const d = useLoaderData<typeof loader>();
-  const actionData = useActionData<{ success?: boolean; error?: string }>();
+  const actionData = useActionData<{
+    success?: boolean;
+    error?: string;
+    testResult?: string;
+    testError?: string;
+  }>();
   const submit = useSubmit();
 
   const initial = {
@@ -108,6 +170,12 @@ export default function BackInStockPage() {
     headingText: d.headingText,
     consentText: d.consentText,
     successText: d.successText,
+    waEnabled: d.waEnabled,
+    waProvider: d.waProvider,
+    waApiKey: "",
+    waTemplateName: d.waTemplateName,
+    waLanguageCode: d.waLanguageCode,
+    waFromNumber: d.waFromNumber,
   };
 
   const [enabled, setEnabled] = useState(initial.enabled);
@@ -116,6 +184,13 @@ export default function BackInStockPage() {
   const [headingText, setHeadingText] = useState(initial.headingText);
   const [consentText, setConsentText] = useState(initial.consentText);
   const [successText, setSuccessText] = useState(initial.successText);
+  const [waEnabled, setWaEnabled] = useState(initial.waEnabled);
+  const [waProvider, setWaProvider] = useState(initial.waProvider);
+  const [waApiKey, setWaApiKey] = useState(initial.waApiKey);
+  const [waTemplateName, setWaTemplateName] = useState(initial.waTemplateName);
+  const [waLanguageCode, setWaLanguageCode] = useState(initial.waLanguageCode);
+  const [waFromNumber, setWaFromNumber] = useState(initial.waFromNumber);
+  const [testPhone, setTestPhone] = useState("");
   const [showSuccess, setShowSuccess] = useState(false);
 
   const isDirty =
@@ -124,11 +199,18 @@ export default function BackInStockPage() {
     buttonText !== initial.buttonText ||
     headingText !== initial.headingText ||
     consentText !== initial.consentText ||
-    successText !== initial.successText;
+    successText !== initial.successText ||
+    waEnabled !== initial.waEnabled ||
+    waProvider !== initial.waProvider ||
+    waApiKey !== initial.waApiKey ||
+    waTemplateName !== initial.waTemplateName ||
+    waLanguageCode !== initial.waLanguageCode ||
+    waFromNumber !== initial.waFromNumber;
 
   useEffect(() => {
     if (actionData?.success) {
       setShowSuccess(true);
+      setWaApiKey(""); // key is saved; don't keep it in the field
       const t = setTimeout(() => setShowSuccess(false), 3000);
       return () => clearTimeout(t);
     }
@@ -141,6 +223,12 @@ export default function BackInStockPage() {
     setHeadingText(initial.headingText);
     setConsentText(initial.consentText);
     setSuccessText(initial.successText);
+    setWaEnabled(initial.waEnabled);
+    setWaProvider(initial.waProvider);
+    setWaApiKey(initial.waApiKey);
+    setWaTemplateName(initial.waTemplateName);
+    setWaLanguageCode(initial.waLanguageCode);
+    setWaFromNumber(initial.waFromNumber);
   };
 
   const handleSave = () => {
@@ -153,17 +241,26 @@ export default function BackInStockPage() {
           headingText,
           consentText,
           successText,
+          waEnabled,
+          waProvider,
+          waApiKey,
+          waTemplateName,
+          waLanguageCode,
+          waFromNumber,
         }),
       },
       { method: "POST" },
     );
   };
 
+  const handleTest = () => submit({ intent: "test", testPhone }, { method: "POST" });
+
   const rows = d.subscribers.map((s) => [
+    s.phone ? "+91 " + s.phone : "—",
     s.email,
     s.variantId,
     s.createdAt,
-    s.notified ? "Notified" : s.subscribed ? "Waiting" : "Waiting (not subscribed)",
+    s.notified ? "Notified" : s.phone ? "Waiting" : "Waiting (no WhatsApp number)",
   ]);
 
   return (
@@ -178,35 +275,15 @@ export default function BackInStockPage() {
             {showSuccess && <Banner tone="success">Settings saved successfully.</Banner>}
             {actionData?.error && <Banner tone="critical">{actionData.error}</Banner>}
 
-            <Banner tone="warning" title="One-time setup required to send the emails">
-              <BlockStack gap="200">
+            {!(d.waEnabled && d.hasWaKey && d.waTemplateName) && (
+              <Banner tone="warning" title="Set up WhatsApp to send the notifications">
                 <Text as="p">
-                  Shopify has no API that lets an app email a shopper directly, so BadgeHQ
-                  hands off to Shopify Email. Until you create the automation below, signups
-                  are collected but nobody is emailed.
+                  Signups are being collected, but nobody is notified until you connect
+                  Interakt below. Shoppers are messaged on the WhatsApp number they enter
+                  themselves — no Shopify customer data is used to reach them.
                 </Text>
-                <List type="number">
-                  <List.Item>
-                    In Shopify admin open <strong>Automations</strong> (under
-                    Marketing, or Messaging → Automations on newer stores) and click
-                    <strong> Create automation</strong>.
-                  </List.Item>
-                  <List.Item>
-                    Choose the trigger <strong>BadgeHQ back in stock</strong>.
-                  </List.Item>
-                  <List.Item>
-                    Add the action <strong>Send marketing email</strong> and write your
-                    "it's back" email. The trigger gives you the customer plus
-                    product title, variant, image and URL to use in the template.
-                  </List.Item>
-                  <List.Item>Turn the automation on. That's it — it covers every product.</List.Item>
-                </List>
-                <Text as="p" tone="subdued">
-                  Shopify Email only sends to customers subscribed to email marketing, which
-                  is why the signup form subscribes shoppers and says so.
-                </Text>
-              </BlockStack>
-            </Banner>
+              </Banner>
+            )}
 
             <Card>
               <BlockStack gap="400">
@@ -218,8 +295,8 @@ export default function BackInStockPage() {
                   </InlineStack>
                 </InlineStack>
                 <Text as="p" tone="subdued">
-                  Shows a "notify me" form on sold-out variants and emails the shopper
-                  through Shopify Email when stock returns.
+                  Shows a "notify me" form on sold-out variants and sends the shopper a
+                  WhatsApp message when stock returns.
                 </Text>
                 <Checkbox
                   label="Enable back in stock"
@@ -262,7 +339,7 @@ export default function BackInStockPage() {
                   onChange={setConsentText}
                   autoComplete="off"
                   multiline={2}
-                  helpText="Shown under the email field. Signing up subscribes the shopper to your emails — keep this honest and clear."
+                  helpText="Shown under the form. Tell shoppers you'll message them on WhatsApp — keep this honest and clear."
                 />
                 <TextField
                   label="Success message"
@@ -275,22 +352,134 @@ export default function BackInStockPage() {
 
             <Card>
               <BlockStack gap="400">
+                <Text as="h2" variant="headingMd">WhatsApp delivery</Text>
+                <Text as="p" tone="subdued">
+                  Restock alerts are sent on WhatsApp using your own provider account, to
+                  the number the shopper types into the form.
+                </Text>
+                <Checkbox
+                  label="Send restock alerts on WhatsApp"
+                  helpText="When off, signups are collected but nobody is notified"
+                  checked={waEnabled}
+                  onChange={setWaEnabled}
+                />
+                <Select
+                  label="Provider"
+                  options={[
+                    { label: "Interakt", value: "interakt" },
+                    { label: "DoubleTick", value: "doubletick" },
+                  ]}
+                  value={waProvider}
+                  onChange={setWaProvider}
+                />
+                <TextField
+                  label="API key"
+                  value={waApiKey}
+                  onChange={setWaApiKey}
+                  autoComplete="off"
+                  placeholder={
+                    d.hasWaKey
+                      ? `Saved key ending in ${d.waKeyPreview} — enter a new key to replace it`
+                      : "Paste your API key"
+                  }
+                  helpText={
+                    waProvider === "doubletick"
+                      ? "DoubleTick → Settings → API key. Stored securely — never sent to your storefront."
+                      : "Interakt → Settings → Developer Settings → Secret Key (base64). Stored securely — never sent to your storefront."
+                  }
+                />
+                <TextField
+                  label="Template name"
+                  value={waTemplateName}
+                  onChange={setWaTemplateName}
+                  autoComplete="off"
+                  placeholder="back_in_stock"
+                  helpText="An approved WhatsApp template whose body uses three variables: {{1}} product, {{2}} variant, {{3}} product link."
+                />
+                <InlineStack gap="300" wrap={false}>
+                  <div style={{ flexGrow: 1 }}>
+                    <TextField
+                      label="Template language"
+                      value={waLanguageCode}
+                      onChange={setWaLanguageCode}
+                      autoComplete="off"
+                      placeholder="en"
+                    />
+                  </div>
+                  {waProvider === "doubletick" && (
+                    <div style={{ flexGrow: 1 }}>
+                      <TextField
+                        label="Sender number"
+                        value={waFromNumber}
+                        onChange={setWaFromNumber}
+                        autoComplete="off"
+                        placeholder="+919876543210"
+                        helpText="Your DoubleTick WhatsApp business number."
+                      />
+                    </div>
+                  )}
+                </InlineStack>
+              </BlockStack>
+            </Card>
+
+            <Card>
+              <BlockStack gap="400">
+                <Text as="h2" variant="headingMd">Send a test message</Text>
+                <Text as="p" tone="subdued">
+                  Uses your saved settings to send the template right now with sample
+                  values. Save first.
+                </Text>
+                {actionData?.testResult && (
+                  <Banner tone="success">{actionData.testResult}</Banner>
+                )}
+                {actionData?.testError && <Banner tone="warning">{actionData.testError}</Banner>}
+                <InlineStack gap="200" blockAlign="end" wrap={false}>
+                  <div style={{ flexGrow: 1 }}>
+                    <TextField
+                      label="Your WhatsApp number"
+                      labelHidden
+                      value={testPhone}
+                      onChange={(v) => setTestPhone(v.replace(/\D/g, "").slice(0, 12))}
+                      autoComplete="off"
+                      inputMode="numeric"
+                      placeholder="10-digit mobile number"
+                    />
+                  </div>
+                  <Button onClick={handleTest} disabled={testPhone.length < 10}>
+                    Send test
+                  </Button>
+                </InlineStack>
+              </BlockStack>
+            </Card>
+
+            <Card>
+              <BlockStack gap="400">
                 <Text as="h2" variant="headingMd">Recent signups</Text>
                 {rows.length === 0 ? (
                   <Text as="p" tone="subdued">No signups yet.</Text>
                 ) : (
                   <DataTable
-                    columnContentTypes={["text", "text", "text", "text"]}
-                    headings={["Email", "Variant", "Signed up", "Status"]}
+                    columnContentTypes={["text", "text", "text", "text", "text"]}
+                    headings={["WhatsApp", "Email", "Variant", "Signed up", "Status"]}
                     rows={rows}
                   />
                 )}
                 <Text as="p" tone="subdued">
-                  "Waiting (not subscribed)" means Shopify wouldn't subscribe that shopper,
-                  so the automation can't email them — reach out manually if needed.
+                  "Waiting (no WhatsApp number)" means the shopper signed up before the
+                  WhatsApp field existed, so they can't be messaged — reach out by email.
                 </Text>
               </BlockStack>
             </Card>
+
+            <Banner tone="info" title="Optional: also send an email">
+              <Text as="p">
+                BadgeHQ still fires a Shopify Flow trigger ("BadgeHQ back in stock") on
+                every restock, so if you build a marketing automation with a "Send
+                marketing email" action it will send alongside WhatsApp. This only reaches
+                email-marketing subscribers and is entirely optional — WhatsApp works on
+                its own.
+              </Text>
+            </Banner>
           </BlockStack>
         </Layout.Section>
       </Layout>

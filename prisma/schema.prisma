@@ -215,8 +215,19 @@ model BackInStockSettings {
   placement   String   @default("below-atc") // below-atc | above-atc | replace-button
   buttonText  String   @default("Notify me when available")
   headingText String   @default("Get notified when this is back")
-  consentText String   @default("We'll email you when it's back in stock. You'll also receive our emails — unsubscribe anytime.")
-  successText String   @default("Done! We'll email you when it's back in stock.")
+  consentText String   @default("We'll message you on WhatsApp when it's back in stock.")
+  successText String   @default("Done! We'll WhatsApp you when it's back in stock.")
+
+  // WhatsApp delivery. The shopper's number is first-party data typed into the
+  // storefront form, so notifying needs no customer records and no Protected
+  // Customer Data access. The merchant brings their own provider account.
+  waEnabled      Boolean @default(false)
+  waProvider     String  @default("interakt") // "interakt" | "doubletick"
+  waApiKey       String  @default("") // provider secret; Interakt's is base64 and sent verbatim
+  waTemplateName String  @default("")
+  waLanguageCode String  @default("en")
+  waFromNumber   String  @default("") // DoubleTick only: the sender WhatsApp number
+
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }
@@ -227,8 +238,9 @@ model BackInStockSubscription {
   variantId  String
   productId  String
   email      String
+  phone      String    @default("") // WhatsApp number; "" = legacy row, unreachable
   customerId String?
-  notifiedAt DateTime?
+  notifiedAt DateTime? // set ONLY once Interakt accepted the WhatsApp message
   createdAt  DateTime  @default(now())
 
   @@unique([shop, variantId, email])
