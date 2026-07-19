@@ -3197,7 +3197,11 @@
       ".badgehq-bis__btn{width:100%;display:flex;align-items:center;justify-content:center;gap:8px;" +
       "padding:12px 18px;font:inherit;font-weight:600;cursor:pointer;background:transparent;color:inherit;" +
       "border:1px solid rgba(0,0,0,0.6);border-radius:var(--buttons-radius,6px);box-sizing:border-box;}" +
+      /* The panel spans the full button row. In the replace-button placement
+         the wrapper is only as wide as the ATC slot, so --badgehq-bis-row-width
+         (set at mount) lets the panel break out to the row's real width. */
       ".badgehq-bis__panel{display:none;margin-top:10px;padding:14px;border:1px solid rgba(0,0,0,0.12);" +
+      "width:var(--badgehq-bis-row-width,100%);box-sizing:border-box;" +
       "border-radius:var(--buttons-radius,6px);}" +
       ".badgehq-bis__panel.is-open{display:block;}" +
       ".badgehq-bis__heading{font-weight:600;margin:0 0 8px;}" +
@@ -3290,6 +3294,20 @@
         wrap.style.maxWidth = "100%";
       } else {
         wrap.style.width = "100%";
+      }
+
+      // The BUTTON should match the ATC's slot, but the expanded panel reads
+      // better spanning the whole row (like the wishlist button beneath it).
+      // Record the row's inner width so the panel can break out of a narrow
+      // slot; if the wrap already fills the row this is a no-op.
+      if (parent && parent.nodeType === 1) {
+        var pw = parent.clientWidth;
+        var pcs = window.getComputedStyle(parent);
+        pw -= (parseFloat(pcs.paddingLeft) || 0) + (parseFloat(pcs.paddingRight) || 0);
+        var ww = parseFloat(w) || wrap.getBoundingClientRect().width;
+        if (pw > 0 && ww > 0 && pw - ww > 1) {
+          wrap.style.setProperty("--badgehq-bis-row-width", Math.round(pw) + "px");
+        }
       }
     } catch (e) {}
   }
