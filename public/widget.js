@@ -3215,6 +3215,20 @@
 
   // Style our button like the theme's ATC button (secondary variant), the same
   // way the delivery/wishlist widgets do.
+  // Return the colour only when it is opaque and dark enough to read as text
+  // on a light background; otherwise null so the caller can fall back.
+  // Perceived luminance (ITU-R BT.601) — grey #e0e0e0 scores ~224 and fails.
+  function bisReadableColor(css) {
+    if (!css) return null;
+    var m = String(css).match(/rgba?\(([^)]+)\)/);
+    if (!m) return null;
+    var p = m[1].split(",").map(function (n) { return parseFloat(n); });
+    if (p.length < 3 || !isFinite(p[0])) return null;
+    if (p.length > 3 && p[3] < 0.5) return null; // transparent
+    var lum = 0.299 * p[0] + 0.587 * p[1] + 0.114 * p[2];
+    return lum <= 160 ? "rgb(" + p[0] + "," + p[1] + "," + p[2] + ")" : null;
+  }
+
   function bisStyleLikeAtc(btn, root) {
     var atc = bisAtcButton(root);
     if (!atc) return;
@@ -3228,11 +3242,14 @@
       btn.style.letterSpacing = abs.letterSpacing;
       btn.style.textTransform = abs.textTransform;
       if (abr.height > 0) btn.style.minHeight = Math.round(abr.height) + "px";
-      var bg = abs.backgroundColor;
-      if (bg && bg !== "rgba(0, 0, 0, 0)" && bg !== "transparent") {
-        btn.style.borderColor = bg;
-        btn.style.color = bg;
-      }
+      // Borrow the ATC's colour — but ONLY if it's dark enough to read. On a
+      // sold-out variant the ATC is in its disabled state (light grey on most
+      // themes), and copying that gives near-invisible grey-on-white text.
+      var bg = bisReadableColor(abs.backgroundColor);
+      if (!bg) bg = bisReadableColor(window.getComputedStyle(root || document.body).color);
+      if (!bg) bg = "#111111";
+      btn.style.borderColor = bg;
+      btn.style.color = bg;
     } catch (e) {}
   }
 
