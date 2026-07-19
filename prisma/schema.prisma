@@ -227,6 +227,9 @@ model BackInStockSettings {
   waTemplateName String  @default("")
   waLanguageCode String  @default("en")
   waFromNumber   String  @default("") // DoubleTick only: the sender WhatsApp number
+  // Template header image. Products without a featured image fall back to this
+  // so one image template covers every send (Meta rejects an empty header).
+  waFallbackImage String @default("")
 
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt

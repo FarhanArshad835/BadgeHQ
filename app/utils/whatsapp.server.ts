@@ -45,6 +45,7 @@ export async function sendDoubleTickTemplate(opts: {
   templateName: string;
   languageCode?: string;
   bodyValues: string[];
+  headerImageUrl?: string;
 }): Promise<InteraktResult> {
   const ten = toIndianTenDigit(opts.phone);
   if (!ten) return { ok: false, error: "invalid-phone" };
@@ -64,6 +65,9 @@ export async function sendDoubleTickTemplate(opts: {
           language: opts.languageCode || "en",
           templateName: opts.templateName,
           templateData: {
+            ...(opts.headerImageUrl
+              ? { header: { type: "IMAGE", mediaUrl: opts.headerImageUrl } }
+              : {}),
             body: { placeholders: opts.bodyValues.map((v) => (v == null ? "" : String(v))) },
           },
         },
@@ -129,6 +133,7 @@ export async function sendWhatsAppTemplate(opts: {
   languageCode?: string;
   fromNumber?: string;
   bodyValues: string[];
+  headerImageUrl?: string;
   callbackData?: string;
 }): Promise<InteraktResult> {
   if (opts.provider === "doubletick") {
@@ -139,6 +144,7 @@ export async function sendWhatsAppTemplate(opts: {
       templateName: opts.templateName,
       languageCode: opts.languageCode,
       bodyValues: opts.bodyValues,
+      headerImageUrl: opts.headerImageUrl,
     });
   }
   return sendInteraktTemplate({
@@ -147,6 +153,7 @@ export async function sendWhatsAppTemplate(opts: {
     templateName: opts.templateName,
     languageCode: opts.languageCode,
     bodyValues: opts.bodyValues,
+    headerImageUrl: opts.headerImageUrl,
     callbackData: opts.callbackData,
   });
 }
@@ -161,6 +168,7 @@ export async function sendInteraktTemplate(opts: {
   templateName: string;
   languageCode?: string;
   bodyValues: string[];
+  headerImageUrl?: string;
   callbackData?: string;
 }): Promise<InteraktResult> {
   const phoneNumber = toIndianTenDigit(opts.phone);
@@ -178,6 +186,8 @@ export async function sendInteraktTemplate(opts: {
       languageCode: opts.languageCode || "en",
       // Interakt requires strings; a null/undefined would be rejected by Meta.
       bodyValues: opts.bodyValues.map((v) => (v == null ? "" : String(v))),
+      // Media header (image): a single-element list holding the media URL.
+      ...(opts.headerImageUrl ? { headerValues: [opts.headerImageUrl] } : {}),
     },
   };
 

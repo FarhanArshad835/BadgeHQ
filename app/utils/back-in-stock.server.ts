@@ -1,10 +1,10 @@
 /**
  * Back-in-stock server helpers.
  *
- * Delivery is WhatsApp via Interakt. The shopper types their own number into
- * the storefront form, so notifying them reads NO Shopify customer records and
- * needs no Protected Customer Data access. `notifiedAt` is set only when
- * Interakt accepts the message, so a failure is retried on the next restock.
+ * Delivery is WhatsApp (Interakt or DoubleTick). The shopper types their own
+ * number into the storefront form, so notifying them reads NO Shopify customer
+ * records and needs no Protected Customer Data access. `notifiedAt` is set only
+ * when the provider accepts the message, so a failure is retried next restock.
  *
  * Mirroring the shopper into Shopify's customer list (and firing the Flow
  * trigger for merchants who built the marketing automation) is an optional
@@ -209,6 +209,7 @@ export type WhatsAppConfig = {
   waTemplateName: string;
   waLanguageCode: string;
   waFromNumber: string;
+  waFallbackImage: string;
 };
 
 /** True when this shop can actually deliver a WhatsApp message. */
@@ -250,6 +251,9 @@ export async function sendRestockWhatsApp(opts: {
       clean(opts.variant.variantTitle, title),
       clean(url, "our store"),
     ],
+    // Products with no featured image fall back to the merchant's image, so a
+    // single image template covers every send (Meta rejects an empty header).
+    headerImageUrl: opts.variant.productImage || s.waFallbackImage || undefined,
     callbackData: `bis:${opts.variant.variantId}`,
   });
 

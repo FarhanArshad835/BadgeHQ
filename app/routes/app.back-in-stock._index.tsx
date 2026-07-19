@@ -56,6 +56,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     waTemplateName: settings?.waTemplateName ?? "",
     waLanguageCode: settings?.waLanguageCode ?? "en",
     waFromNumber: settings?.waFromNumber ?? "",
+    waFallbackImage: settings?.waFallbackImage ?? "",
     waitingCount,
     notifiedCount,
     subscribers: subs.map((s) => ({
@@ -96,6 +97,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       languageCode: s.waLanguageCode || "en",
       fromNumber: s.waFromNumber,
       bodyValues: ["Test product", "Test variant", `https://${session.shop}`],
+      headerImageUrl: s.waFallbackImage || undefined,
       callbackData: "bis:test",
     });
     return res.ok
@@ -121,6 +123,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     .slice(0, 100);
   const languageCode = String(data.waLanguageCode || "en").trim().slice(0, 10) || "en";
   const fromNumber = String(data.waFromNumber || "").trim().replace(/[^\d+]/g, "").slice(0, 20);
+  // Only accept an https image URL — WhatsApp refuses anything else.
+  const rawImage = String(data.waFallbackImage || "").trim().slice(0, 500);
+  const fallbackImage = /^https:\/\//.test(rawImage) ? rawImage : "";
 
   try {
     const values = {
@@ -140,6 +145,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       waTemplateName: templateName,
       waLanguageCode: languageCode,
       waFromNumber: fromNumber,
+      waFallbackImage: fallbackImage,
     };
     await prisma.backInStockSettings.upsert({
       where: { shop: session.shop },
@@ -176,6 +182,7 @@ export default function BackInStockPage() {
     waTemplateName: d.waTemplateName,
     waLanguageCode: d.waLanguageCode,
     waFromNumber: d.waFromNumber,
+    waFallbackImage: d.waFallbackImage,
   };
 
   const [enabled, setEnabled] = useState(initial.enabled);
@@ -190,6 +197,7 @@ export default function BackInStockPage() {
   const [waTemplateName, setWaTemplateName] = useState(initial.waTemplateName);
   const [waLanguageCode, setWaLanguageCode] = useState(initial.waLanguageCode);
   const [waFromNumber, setWaFromNumber] = useState(initial.waFromNumber);
+  const [waFallbackImage, setWaFallbackImage] = useState(initial.waFallbackImage);
   const [testPhone, setTestPhone] = useState("");
   const [showSuccess, setShowSuccess] = useState(false);
 
@@ -205,7 +213,8 @@ export default function BackInStockPage() {
     waApiKey !== initial.waApiKey ||
     waTemplateName !== initial.waTemplateName ||
     waLanguageCode !== initial.waLanguageCode ||
-    waFromNumber !== initial.waFromNumber;
+    waFromNumber !== initial.waFromNumber ||
+    waFallbackImage !== initial.waFallbackImage;
 
   useEffect(() => {
     if (actionData?.success) {
@@ -229,6 +238,7 @@ export default function BackInStockPage() {
     setWaTemplateName(initial.waTemplateName);
     setWaLanguageCode(initial.waLanguageCode);
     setWaFromNumber(initial.waFromNumber);
+    setWaFallbackImage(initial.waFallbackImage);
   };
 
   const handleSave = () => {
@@ -247,6 +257,7 @@ export default function BackInStockPage() {
           waTemplateName,
           waLanguageCode,
           waFromNumber,
+          waFallbackImage,
         }),
       },
       { method: "POST" },
@@ -394,7 +405,15 @@ export default function BackInStockPage() {
                   onChange={setWaTemplateName}
                   autoComplete="off"
                   placeholder="back_in_stock"
-                  helpText="An approved WhatsApp template whose body uses three variables: {{1}} product, {{2}} variant, {{3}} product link."
+                  helpText="An approved WhatsApp template with an IMAGE header and three body variables: {{1}} product, {{2}} variant, {{3}} product link."
+                />
+                <TextField
+                  label="Fallback image URL"
+                  value={waFallbackImage}
+                  onChange={setWaFallbackImage}
+                  autoComplete="off"
+                  placeholder="https://cdn.shopify.com/…/logo.jpg"
+                  helpText="Used as the message image when a product has no featured image. Must start with https:// — WhatsApp rejects a template whose image header is empty."
                 />
                 <InlineStack gap="300" wrap={false}>
                   <div style={{ flexGrow: 1 }}>
