@@ -3201,7 +3201,8 @@
          the wrapper is only as wide as the ATC slot, so --badgehq-bis-row-width
          (set at mount) lets the panel break out to the row's real width. */
       ".badgehq-bis__panel{display:none;margin-top:10px;padding:14px;border:1px solid rgba(0,0,0,0.12);" +
-      "width:var(--badgehq-bis-row-width,100%);box-sizing:border-box;" +
+      "width:var(--badgehq-bis-row-width,100%);" +
+      "margin-inline-start:var(--badgehq-bis-row-offset,0);box-sizing:border-box;" +
       "border-radius:var(--buttons-radius,6px);}" +
       ".badgehq-bis__panel.is-open{display:block;}" +
       ".badgehq-bis__heading{font-weight:600;margin:0 0 8px;}" +
@@ -3297,18 +3298,31 @@
         wrap.style.width = "100%";
       }
 
-      // The BUTTON should match the ATC's slot, but the expanded panel reads
-      // better spanning the whole row (like the wishlist button beneath it).
-      // Record the row's inner width so the panel can break out of a narrow
-      // slot; if the wrap already fills the row this is a no-op.
-      if (parent && parent.nodeType === 1) {
-        var pw = parent.clientWidth;
-        var pcs = window.getComputedStyle(parent);
-        pw -= (parseFloat(pcs.paddingLeft) || 0) + (parseFloat(pcs.paddingRight) || 0);
-        var ww = parseFloat(w) || wrap.getBoundingClientRect().width;
-        if (pw > 0 && ww > 0 && pw - ww > 1) {
-          wrap.style.setProperty("--badgehq-bis-row-width", Math.round(pw) + "px");
-        }
+    } catch (e) {}
+  }
+
+  // The BUTTON matches the ATC's slot, but the expanded panel should span the
+  // whole row so it lines up with the wishlist button beneath it. That needs
+  // BOTH a width and a negative start offset: the wrapper usually sits partway
+  // across the row, so setting width alone overflows the right edge (which is
+  // exactly what pushed the "Notify me" button off screen).
+  // Must run AFTER the ATC is hidden, or the wrapper hasn't taken its place yet.
+  function bisMeasurePanelRow(wrap) {
+    try {
+      var parent = wrap.parentNode;
+      if (!parent || parent.nodeType !== 1) return;
+      var pr = parent.getBoundingClientRect();
+      var pcs = window.getComputedStyle(parent);
+      var padL = parseFloat(pcs.paddingLeft) || 0;
+      var padR = parseFloat(pcs.paddingRight) || 0;
+      var rowLeft = pr.left + padL;
+      var rowWidth = pr.width - padL - padR;
+      var wr = wrap.getBoundingClientRect();
+      var offset = wr.left - rowLeft; // how far in the wrapper starts
+      if (rowWidth <= 0) return;
+      if (offset > 1 || rowWidth - wr.width > 1) {
+        wrap.style.setProperty("--badgehq-bis-row-width", Math.round(rowWidth) + "px");
+        wrap.style.setProperty("--badgehq-bis-row-offset", "-" + Math.round(offset) + "px");
       }
     } catch (e) {}
   }
@@ -3387,6 +3401,9 @@
         bisTakeAtcSlot(wrap, atc);
         atc.style.display = "none";
         bisHiddenBtn = atc;
+        // The wrapper only settles into the ATC's place once the ATC is gone,
+        // so the panel's break-out offset has to be measured now, not above.
+        bisMeasurePanelRow(wrap);
       } else {
         atc.style.display = "none";
         bisHiddenBtn = atc;
