@@ -3215,6 +3215,10 @@
       "min-width:12ch;padding:10px 12px;font:inherit;box-sizing:border-box;" +
       "color:rgb(var(--color-foreground,18 18 18));background:rgb(var(--color-background,255 255 255));" +
       "border:1px solid rgba(var(--color-foreground,18 18 18),0.25);border-radius:var(--inputs-radius,4px);}" +
+      /* The placeholder states the expected format, which is longer than the
+         value it hints at — shrink it so it isn't clipped on narrow screens.
+         Only the hint scales down; typed digits keep the inherited size. */
+      ".badgehq-bis__input::placeholder{font-size:0.82em;opacity:0.7;}" +
       ".badgehq-bis__submit{flex:none;padding:10px 18px;font:inherit;font-weight:600;cursor:pointer;" +
       "color:rgb(var(--color-button-text,255 255 255));background:rgb(var(--color-button,18 18 18));" +
       "border:1px solid transparent;border-radius:var(--buttons-radius,4px);}" +
@@ -3365,7 +3369,10 @@
         '<p class="badgehq-bis__heading">' + escapeDeHtml(cfg.headingText) + "</p>" +
         '<div class="badgehq-bis__row">' +
         '<input class="badgehq-bis__input" type="tel" inputmode="numeric" autocomplete="tel" ' +
-        'maxlength="10" placeholder="WhatsApp number" aria-label="WhatsApp number" data-bis-phone>' +
+        // "WhatsApp number" alone left shoppers unsure whether to include +91,
+        // spaces or a leading zero — state the expected format instead.
+        'maxlength="10" placeholder="Enter your 10-digit mobile number" ' +
+        'aria-label="Your WhatsApp number, 10 digits without the country code" data-bis-phone>' +
         '<button type="button" class="badgehq-bis__submit" data-bis-submit>Notify me</button>' +
         "</div>" +
         '<p class="badgehq-bis__note">' + escapeDeHtml(cfg.consentText) + "</p>" +
@@ -3441,7 +3448,7 @@
 
     // The number IS the subscription — there is no other way to notify them.
     if (!/^[6-9]\d{9}$/.test(phone)) {
-      setMsg("err", "Please enter a valid 10-digit WhatsApp number.");
+      setMsg("err", "Enter your 10-digit mobile number, without +91 or spaces.");
       if (phoneInput) phoneInput.focus();
       return;
     }
