@@ -128,6 +128,81 @@ export async function sendDoubleTickTemplate(opts: {
   }
 }
 
+/** WhatsApp caps a text body at 4096 chars; leave room rather than be truncated by Meta. */
+const MAX_TEXT_CHARS = 4000;
+
+/**
+ * Send a free-text (non-template) WhatsApp message via Interakt.
+ *
+ * Unlike a template this needs no Meta pre-approval, but it is only allowed
+ * inside the 24-hour customer service window — i.e. when the shopper has
+ * messaged us in the last 24h. That is exactly the AI-reply case, and such
+ * messages are free of charge. Sending outside the window is rejected upstream;
+ * we surface that rather than silently falling back to a paid template.
+ */
+export async function sendInteraktText(opts: {
+  apiKey: string;
+  phone: string;
+  message: string;
+  callbackData?: string;
+}): Promise<InteraktResult> {
+  const phoneNumber = toIndianTenDigit(opts.phone);
+  if (!phoneNumber) return { ok: false, error: "invalid-phone" };
+  if (!opts.apiKey) return { ok: false, error: "no-api-key" };
+
+  const message = String(opts.message ?? "").trim().slice(0, MAX_TEXT_CHARS);
+  if (!message) return { ok: false, error: "empty-message" };
+
+  const payload = {
+    countryCode: "+91",
+    phoneNumber,
+    callbackData: opts.callbackData ?? "badgehq-ai",
+    type: "Text",
+    data: { message },
+  };
+
+  try {
+    const res = await fetch(INTERAKT_URL, {
+      method: "POST",
+      headers: {
+        // Already base64 — send verbatim, never re-encode.
+        Authorization: `Basic ${opts.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+
+    const text = await res.text().catch(() => "");
+    let body: any = null;
+    try {
+      body = text ? JSON.parse(text) : null;
+    } catch {
+      // non-JSON error page — keep the raw text for the log
+    }
+
+    // Interakt can return HTTP 200 carrying result:false.
+    if (!res.ok || body?.result === false) {
+      if (res.status === 401 || res.status === 403) {
+        console.error("[interakt] text auth", res.status, text.slice(0, 200));
+        return { ok: false, error: "auth-failed (check the Interakt API key)" };
+      }
+      const detail = String(body?.message || text || `http-${res.status}`).slice(0, 300);
+      // Outside the 24h window is expected-ish, so name it rather than logging
+      // it as a generic failure.
+      const outsideWindow = /24\s*hour|session|window|expired/i.test(detail);
+      console.error("[interakt] text send failed", res.status, detail);
+      return { ok: false, error: outsideWindow ? `outside-window: ${detail}` : detail };
+    }
+
+    return { ok: true, messageId: body?.id ?? body?.messageId };
+  } catch (e: any) {
+    const msg = e?.name === "TimeoutError" ? "timeout" : String(e?.message || e).slice(0, 200);
+    console.error("[interakt] text threw", msg);
+    return { ok: false, error: msg };
+  }
+}
+
 /** Provider-agnostic send. Routes to whichever provider the merchant configured. */
 export async function sendWhatsAppTemplate(opts: {
   provider: string;

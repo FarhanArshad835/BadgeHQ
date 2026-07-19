@@ -261,8 +261,59 @@ model AiReplySettings {
   supportUrl   String   @default("")
   accentColor  String   @default("#111111")
   position     String   @default("bottom-right") // bottom-right | bottom-left
+
+  // Inbound AI replies over WhatsApp (Interakt). The same knowledge base and
+  // Gemini key answer both channels; only the delivery path differs.
+  waReplyEnabled  Boolean @default(false)
+  waApiKey        String  @default("") // Interakt send key — base64 already, sent verbatim
+  waWebhookSecret String  @default("") // Interakt secret_key, for HMAC verification
+  // Opaque per-shop token in the webhook URL. Interakt's payload names only the
+  // CUSTOMER's number, never which business number received it, so the token is
+  // the only thing that identifies the shop. Uniqueness is enforced by a PARTIAL
+  // index (see migration 0021) because "" is the shared default.
+  waWebhookToken  String  @default("")
+
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+
+  @@index([waWebhookToken])
+}
+
+/// One rolling WhatsApp thread per shopper. Kept only long enough for the bot to
+/// follow the conversation, then purged — see PURGE_AFTER_HOURS in the cron.
+model WhatsAppConversation {
+  id            String   @id @default(cuid())
+  shop          String
+  phone         String // normalised 10-digit — the conversation key
+  turns         String   @default("[]") // JSON ChatTurn[]; capped via trimHistory()
+  optedOut      Boolean  @default(false) // handoff keyword sent; bot stays silent
+  windowCount   Int      @default(0) // replies sent in the current rate-limit window
+  windowStart   DateTime @default(now())
+  lastInboundAt DateTime @default(now())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([shop, phone])
+  @@index([updatedAt]) // for the purge sweep
+}
+
+/// Inbound message awaiting an AI reply. Exists because Interakt demands a 200
+/// within 3s while Gemini can take 15s — the webhook records the job and a cron
+/// drains it. A row is also the only durable record if a send fails.
+model WhatsAppReplyJob {
+  id                String   @id @default(cuid())
+  shop              String
+  phone             String
+  message           String
+  providerMessageId String // Interakt's data.message.id — the idempotency key
+  status            String   @default("pending") // pending | claimed | done | failed
+  attempts          Int      @default(0)
+  error             String   @default("")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([shop, providerMessageId]) // a redelivered webhook must not double-reply
+  @@index([status, createdAt])
 }
 
 model ShopPlan {

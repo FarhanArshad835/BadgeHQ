@@ -27,12 +27,19 @@ export type AiSettings = {
   supportUrl: string;
 };
 
+/** Where the answer will be rendered. Only the formatting rules differ. */
+export type AiChannel = "web" | "whatsapp";
+
 /**
  * Wrap the merchant's knowledge text in guardrails. The bot must answer only
  * from what the merchant wrote — inventing a returns window or a discount is
  * worse than saying "I don't know".
+ *
+ * `channel` changes ONLY the closing formatting rules: the web widget parses
+ * markdown links into anchors, but WhatsApp has no markdown, so the same
+ * instruction there would render a literal "[Returns](https://…)".
  */
-export function buildSystemPrompt(s: AiSettings): string {
+export function buildSystemPrompt(s: AiSettings, channel: AiChannel = "web"): string {
   const contact = [
     s.supportEmail ? `email ${s.supportEmail}` : "",
     s.supportUrl ? `or use ${s.supportUrl}` : "",
@@ -57,8 +64,16 @@ export function buildSystemPrompt(s: AiSettings): string {
       ? `7. For order-specific problems, complaints, payment issues or anything you cannot answer, tell them to contact the team: ${contact}.`
       : "7. For order-specific problems, complaints or payment issues, tell them to contact the store's support team.",
     "",
-    "Reply in plain text. Do not use markdown formatting, EXCEPT links.",
-    "For any link, always use markdown with a short human label — [Returns portal](https://example.com/returns), never a bare URL and never 'click here'. Only link to URLs that appear in the store information above.",
+    ...(channel === "whatsapp"
+      ? [
+          "You are replying on WhatsApp. Reply in plain text with no markdown at all — markdown is not rendered there and would show as literal characters.",
+          "Write any link as a bare URL on its own, e.g. https://example.com/returns. Only use URLs that appear in the store information above.",
+          "Keep it to a few short lines; this is a phone screen.",
+        ]
+      : [
+          "Reply in plain text. Do not use markdown formatting, EXCEPT links.",
+          "For any link, always use markdown with a short human label — [Returns portal](https://example.com/returns), never a bare URL and never 'click here'. Only link to URLs that appear in the store information above.",
+        ]),
   ].join("\n");
 }
 
