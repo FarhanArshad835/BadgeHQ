@@ -175,6 +175,17 @@ export function buildProductUrl(shop: string, v: RestockedVariant): string {
 }
 
 /**
+ * Value for the template's dynamic URL button. WhatsApp stores the fixed
+ * prefix (https://<shop>/products/) in the approved template and appends only
+ * this suffix, which Meta caps at 128 characters. Returns "" when there's no
+ * handle, so the send simply omits the button parameter.
+ */
+export function buildButtonSuffix(v: RestockedVariant): string {
+  if (!v.productHandle) return "";
+  return `${v.productHandle}?variant=${v.variantId}`.slice(0, 128);
+}
+
+/**
  * Does this shop actually grant write_customers? Checked live so a shop that
  * never approved it makes ZERO customer API calls. Failure = assume no.
  */
@@ -254,6 +265,9 @@ export async function sendRestockWhatsApp(opts: {
     // Products with no featured image fall back to the merchant's image, so a
     // single image template covers every send (Meta rejects an empty header).
     headerImageUrl: opts.variant.productImage || s.waFallbackImage || undefined,
+    // Dynamic URL button. The template holds the fixed prefix
+    // https://<shop>/products/ and we supply only the suffix.
+    buttonUrlSuffix: buildButtonSuffix(opts.variant),
     callbackData: `bis:${opts.variant.variantId}`,
   });
 

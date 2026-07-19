@@ -46,6 +46,7 @@ export async function sendDoubleTickTemplate(opts: {
   languageCode?: string;
   bodyValues: string[];
   headerImageUrl?: string;
+  buttonUrlSuffix?: string;
 }): Promise<InteraktResult> {
   const ten = toIndianTenDigit(opts.phone);
   if (!ten) return { ok: false, error: "invalid-phone" };
@@ -69,6 +70,9 @@ export async function sendDoubleTickTemplate(opts: {
               ? { header: { type: "IMAGE", mediaUrl: opts.headerImageUrl } }
               : {}),
             body: { placeholders: opts.bodyValues.map((v) => (v == null ? "" : String(v))) },
+            ...(opts.buttonUrlSuffix
+              ? { buttons: [{ type: "URL", parameter: opts.buttonUrlSuffix }] }
+              : {}),
           },
         },
         from,
@@ -134,6 +138,7 @@ export async function sendWhatsAppTemplate(opts: {
   fromNumber?: string;
   bodyValues: string[];
   headerImageUrl?: string;
+  buttonUrlSuffix?: string;
   callbackData?: string;
 }): Promise<InteraktResult> {
   if (opts.provider === "doubletick") {
@@ -145,6 +150,7 @@ export async function sendWhatsAppTemplate(opts: {
       languageCode: opts.languageCode,
       bodyValues: opts.bodyValues,
       headerImageUrl: opts.headerImageUrl,
+      buttonUrlSuffix: opts.buttonUrlSuffix,
     });
   }
   return sendInteraktTemplate({
@@ -154,6 +160,7 @@ export async function sendWhatsAppTemplate(opts: {
     languageCode: opts.languageCode,
     bodyValues: opts.bodyValues,
     headerImageUrl: opts.headerImageUrl,
+    buttonUrlSuffix: opts.buttonUrlSuffix,
     callbackData: opts.callbackData,
   });
 }
@@ -169,6 +176,9 @@ export async function sendInteraktTemplate(opts: {
   languageCode?: string;
   bodyValues: string[];
   headerImageUrl?: string;
+  /** Value for a dynamic URL button's {{1}} — the suffix after the template's
+   *  fixed prefix, NOT a whole URL. */
+  buttonUrlSuffix?: string;
   callbackData?: string;
 }): Promise<InteraktResult> {
   const phoneNumber = toIndianTenDigit(opts.phone);
@@ -188,6 +198,9 @@ export async function sendInteraktTemplate(opts: {
       bodyValues: opts.bodyValues.map((v) => (v == null ? "" : String(v))),
       // Media header (image): a single-element list holding the media URL.
       ...(opts.headerImageUrl ? { headerValues: [opts.headerImageUrl] } : {}),
+      // Dynamic URL button. Keys are 0-based button indexes; we only ever have
+      // one button, so index "0".
+      ...(opts.buttonUrlSuffix ? { buttonValues: { "0": [opts.buttonUrlSuffix] } } : {}),
     },
   };
 

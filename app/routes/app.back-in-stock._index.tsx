@@ -41,6 +41,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   ]);
 
   return json({
+    shop,
     isEnabled: settings?.isEnabled ?? false,
     placement: settings?.placement ?? "below-atc",
     buttonText: settings?.buttonText ?? "Notify me when available",
@@ -98,6 +99,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       fromNumber: s.waFromNumber,
       bodyValues: ["Test product", "Test variant", `https://${session.shop}`],
       headerImageUrl: s.waFallbackImage || undefined,
+      // Exercises the dynamic URL button too, so a template misconfiguration
+      // shows up in the test rather than on a real restock.
+      buttonUrlSuffix: "test-product",
       callbackData: "bis:test",
     });
     return res.ok
@@ -405,7 +409,7 @@ export default function BackInStockPage() {
                   onChange={setWaTemplateName}
                   autoComplete="off"
                   placeholder="back_in_stock"
-                  helpText="An approved WhatsApp template with an IMAGE header and three body variables: {{1}} product, {{2}} variant, {{3}} product link."
+                  helpText={`An approved template with an IMAGE header, three body variables ({{1}} product, {{2}} variant, {{3}} product link) and a dynamic URL button whose base URL is https://${d.shop}/products/`}
                 />
                 <TextField
                   label="Fallback image URL"
