@@ -2745,12 +2745,15 @@
         btn.style.letterSpacing = abs.letterSpacing;
         btn.style.textTransform = abs.textTransform;
         if (abr.height > 0) btn.style.minHeight = Math.round(abr.height) + "px";
-        // Outline in the ATC's fill color so the pair reads as primary/secondary.
-        var atcBg = abs.backgroundColor;
-        if (atcBg && atcBg !== "rgba(0, 0, 0, 0)" && atcBg !== "transparent") {
-          btn.style.borderColor = atcBg;
-          btn.style.color = atcBg;
-        }
+        // Outline in the ATC's fill color so the pair reads as primary/secondary
+        // — but only when that color is readable. On a sold-out variant the ATC
+        // is disabled and light grey on most themes, which would render this
+        // button as near-invisible grey-on-white.
+        var atcBg = bisReadableColor(abs.backgroundColor);
+        if (!atcBg) atcBg = bisReadableColor(window.getComputedStyle(document.body).color);
+        if (!atcBg) atcBg = "#111111";
+        btn.style.borderColor = atcBg;
+        btn.style.color = atcBg;
       } catch (e) {}
     }
 
@@ -3039,8 +3042,6 @@
   var BIS_KEY_PREFIX = "badgehq_bis_";
   var bisCfg = null;
   var bisHiddenBtn = null; // ATC button we hid for the replace-button placement
-  var bisWrappedParent = null; // parent whose flex-wrap we overrode
-  var bisWrappedParentFlexWrap = ""; // its previous inline value, to restore
 
   function bisRoot() {
     // Scope to the main product; excludes quick-add drawers and featured
@@ -3258,37 +3259,38 @@
 
   // Make the widget span its parent's full width even when it was inserted
   // into a flex/grid slot that was sized for a single button.
-  function bisClaimFullWidth(wrap) {
+  // For the replace-button placement: take over the hidden ATC button's own
+  // slot so the notify button sits exactly where "Add to cart" was, at the
+  // same width — rather than pushing itself onto a new line.
+  function bisTakeAtcSlot(wrap, atc) {
     try {
+      if (!atc) return;
+      var as = window.getComputedStyle(atc);
       var parent = wrap.parentNode;
-      if (!parent || parent.nodeType !== 1) return;
-      var ps = window.getComputedStyle(parent);
-      wrap.style.width = "100%";
-      wrap.style.maxWidth = "100%";
+      // Copy the layout properties that decide the button's footprint.
+      if (as.flex && as.flex !== "0 1 auto") wrap.style.flex = as.flex;
+      if (as.gridColumn && as.gridColumn !== "auto") wrap.style.gridColumn = as.gridColumn;
+      if (as.gridArea && as.gridArea !== "auto / auto / auto / auto") wrap.style.gridArea = as.gridArea;
+      if (as.alignSelf && as.alignSelf !== "auto") wrap.style.alignSelf = as.alignSelf;
+      if (as.marginBlockStart) wrap.style.marginBlockStart = as.marginBlockStart;
+      if (as.marginBlockEnd) wrap.style.marginBlockEnd = as.marginBlockEnd;
+      wrap.style.boxSizing = "border-box";
       wrap.style.minWidth = "0";
-      if (ps.display === "flex" || ps.display === "inline-flex") {
-        wrap.style.flex = "1 1 100%";
-        // A row of buttons would otherwise keep us on the same line.
-        if (ps.flexWrap === "nowrap") {
-          bisWrappedParent = parent;
-          bisWrappedParentFlexWrap = parent.style.flexWrap;
-          parent.style.flexWrap = "wrap";
-        }
-      } else if (ps.display === "grid" || ps.display === "inline-grid") {
-        wrap.style.gridColumn = "1 / -1";
+      // Width: match what the ATC actually occupied. offsetWidth is 0 because
+      // we already hid it, so prefer its computed width and fall back to
+      // filling the parent (the ATC is normally full-width anyway).
+      var w = as.width;
+      if (w && w !== "auto" && parseFloat(w) > 0) {
+        wrap.style.width = w;
+        wrap.style.maxWidth = "100%";
+      } else {
+        wrap.style.width = "100%";
       }
     } catch (e) {}
   }
 
   function bisRemove() {
     var el = document.getElementById("badgehq-back-in-stock");
-    // Undo the parent's flex-wrap override before leaving, so the theme's
-    // button row goes back exactly as it was.
-    if (el && bisWrappedParent) {
-      bisWrappedParent.style.flexWrap = bisWrappedParentFlexWrap;
-      bisWrappedParent = null;
-      bisWrappedParentFlexWrap = "";
-    }
     if (el) el.remove();
     // Restore the ATC button if the replace-button placement hid it.
     if (bisHiddenBtn) {
@@ -3350,16 +3352,17 @@
 
     // Placement.
     if (cfg.placement === "replace-button" && atc) {
-      atc.style.display = "none";
-      bisHiddenBtn = atc;
       if (atc.parentNode) {
         atc.parentNode.insertBefore(wrap, atc.nextSibling);
-        // We're now sitting in the slot the ATC button occupied. That slot is
-        // often a flex/grid cell sized for a button, which squeezes the form
-        // into a narrow column (one word per line, unusable input). Claim the
-        // full row instead.
-        bisClaimFullWidth(wrap);
+        // Measure the ATC BEFORE hiding it — a display:none element reports no
+        // usable geometry — so the notify button lands in the same slot at the
+        // same width instead of wrapping onto its own line.
+        bisTakeAtcSlot(wrap, atc);
+        atc.style.display = "none";
+        bisHiddenBtn = atc;
       } else {
+        atc.style.display = "none";
+        bisHiddenBtn = atc;
         anchor.parentNode.insertBefore(wrap, anchor.nextSibling);
       }
     } else if (cfg.placement === "above-atc") {
