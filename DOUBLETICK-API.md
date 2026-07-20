@@ -10,7 +10,7 @@ re-verified against the live account on 2026-07-20.** Where something is unverif
 was only read in documentation, it says so.
 
 The reason this file exists: DoubleTick's public docs are incomplete in places and
-**wrong** in at least three that cost real debugging time. Those are called out under
+**wrong** in at least five ways that each cost real debugging time. Those are called out under
 [Gotchas](#gotchas), which is the part worth reading first.
 
 ---
@@ -218,29 +218,39 @@ Event types include `MESSAGE_RECEIVED`, `MESSAGE_STATUS_UPDATE`, `TEMPLATE_UPDAT
 `ADD_TAG`, `REMOVE_TAG`, `CHAT_ASSIGNED_TO_AGENT`, `NEW_LEAD`, and others (~16 total,
 read from docs, not individually verified).
 
-Inbound `MESSAGE_RECEIVED` payload:
+Inbound `MESSAGE_RECEIVED` payload — **as actually delivered** (captured live
+2026-07-20; the docs' example differs, see [gotcha 5](#gotchas)):
 
 ```json
 {
   "to": "918178788820",
-  "from": "919354991605",
-  "messageId": "HBgMOTE3NjAwNzI4MjU0FQIAEhgU...",
-  "dtMessageId": "3bf23c11-6c34-4c1e-b259-12a0e518d3cd",
-  "receivedAt": "2026-07-20T10:27:00.000Z",
-  "contact": { "name": "Contact Name" },
+  "from": "919137979401",
+  "messageId": "wamid.HBgMOTE5MTM3OTc5NDAxFQIAEhgg...",
+  "dtMessageId": "3c176d90-844c-4ac2-a267-5744bb5c1db7",
+  "receivedAt": "2026-07-20T11:39:47.443Z",
+  "contact": { "name": "Riya D" },
+  "callbackData": null,
   "integrationType": "WHATSAPP",
-  "status": "received",
-  "message": { "type": "TEXT", "text": "Ok", "context": {} }
+  "message": { "type": "TEXT", "text": "How to proceed with that?", "context": {} },
+  "dtLastMessageId": "19855fe1-...",
+  "lastMessageOrigin": "USER",
+  "isAgentOffline": false,
+  "customerId": "...", "dtCustomerId": "...", "userId": "...",
+  "isFirstMessage": false, "isFirstDailyMessageFromCustomer": false,
+  "isChatOpenAfterCustomerMessage": true
 }
 ```
 
-`from` is the customer, `to` is your business number. **Direction is marked by
-`status: "received"`**, not by an event-type field — outbound echoes arrive as
-`sent`/`delivered`/`read` on the same webhook. Filtering on that is what stops a bot
-replying to itself in a loop.
+`from` is the customer, `to` is your business number. **There is no `status` field** —
+the docs show `"status": "received"` but live deliveries omit it entirely. Don't gate on
+it; MESSAGE_RECEIVED is customer-inbound by definition, and subscribing to that single
+event is what keeps a bot from answering its own send echoes.
 
-Prefer `dtMessageId` (DoubleTick's UUID) over `messageId` (Meta's) as an idempotency
-key — it's present on every event and it's what their dashboard displays.
+Button taps arrive as `message.type: "BUTTON"` with the button label in `text` and
+`payload`/`id` fields — filter to `TEXT` unless you mean to handle menu clicks.
+
+Prefer `dtMessageId` (DoubleTick's UUID) over `messageId` (Meta's `wamid.…`) as an
+idempotency key — it's present on every event and it's what their dashboard displays.
 
 ### Not found: mark-as-done
 
@@ -331,7 +341,19 @@ records the message and returns immediately; a cron does the LLM call and the se
 `retryOnTimeout` is left `false` — with a fast-return design, a timeout means something
 is broken badly enough that a retry would duplicate rather than fix.
 
-### 5. Server-side filters are ignored
+### 5. The documented webhook payload is wrong: no `status` field
+
+The docs' MESSAGE_RECEIVED example includes `"status": "received"`. Live deliveries —
+three captured on 2026-07-20 — have **no `status` key at all**. A parser that requires
+it silently drops every real message while doc-shaped test payloads pass, which is the
+worst kind of failure: your own tests prove the pipeline works, and production stays
+silent. Real payloads also carry a dozen extra fields the docs never mention
+(`customerId`, `isFirstMessage`, `lastMessageOrigin`, `isAgentOffline`, …).
+
+If you must validate direction, rely on having subscribed only to `MESSAGE_RECEIVED`;
+treat `status` as optional and reject only an explicit non-`received` value.
+
+### 6. Server-side filters are ignored
 
 `?isDone=false` and `?phoneNumber=` on `/chats` are accepted and disregarded — the latter
 returns a different customer's chat. Filter client-side and don't trust a query param

@@ -115,7 +115,14 @@ export function parseInboundMessage(payload: any): InboundMessage | null {
 export function parseDoubleTickInbound(payload: any): InboundMessage | null {
   if (!payload || typeof payload !== "object") return null;
 
-  if (String(payload.status ?? "").toLowerCase() !== "received") return null;
+  // Real deliveries carry NO status field at all — the docs' example shows
+  // "status":"received" but three captured live payloads all lacked it, which
+  // made a strict equality check reject every genuine message while synthetic
+  // doc-shaped tests passed. MESSAGE_RECEIVED is customer-inbound by
+  // definition (we subscribe to no other event), so absence is fine; only an
+  // explicit non-"received" value — some status echo — is rejected.
+  const status = payload.status;
+  if (status != null && String(status).toLowerCase() !== "received") return null;
 
   const msg = payload.message;
   if (!msg || String(msg.type ?? "").toUpperCase() !== "TEXT") return null;
