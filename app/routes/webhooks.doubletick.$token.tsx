@@ -30,6 +30,11 @@ import {
   verifyDoubleTickAuth,
 } from "../utils/whatsapp-ai.server";
 import { toIndianTenDigit } from "../utils/whatsapp.server";
+import { drainJobSoon } from "../utils/whatsapp-reply.server";
+
+// The instant drain keeps running AFTER the 200 goes back (waitUntil), and it
+// includes an LLM call of up to 15s plus the send — give it headroom.
+export const config = { maxDuration: 60 };
 
 const ack = () => new Response(null, { status: 200 });
 
@@ -113,7 +118,8 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         update: { optedOut: optOut === "stop", lastInboundAt: now },
       });
       if (optOut === "stop") {
-        await queueJob(shop, phone, "__handoff__", inbound.messageId);
+        const jobId = await queueJob(shop, phone, "__handoff__", inbound.messageId);
+        if (jobId) drainJobSoon(jobId);
       }
       return ack();
     }
@@ -139,7 +145,11 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       },
     });
 
-    await queueJob(shop, phone, inbound.text, inbound.messageId);
+    const jobId = await queueJob(shop, phone, inbound.text, inbound.messageId);
+    // Reply NOW, in this same invocation, after the 200 below goes out — the
+    // cron sweep only handles what this drops. Null = duplicate delivery,
+    // already queued (and probably already answered): nothing to do.
+    if (jobId) drainJobSoon(jobId);
     return ack();
   } catch (e) {
     console.error("[doubletick-webhook] failed", e);
@@ -148,16 +158,23 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 };
 
 /**
- * Record the message for the cron. The unique (shop, providerMessageId) makes a
- * redelivered webhook a no-op — replying twice is worse than not replying.
+ * Record the message and return the job id for the instant drain. The unique
+ * (shop, providerMessageId) makes a redelivered webhook a no-op — replying
+ * twice is worse than not replying — and that case returns null.
  */
-async function queueJob(shop: string, phone: string, message: string, providerMessageId: string) {
+async function queueJob(
+  shop: string,
+  phone: string,
+  message: string,
+  providerMessageId: string,
+): Promise<string | null> {
   try {
-    await prisma.whatsAppReplyJob.create({
+    const job = await prisma.whatsAppReplyJob.create({
       data: { shop, phone, message, providerMessageId },
     });
+    return job.id;
   } catch (e: any) {
-    if (e?.code === "P2002") return; // already queued — duplicate delivery
+    if (e?.code === "P2002") return null; // already queued — duplicate delivery
     throw e;
   }
 }

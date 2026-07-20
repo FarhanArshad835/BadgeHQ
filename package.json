@@ -36,6 +36,7 @@
     "@shopify/shopify-app-session-storage-prisma": "^8.0.0",
     "@shopify/ui-extensions": "2025.1.x",
     "@shopify/ui-extensions-react": "2025.1.x",
+    "@vercel/functions": "^3.7.5",
     "@vercel/remix": "2.16.7",
     "isbot": "^5.1.0",
     "prisma": "^6.2.1",

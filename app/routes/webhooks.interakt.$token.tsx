@@ -28,6 +28,12 @@ import {
   verifyInteraktSignature,
 } from "../utils/whatsapp-ai.server";
 import { toIndianTenDigit } from "../utils/whatsapp.server";
+import { drainJobSoon } from "../utils/whatsapp-reply.server";
+
+// The instant drain runs AFTER the 200 is sent (waitUntil), so Interakt's
+// 3-second rule still sees a sub-second response — but the invocation itself
+// now carries an LLM call of up to 15s plus the send. Give it headroom.
+export const config = { maxDuration: 60 };
 
 /** 200 with no body — the "received, nothing to do" response. */
 const ack = () => new Response(null, { status: 200 });
@@ -103,7 +109,8 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       });
       if (optOut === "stop") {
         // Acknowledge once, via a job so the send stays off this 3s path.
-        await queueJob(shop, phone, "__handoff__", inbound.messageId);
+        const jobId = await queueJob(shop, phone, "__handoff__", inbound.messageId);
+        if (jobId) drainJobSoon(jobId);
       }
       return ack();
     }
@@ -130,7 +137,10 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       },
     });
 
-    await queueJob(shop, phone, inbound.text, inbound.messageId);
+    const jobId = await queueJob(shop, phone, inbound.text, inbound.messageId);
+    // Reply NOW, in this same invocation, after the 200 below goes out — the
+    // cron sweep only handles what this drops. Null = duplicate delivery.
+    if (jobId) drainJobSoon(jobId);
     return ack();
   } catch (e) {
     // Never surface a 500: it would count toward the 5-failure auto-disable.
@@ -140,16 +150,23 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 };
 
 /**
- * Record the message for the cron. The unique (shop, providerMessageId) makes a
- * redelivered webhook a no-op — replying twice is worse than not replying.
+ * Record the message and return the job id for the instant drain. The unique
+ * (shop, providerMessageId) makes a redelivered webhook a no-op — replying
+ * twice is worse than not replying — and that case returns null.
  */
-async function queueJob(shop: string, phone: string, message: string, providerMessageId: string) {
+async function queueJob(
+  shop: string,
+  phone: string,
+  message: string,
+  providerMessageId: string,
+): Promise<string | null> {
   try {
-    await prisma.whatsAppReplyJob.create({
+    const job = await prisma.whatsAppReplyJob.create({
       data: { shop, phone, message, providerMessageId },
     });
+    return job.id;
   } catch (e: any) {
-    if (e?.code === "P2002") return; // already queued — duplicate delivery
+    if (e?.code === "P2002") return null; // already queued — duplicate delivery
     throw e;
   }
 }

@@ -1,27 +1,22 @@
 /**
- * Cron drain for inbound WhatsApp AI replies — /api/cron/whatsapp-replies
+ * Cron sweep for inbound WhatsApp AI replies — /api/cron/whatsapp-replies
  *
- * Runs every minute (see vercel.json). The webhook can only spend 3 seconds, so
- * the slow half of the work lives here: load the thread, ask Gemini, send the
- * answer back over WhatsApp.
+ * Runs every minute (see vercel.json). Since the webhooks drain their own jobs
+ * instantly via waitUntil(), this is the SAFETY NET, not the primary path: it
+ * picks up whatever the instant path dropped — a crashed invocation, a
+ * rate-limited retry, a stale claim. Most ticks find nothing and exit in
+ * milliseconds.
  *
- * Guarded by CRON_SECRET because every run spends the merchant's Gemini quota.
+ * Guarded by CRON_SECRET because every run can spend the merchant's LLM quota.
  */
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import prisma from "../db.server";
-import { buildSystemPrompt, callAi } from "../utils/ai-replies.server";
-import { sendWhatsAppText } from "../utils/whatsapp.server";
-import {
-  HANDOFF_REPLY,
-  PURGE_AFTER_HOURS,
-  appendTurns,
-  loadTurns,
-} from "../utils/whatsapp-ai.server";
+import { PURGE_AFTER_HOURS } from "../utils/whatsapp-ai.server";
+import { processReplyJob } from "../utils/whatsapp-reply.server";
 
 /** Bounded so one run can't exceed the function timeout. */
 const BATCH = 10;
-const MAX_ATTEMPTS = 3;
 /** A row claimed longer ago than this is assumed abandoned and retried. */
 const STALE_CLAIM_MS = 5 * 60 * 1000;
 
@@ -68,29 +63,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   let sent = 0;
   let failed = 0;
 
+  // Same worker the webhooks' instant path runs — see whatsapp-reply.server.ts.
   for (const { id } of claimed) {
-    const job = await prisma.whatsAppReplyJob.findUnique({ where: { id } });
-    if (!job) continue;
-
-    const result = await handleJob(job);
-
-    if (result.ok) {
-      await prisma.whatsAppReplyJob.update({
-        where: { id },
-        data: { status: "done", error: "" },
-      });
-      sent++;
-    } else {
-      const giveUp = job.attempts >= MAX_ATTEMPTS || result.permanent;
-      await prisma.whatsAppReplyJob.update({
-        where: { id },
-        data: {
-          status: giveUp ? "failed" : "pending",
-          error: result.error.slice(0, 300),
-        },
-      });
-      failed++;
-    }
+    const outcome = await processReplyJob(id);
+    if (outcome === "sent") sent++;
+    else if (outcome === "failed") failed++;
   }
 
   // Purge cold threads in the same pass — no second cron needed.
@@ -100,90 +77,3 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   return json({ ok: true, claimed: claimed.length, sent, failed, purged: purged.count });
 };
-
-type JobResult = { ok: true } | { ok: false; error: string; permanent?: boolean };
-
-async function handleJob(job: {
-  id: string;
-  shop: string;
-  phone: string;
-  message: string;
-}): Promise<JobResult> {
-  const settings = await prisma.aiReplySettings.findUnique({ where: { shop: job.shop } });
-  if (!settings?.waReplyEnabled || !settings.isEnabled || !settings.apiKey) {
-    // Merchant switched it off between queueing and now — drop, don't retry.
-    return { ok: false, error: "feature-disabled", permanent: true };
-  }
-  if (!settings.waApiKey) {
-    return { ok: false, error: "no-wa-key", permanent: true };
-  }
-  // DoubleTick refuses a send without a sender number; no amount of retrying
-  // supplies one.
-  if (settings.waProvider === "doubletick" && !settings.waFromNumber) {
-    return { ok: false, error: "no-sender-number", permanent: true };
-  }
-
-  const send = (message: string, callbackData: string) =>
-    sendWhatsAppText({
-      provider: settings.waProvider,
-      apiKey: settings.waApiKey,
-      fromNumber: settings.waFromNumber,
-      phone: job.phone,
-      message,
-      callbackData,
-    });
-
-  // The handoff acknowledgement is a fixed string — no AI, no quota spent.
-  if (job.message === "__handoff__") {
-    const wa = await send(HANDOFF_REPLY, "badgehq-ai-handoff");
-    return wa.ok ? { ok: true } : { ok: false, error: wa.error };
-  }
-
-  const convo = await prisma.whatsAppConversation.findUnique({
-    where: { shop_phone: { shop: job.shop, phone: job.phone } },
-  });
-  // Muted after the job was queued — a human has the thread now.
-  if (convo?.optedOut) return { ok: false, error: "opted-out", permanent: true };
-
-  const history = loadTurns(convo?.turns);
-
-  const ai = await callAi({
-    provider: settings.aiProvider,
-    apiKey: settings.apiKey,
-    // "whatsapp" swaps markdown links for bare URLs — WhatsApp renders no markdown.
-    system: buildSystemPrompt(settings, "whatsapp"),
-    history,
-    message: job.message,
-  });
-
-  if (!ai.ok) {
-    // bad-key / bad-model are configuration problems: retrying burns quota and
-    // will fail identically every time. A rate limit is the opposite — it
-    // clears on its own, so the job stays pending and the next tick retries.
-    const permanent = ai.error === "bad-key" || ai.error === "bad-model";
-    return { ok: false, error: `${settings.aiProvider}:${ai.error}`, permanent };
-  }
-
-  const wa = await send(ai.text, "badgehq-ai");
-
-  if (!wa.ok) {
-    // Outside the 24h service window a free-text send is refused by either
-    // provider. Do NOT fall back to a template: those cost money and need
-    // pre-approval.
-    const permanent = wa.error.startsWith("outside-window") || wa.error === "invalid-phone";
-    return { ok: false, error: `${settings.waProvider}:${wa.error}`, permanent };
-  }
-
-  // Record the exchange only once it actually reached the shopper.
-  await prisma.whatsAppConversation.upsert({
-    where: { shop_phone: { shop: job.shop, phone: job.phone } },
-    create: {
-      shop: job.shop,
-      phone: job.phone,
-      turns: appendTurns([], job.message, ai.text),
-    },
-    update: { turns: appendTurns(history, job.message, ai.text) },
-  });
-
-  return { ok: true };
-}
