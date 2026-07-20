@@ -121,49 +121,28 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const waProvider = data.waProvider === "doubletick" ? "doubletick" : "interakt";
   const waFromNumber = String(data.waFromNumber || "").trim().replace(/[^\d+]/g, "").slice(0, 20);
 
-  // Enabling WhatsApp replies without the credentials that provider needs would
-  // fail closed on every message — the merchant would just see silence. Refuse
-  // instead. The two providers need different things: Interakt HMACs its
-  // webhook (so it needs a shared secret), DoubleTick doesn't but requires a
-  // sender number on every send.
-  const wantsWa = Boolean(data.waReplyEnabled);
   const existing = await prisma.aiReplySettings.findUnique({ where: { shop } });
   const willHaveWaKey = newWaKey || existing?.waApiKey;
 
+  // Whether WhatsApp replies can actually work. Checked, but NOT used to reject
+  // the save: an earlier version returned 400 here, which threw away the whole
+  // form — including the storefront chat toggle, which has nothing to do with
+  // WhatsApp. The result was a save that appeared to do nothing at all. Now the
+  // settings always persist and this only decides whether waReplyEnabled is
+  // allowed to be on.
+  const wantsWa = Boolean(data.waReplyEnabled);
+  let waBlocked = "";
   if (wantsWa) {
     if (!willHaveWaKey) {
-      return json(
-        {
-          error: `To reply on WhatsApp you need your ${
-            waProvider === "doubletick" ? "DoubleTick" : "Interakt"
-          } API key. Add it, then turn this on.`,
-        },
-        { status: 400 },
-      );
-    }
-    if (waProvider === "doubletick") {
-      if (!waFromNumber) {
-        return json(
-          { error: "DoubleTick needs your WhatsApp sender number to reply." },
-          { status: 400 },
-        );
-      }
-    } else {
-      if (!(newWaSecret || existing?.waWebhookSecret)) {
-        return json(
-          {
-            error:
-              "To reply on WhatsApp you need both the Interakt API key and the webhook secret. Add them, then turn this on.",
-          },
-          { status: 400 },
-        );
-      }
-      if (!existing?.waWebhookToken) {
-        return json(
-          { error: "Generate the webhook URL first, then paste it into Interakt." },
-          { status: 400 },
-        );
-      }
+      waBlocked = `WhatsApp replies stayed off: add your ${
+        waProvider === "doubletick" ? "DoubleTick" : "Interakt"
+      } API key first.`;
+    } else if (waProvider === "doubletick") {
+      if (!waFromNumber) waBlocked = "WhatsApp replies stayed off: DoubleTick needs your sender number.";
+    } else if (!(newWaSecret || existing?.waWebhookSecret)) {
+      waBlocked = "WhatsApp replies stayed off: Interakt also needs the webhook secret.";
+    } else if (!existing?.waWebhookToken) {
+      waBlocked = "WhatsApp replies stayed off: generate the webhook URL and paste it into Interakt first.";
     }
   }
 
@@ -171,44 +150,40 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   // for them. It signs nothing, so we mint a bearer token here and it echoes
   // that back on every delivery — that token is what the route verifies.
   //
-  // Registration happens BEFORE the save so a provider outage can't leave the
-  // feature switched on with a webhook that was never registered. The token is
-  // reused once minted, so re-saving re-registers the same URL rather than
-  // orphaning the previous one.
+  // A registration failure must not lose the merchant's other edits, so it
+  // downgrades to a warning and leaves waReplyEnabled off rather than aborting.
+  // The token is reused once minted, so re-saving re-registers the same URL
+  // rather than orphaning the previous one.
   let waWebhookToken = existing?.waWebhookToken || "";
   let waWebhookAuth = existing?.waWebhookAuth || "";
-  if (wantsWa && waProvider === "doubletick") {
-    if (!waWebhookToken) waWebhookToken = generateWebhookToken();
-    if (!waWebhookAuth) waWebhookAuth = generateWebhookToken();
-
+  if (wantsWa && !waBlocked && waProvider === "doubletick") {
     const base = (process.env.SHOPIFY_APP_URL || "").replace(/\/$/, "");
     if (!base) {
-      return json({ error: "App URL isn't configured — contact support." }, { status: 500 });
-    }
+      waBlocked = "WhatsApp replies stayed off: the app URL isn't configured — contact support.";
+    } else {
+      if (!waWebhookToken) waWebhookToken = generateWebhookToken();
+      if (!waWebhookAuth) waWebhookAuth = generateWebhookToken();
 
-    const reg = await registerDoubleTickWebhook({
-      apiKey: String(willHaveWaKey),
-      url: `${base}/webhooks/doubletick/${waWebhookToken}`,
-      authToken: waWebhookAuth,
-      fromNumber: waFromNumber,
-    });
-    if (!reg.ok) {
-      return json(
-        {
-          error:
-            reg.error.startsWith("auth-failed")
-              ? "DoubleTick rejected the API key. Check it and save again."
-              : `Couldn't register the webhook with DoubleTick: ${reg.error}`,
-        },
-        { status: 400 },
-      );
+      const reg = await registerDoubleTickWebhook({
+        apiKey: String(willHaveWaKey),
+        url: `${base}/webhooks/doubletick/${waWebhookToken}`,
+        authToken: waWebhookAuth,
+        fromNumber: waFromNumber,
+      });
+      if (!reg.ok) {
+        waBlocked = reg.error.startsWith("auth-failed")
+          ? "WhatsApp replies stayed off: DoubleTick rejected the API key."
+          : `WhatsApp replies stayed off — DoubleTick refused the webhook: ${reg.error}`;
+      }
     }
   }
 
   try {
     const values = {
       isEnabled: Boolean(data.isEnabled),
-      waReplyEnabled: wantsWa,
+      // Never store "on" when it can't work — the cron would drop every job as
+      // permanently failed and the merchant would just see silence.
+      waReplyEnabled: wantsWa && !waBlocked,
       waProvider,
       waFromNumber,
       waWebhookToken,
@@ -233,7 +208,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       },
     });
     await bumpConfigVersion(shop);
-    return json({ success: true });
+    return json({ success: true, warning: waBlocked || undefined });
   } catch (error) {
     return json({ error: "Failed to save settings" }, { status: 500 });
   }
@@ -241,6 +216,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
 type ActionData = {
   success?: boolean;
+  /** Saved, but WhatsApp replies could not be switched on — says why. */
+  warning?: string;
   error?: string;
   testResult?: string;
   testError?: string;
@@ -310,6 +287,9 @@ export default function AiRepliesPage() {
       setApiKey("");
       setWaApiKey("");
       setWaWebhookSecret("");
+      // The server refused to store this as on — reflect that, or the ticked
+      // box would claim WhatsApp is live when it isn't.
+      if (actionData.warning) setWaReplyEnabled(false);
       const t = setTimeout(() => setShowSuccess(false), 3000);
       return () => clearTimeout(t);
     }
@@ -370,7 +350,16 @@ export default function AiRepliesPage() {
       <Layout>
         <Layout.Section>
           <BlockStack gap="400">
-            {showSuccess && <Banner tone="success">Settings saved successfully.</Banner>}
+            {showSuccess && !actionData?.warning && (
+              <Banner tone="success">Settings saved successfully.</Banner>
+            )}
+            {/* Deliberately not on the auto-dismiss timer — this is the only
+                thing telling the merchant WhatsApp didn't switch on. */}
+            {actionData?.warning && (
+              <Banner tone="warning" title="Saved, but WhatsApp replies are off">
+                {actionData.warning}
+              </Banner>
+            )}
             {actionData?.error && <Banner tone="critical">{actionData.error}</Banner>}
 
             <Banner tone="info" title="How it works">
