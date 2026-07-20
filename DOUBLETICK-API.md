@@ -109,7 +109,8 @@ other than `SENT`/`QUEUED`/`ACCEPTED`.
 
 ### List the inbox — `GET /chats?limit=50`
 
-Page size up to 50. Response is `{chats: [...], paginationOptions: {...}}`.
+**Default page size is 10**; `?limit=` raises it, and 50 is the largest value observed to
+work. Response is `{chats: [...], paginationOptions: {...}}`.
 
 Per-chat fields:
 
@@ -135,16 +136,24 @@ params, until `hasMoreChats` is false.
 page as no param at all, and `?phoneNumber=X` returns somebody else entirely. Filter
 client-side. `?limit=` is the only query param observed to work.
 
+**Deep pagination is slow and flaky.** Page 1 returns in well under a second; later pages
+take ~3s each and individual requests do hang. One real run pulled 16 pages (~800 chats)
+before a page timed out. Use a per-request timeout, tolerate a failed page rather than
+aborting the run, and dedupe on `phoneNumber + chatUpdatedTime` since the cursor can
+repeat rows. Python's `urllib` hung outright where `curl` with `--max-time` succeeded.
+
 ### Read a full conversation — `GET /chat-messages`
 
 ```
 GET /chat-messages?wabaNumber=918178788820&customerNumber=919354991605
-    &startDate=19-07-2026&endDate=21-07-2026
 ```
 
-Dates are `DD-MM-YYYY`. Returns `{messages: [...]}`, each with `messageOriginType`
-(`CUSTOMER` or `USER`) and `messageTime`. **Sort by `messageTime` — order is not
-guaranteed.**
+**`startDate` and `endDate` are optional**, despite the docs listing them as required.
+Omit them and you get the full history — 375 messages for one customer in testing, versus
+14 with a three-day window. Add them (`DD-MM-YYYY`) only to bound a large thread.
+
+Returns `{messages: [...]}`, each with `messageOriginType` (`CUSTOMER` or `USER`) and
+`messageTime`. **Sort by `messageTime` — order is not guaranteed.**
 
 Text lives at `message.text`; template bodies at
 `message.templateMessage.body.data[0].text`.
@@ -153,6 +162,23 @@ This endpoint matters more than it looks. `/chats` only exposes the *last* messa
 a last message of "Hi" routinely hides the real question three messages earlier. One
 example from the transcript: a customer whose last message was "Hi" had actually asked
 "I want to create an account" — invisible without the full thread.
+
+### Export chats — `POST /export-chats`
+
+```json
+{
+  "wabaNumber": "918178788820",
+  "customerPhoneNumber": "919354991605",
+  "startDate": "19-07-2026",
+  "endDate": "21-07-2026",
+  "includeMedia": false
+}
+```
+
+Returns `{"success": true}` and nothing else — **this is an async export**, delivered
+out-of-band (email or webhook), not a synchronous read. If you want thread content in
+code, use `/chat-messages` instead. Recorded here mainly so nobody mistakes it for a read
+endpoint again.
 
 ### Check the 24-hour window — `GET /chat/status`
 
@@ -353,5 +379,13 @@ if the chat is `TEMPLATE`-only.
 **Verify one send before any batch.** Confirm a real `messageId` comes back, then
 throttle (~600ms) and log every response to a `.jsonl`. Messages cannot be unsent.
 
-**"Customer wrote last" is the real queue.** Of 114 `isDone: false` chats, only 21 had the
-customer writing last. The other 93 were waiting on the customer, not on you.
+**"Customer wrote last" is the real queue.** From one real pull of 797 chats: 114 were
+`isDone: false`, but only **21** had the customer writing last. The other 93 were waiting
+on the customer, not on you. Filter on
+`lastMessage.messageOriginType === "CUSTOMER"` before deciding the queue is big.
+
+**Most awaiting chats are repliable.** Of those 114, **100 were `ANY`** and only 14 were
+`TEMPLATE`-only — so free-form replies covered nearly everything.
+
+**Throttle batches at ~600ms** between sends to stay clear of rate limits and avoid
+looking like spam.
