@@ -1,9 +1,15 @@
 /**
- * Gemini client for the storefront AI chat ("Automated replies").
+ * LLM clients for the storefront AI chat ("Automated replies").
  *
  * The merchant supplies their own API key, so every call spends THEIR quota —
  * hence the hard input caps in the route. The key is read only here and in the
  * admin page; it never reaches /api/widgets or the browser.
+ *
+ * Two providers, because Gemini's free tier cannot run a support bot: it allows
+ * 20 requests PER DAY, which one shopper exhausts in an afternoon. Groq's free
+ * tier is 30 RPM / 1000 RPD / 12K TPM — in practice ~100+ replies a day once the
+ * ~700-token system prompt is counted, which is 5x Gemini and actually usable.
+ * Gemini stays supported for merchants who already have a key or pay for one.
  */
 
 // gemini-2.0-flash was shut down on 2026-06-01 and now 404s. 2.5-flash is the
@@ -94,6 +100,93 @@ export function trimHistory(history: unknown): ChatTurn[] {
     recent.shift();
   }
   return recent;
+}
+
+const GROQ_MODEL = "llama-3.3-70b-versatile";
+const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
+
+export type AiProvider = "gemini" | "groq";
+export type AiResult = { ok: true; text: string } | { ok: false; error: string };
+
+/**
+ * Groq (OpenAI-compatible chat completions).
+ *
+ * No thinking-token problem here — unlike Gemini 2.5, Llama emits its answer
+ * directly, so max_tokens is purely reply length. 400 is generous for the two
+ * or three lines the prompt asks for.
+ */
+export async function callGroq(opts: {
+  apiKey: string;
+  system: string;
+  history: ChatTurn[];
+  message: string;
+}): Promise<AiResult> {
+  const messages = [
+    { role: "system", content: opts.system },
+    // Gemini calls the assistant turn "model"; OpenAI-shaped APIs call it
+    // "assistant". Same conversation, different vocabulary.
+    ...opts.history.map((t) => ({
+      role: t.role === "model" ? "assistant" : "user",
+      content: t.text,
+    })),
+    { role: "user", content: opts.message },
+  ];
+
+  try {
+    const res = await fetch(GROQ_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${opts.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: GROQ_MODEL,
+        messages,
+        temperature: 0.7,
+        max_tokens: 400,
+        top_p: 0.95,
+      }),
+      signal: AbortSignal.timeout(15000),
+    });
+
+    if (!res.ok) {
+      // Log server-side only — an upstream body can echo the key back.
+      const detail = await res.text().catch(() => "");
+      console.error("[ai-replies] groq", GROQ_MODEL, res.status, detail.slice(0, 300));
+      const error =
+        res.status === 401 || res.status === 403
+          ? "bad-key"
+          : res.status === 429
+          ? "rate-limited"
+          : res.status === 404
+          ? "bad-model"
+          : "upstream";
+      return { ok: false, error };
+    }
+
+    const data = await res.json();
+    const text = data?.choices?.[0]?.message?.content;
+    if (!text || !String(text).trim()) {
+      console.error("[ai-replies] groq empty:", JSON.stringify(data).slice(0, 200));
+      return { ok: false, error: "no-answer" };
+    }
+    return { ok: true, text: String(text).trim() };
+  } catch (e: any) {
+    console.error("[ai-replies] groq threw:", String(e?.message || e).slice(0, 200));
+    return { ok: false, error: e?.name === "TimeoutError" ? "timeout" : "network" };
+  }
+}
+
+/** Provider-agnostic entry point. Every caller should use this, not the two above. */
+export async function callAi(opts: {
+  provider: string;
+  apiKey: string;
+  system: string;
+  history: ChatTurn[];
+  message: string;
+}): Promise<AiResult> {
+  const { provider, ...rest } = opts;
+  return provider === "groq" ? callGroq(rest) : callGemini(rest);
 }
 
 export async function callGemini(opts: {

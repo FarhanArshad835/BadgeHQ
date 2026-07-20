@@ -10,7 +10,7 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import prisma from "../db.server";
-import { buildSystemPrompt, callGemini } from "../utils/ai-replies.server";
+import { buildSystemPrompt, callAi } from "../utils/ai-replies.server";
 import { sendWhatsAppText } from "../utils/whatsapp.server";
 import {
   HANDOFF_REPLY,
@@ -147,7 +147,8 @@ async function handleJob(job: {
 
   const history = loadTurns(convo?.turns);
 
-  const ai = await callGemini({
+  const ai = await callAi({
+    provider: settings.aiProvider,
     apiKey: settings.apiKey,
     // "whatsapp" swaps markdown links for bare URLs — WhatsApp renders no markdown.
     system: buildSystemPrompt(settings, "whatsapp"),
@@ -160,7 +161,7 @@ async function handleJob(job: {
     // will fail identically every time. A rate limit is the opposite — it
     // clears on its own, so the job stays pending and the next tick retries.
     const permanent = ai.error === "bad-key" || ai.error === "bad-model";
-    return { ok: false, error: `gemini:${ai.error}`, permanent };
+    return { ok: false, error: `${settings.aiProvider}:${ai.error}`, permanent };
   }
 
   const wa = await send(ai.text, "badgehq-ai");

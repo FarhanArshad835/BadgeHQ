@@ -253,7 +253,10 @@ model AiReplySettings {
   id           String   @id @default(cuid())
   shop         String   @unique
   isEnabled    Boolean  @default(false)
-  apiKey       String   @default("") // merchant's Gemini key — server-side only
+  // "gemini" | "groq". Groq is the practical default for new shops: Gemini's
+  // free tier allows 20 requests A DAY, which no storefront can run on.
+  aiProvider   String   @default("gemini")
+  apiKey       String   @default("") // merchant's LLM key — server-side only
   knowledge    String   @default("") // policies/FAQ text the bot may answer from
   botName      String   @default("Support")
   greeting     String   @default("Hi! Ask me about shipping, returns or sizing.")

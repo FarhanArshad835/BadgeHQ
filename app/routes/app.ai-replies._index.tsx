@@ -21,7 +21,7 @@ import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { bumpConfigVersion } from "../utils/config-version.server";
-import { buildSystemPrompt, callGemini } from "../utils/ai-replies.server";
+import { buildSystemPrompt, callAi } from "../utils/ai-replies.server";
 import { generateWebhookToken, registerDoubleTickWebhook } from "../utils/whatsapp-ai.server";
 
 const POSITIONS = ["bottom-right", "bottom-left"];
@@ -34,6 +34,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const s = await prisma.aiReplySettings.findUnique({ where: { shop: session.shop } });
   return json({
     isEnabled: s?.isEnabled ?? false,
+    aiProvider: s?.aiProvider ?? "gemini",
     // The key itself never leaves the server — only whether one is saved.
     hasKey: Boolean(s?.apiKey),
     keyPreview: s?.apiKey ? s.apiKey.slice(-4) : "",
@@ -78,26 +79,33 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   // pasting the key again or visiting the storefront.
   if (formData.get("intent") === "test") {
     const s = await prisma.aiReplySettings.findUnique({ where: { shop } });
-    if (!s?.apiKey) return json({ testError: "Save your Gemini API key first." });
+    if (!s?.apiKey) return json({ testError: "Save your API key first." });
     const question = String(formData.get("testQuestion") || "").trim() || "What is your return policy?";
-    const result = await callGemini({
+    const result = await callAi({
+      provider: s.aiProvider,
       apiKey: s.apiKey,
       system: buildSystemPrompt(s),
       history: [],
       message: question.slice(0, 1000),
     });
     if (result.ok) return json({ testResult: result.text });
+    const isGroq = s.aiProvider === "groq";
+    const name = isGroq ? "Groq" : "Gemini";
     return json({
       testError:
         result.error === "bad-key"
-          ? "Gemini rejected the API key. Check it's a valid key from Google AI Studio."
+          ? `${name} rejected the API key. Check it's a valid key from ${
+              isGroq ? "console.groq.com" : "Google AI Studio"
+            }.`
           : result.error === "bad-model"
-          ? "Gemini no longer offers the model this app requests (Google retires older models). This needs an app update — your API key is fine."
+          ? `${name} no longer offers the model this app requests (providers retire older models). This needs an app update — your API key is fine.`
           : result.error === "rate-limited"
-          ? "Gemini is rate-limiting this key (free-tier limits are per-minute and per-day). Your key and setup are fine — wait a minute and try again, or enable billing in Google AI Studio for higher limits."
+          ? isGroq
+            ? "Groq is rate-limiting this key. The free tier allows 30 requests a minute — wait a moment and try again."
+            : "Gemini is rate-limiting this key. The free tier allows only 20 requests PER DAY, which a storefront exhausts almost immediately — switch to Groq above, or enable billing in Google AI Studio."
           : result.error === "timeout"
-          ? "Gemini didn't respond in time. Try again."
-          : "Couldn't reach Gemini. Check the key and try again.",
+          ? `${name} didn't respond in time. Try again.`
+          : `Couldn't reach ${name}. Check the key and try again.`,
     });
   }
 
@@ -212,6 +220,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   try {
     const values = {
       isEnabled: Boolean(data.isEnabled),
+      aiProvider: data.aiProvider === "groq" ? "groq" : "gemini",
       // Never store "on" when it can't work — the cron would drop every job as
       // permanently failed and the merchant would just see silence.
       waReplyEnabled: wantsWa && !waBlocked,
@@ -274,6 +283,7 @@ export default function AiRepliesPage() {
 
   const initial = {
     enabled: d.isEnabled,
+    aiProvider: d.aiProvider,
     apiKey: "",
     knowledge: d.knowledge,
     botName: d.botName,
@@ -290,6 +300,7 @@ export default function AiRepliesPage() {
   };
 
   const [enabled, setEnabled] = useState(initial.enabled);
+  const [aiProvider, setAiProvider] = useState(initial.aiProvider);
   const [waReplyEnabled, setWaReplyEnabled] = useState(initial.waReplyEnabled);
   const [waProvider, setWaProvider] = useState(initial.waProvider);
   const [waApiKey, setWaApiKey] = useState(initial.waApiKey);
@@ -308,6 +319,7 @@ export default function AiRepliesPage() {
 
   const isDirty =
     enabled !== initial.enabled ||
+    aiProvider !== initial.aiProvider ||
     apiKey !== initial.apiKey ||
     knowledge !== initial.knowledge ||
     botName !== initial.botName ||
@@ -338,6 +350,7 @@ export default function AiRepliesPage() {
 
   const handleDiscard = () => {
     setEnabled(initial.enabled);
+    setAiProvider(initial.aiProvider);
     setApiKey(initial.apiKey);
     setKnowledge(initial.knowledge);
     setBotName(initial.botName);
@@ -358,6 +371,7 @@ export default function AiRepliesPage() {
       {
         data: JSON.stringify({
           isEnabled: enabled,
+          aiProvider,
           apiKey,
           knowledge,
           botName,
@@ -412,7 +426,8 @@ export default function AiRepliesPage() {
                 </Text>
                 <List type="number">
                   <List.Item>
-                    Get a free Gemini API key from Google AI Studio (aistudio.google.com/apikey).
+                    Get a free API key from console.groq.com (no card needed), or from Google AI
+                    Studio if you prefer Gemini.
                   </List.Item>
                   <List.Item>Paste it below and write your store information.</List.Item>
                   <List.Item>Use <strong>Test</strong> to check a question, then enable.</List.Item>
@@ -435,17 +450,41 @@ export default function AiRepliesPage() {
                   checked={enabled}
                   onChange={setEnabled}
                 />
+                <Select
+                  label="AI provider"
+                  options={[
+                    { label: "Groq — free, recommended", value: "groq" },
+                    { label: "Google Gemini", value: "gemini" },
+                  ]}
+                  value={aiProvider}
+                  onChange={setAiProvider}
+                  helpText="Each provider needs its own key. Changing this means pasting a new one."
+                />
+
+                {aiProvider === "gemini" && (
+                  <Banner tone="warning">
+                    Gemini&apos;s free tier allows only <strong>20 requests per day</strong>, which a
+                    storefront uses up almost immediately. Either enable billing in Google AI Studio,
+                    or switch to Groq, whose free tier handles far more.
+                  </Banner>
+                )}
+
                 <TextField
-                  label="Gemini API key"
+                  label={aiProvider === "groq" ? "Groq API key" : "Gemini API key"}
                   value={apiKey}
                   onChange={setApiKey}
                   autoComplete="off"
+                  type="password"
                   placeholder={
                     d.hasKey
                       ? `Saved key ending in ${d.keyPreview} — enter a new key to replace it`
-                      : "Paste your Gemini API key"
+                      : "Paste your API key"
                   }
-                  helpText="From Google AI Studio. Stored securely — never sent to your storefront."
+                  helpText={
+                    aiProvider === "groq"
+                      ? "Free from console.groq.com — no card needed. Stored securely, never sent to your storefront."
+                      : "From Google AI Studio. Stored securely — never sent to your storefront."
+                  }
                 />
               </BlockStack>
             </Card>

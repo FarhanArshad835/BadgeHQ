@@ -1,0 +1,11 @@
+-- Let merchants pick their LLM provider for Automated Replies.
+--
+-- Gemini's free tier is 20 requests PER DAY, which one shopper exhausts in an
+-- afternoon, so the feature was unusable for anyone not paying Google. Groq's
+-- free tier (30 RPM / 1000 RPD / 12K TPM) supports a real storefront.
+--
+-- Defaults to 'gemini' so every existing shop keeps the provider its saved key
+-- belongs to — a key is meaningless against the wrong provider.
+--
+-- Idempotent, matching every migration since 0008.
+ALTER TABLE "AiReplySettings" ADD COLUMN IF NOT EXISTS "aiProvider" TEXT NOT NULL DEFAULT 'gemini';

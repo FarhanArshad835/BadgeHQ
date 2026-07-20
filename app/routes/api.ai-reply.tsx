@@ -17,7 +17,7 @@ import prisma from "../db.server";
 import {
   MAX_MESSAGE_CHARS,
   buildSystemPrompt,
-  callGemini,
+  callAi,
   trimHistory,
 } from "../utils/ai-replies.server";
 
@@ -68,7 +68,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return json({ enabled: false }, { status: 200, headers: NO_STORE });
   }
 
-  const result = await callGemini({
+  const result = await callAi({
+    provider: settings.aiProvider,
     apiKey: settings.apiKey,
     system: buildSystemPrompt(settings),
     history: trimHistory(body?.history),
