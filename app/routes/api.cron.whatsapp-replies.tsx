@@ -157,7 +157,8 @@ async function handleJob(job: {
 
   if (!ai.ok) {
     // bad-key / bad-model are configuration problems: retrying burns quota and
-    // will fail identically every time.
+    // will fail identically every time. A rate limit is the opposite — it
+    // clears on its own, so the job stays pending and the next tick retries.
     const permanent = ai.error === "bad-key" || ai.error === "bad-model";
     return { ok: false, error: `gemini:${ai.error}`, permanent };
   }

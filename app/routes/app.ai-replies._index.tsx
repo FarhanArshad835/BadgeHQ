@@ -93,6 +93,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           ? "Gemini rejected the API key. Check it's a valid key from Google AI Studio."
           : result.error === "bad-model"
           ? "Gemini no longer offers the model this app requests (Google retires older models). This needs an app update — your API key is fine."
+          : result.error === "rate-limited"
+          ? "Gemini is rate-limiting this key (free-tier limits are per-minute and per-day). Your key and setup are fine — wait a minute and try again, or enable billing in Google AI Studio for higher limits."
           : result.error === "timeout"
           ? "Gemini didn't respond in time. Try again."
           : "Couldn't reach Gemini. Check the key and try again.",

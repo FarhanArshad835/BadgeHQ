@@ -130,9 +130,15 @@ export async function callGemini(opts: {
       console.error("[ai-replies] gemini", GEMINI_MODEL, res.status, detail.slice(0, 300));
       // 404 = the model id is gone/renamed (Google retires these). Distinct
       // from a key problem so the admin Test points at the real cause.
+      // 429 and quota-exhausted 400s are NOT key problems — reporting them as
+      // "bad-key" sent merchants hunting for a broken key when the real cause
+      // was Gemini's free-tier rate limit, which clears on its own.
+      const quota = /quota|rate.?limit|RESOURCE_EXHAUSTED|exceeded/i.test(detail);
       const error =
         res.status === 404
           ? "bad-model"
+          : res.status === 429 || quota
+          ? "rate-limited"
           : res.status === 400 || res.status === 403
           ? "bad-key"
           : "upstream";
