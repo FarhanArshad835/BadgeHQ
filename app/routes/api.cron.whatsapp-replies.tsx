@@ -75,5 +75,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     where: { updatedAt: { lt: new Date(now.getTime() - PURGE_AFTER_HOURS * 3600_000) } },
   });
 
+  // Sweep rows left by the temporary payload-capture route (2026-07-20 payload
+  // diagnosis) — they held raw webhook bodies with real customer messages.
+  // A no-op once empty; kept until the general job-table purge lands.
+  await prisma.whatsAppReplyJob.deleteMany({ where: { shop: "__dt_capture__" } });
+
   return json({ ok: true, claimed: claimed.length, sent, failed, purged: purged.count });
 };
