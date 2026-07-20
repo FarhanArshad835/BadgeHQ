@@ -262,16 +262,24 @@ model AiReplySettings {
   accentColor  String   @default("#111111")
   position     String   @default("bottom-right") // bottom-right | bottom-left
 
-  // Inbound AI replies over WhatsApp (Interakt). The same knowledge base and
-  // Gemini key answer both channels; only the delivery path differs.
+  // Inbound AI replies over WhatsApp. The same knowledge base and Gemini key
+  // answer both channels; only the delivery path differs. Set independently of
+  // the Back in Stock provider — a merchant may run alerts on one and chat on
+  // the other.
   waReplyEnabled  Boolean @default(false)
-  waApiKey        String  @default("") // Interakt send key — base64 already, sent verbatim
+  waProvider      String  @default("interakt") // "interakt" | "doubletick"
+  waApiKey        String  @default("") // provider send key; Interakt's is base64, sent verbatim
   waWebhookSecret String  @default("") // Interakt secret_key, for HMAC verification
-  // Opaque per-shop token in the webhook URL. Interakt's payload names only the
-  // CUSTOMER's number, never which business number received it, so the token is
-  // the only thing that identifies the shop. Uniqueness is enforced by a PARTIAL
-  // index (see migration 0021) because "" is the shared default.
+  // Opaque per-shop token in the webhook URL. Neither provider's payload names
+  // which business number received the message, so the token is the only thing
+  // identifying the shop. Uniqueness is enforced by a PARTIAL index (migration
+  // 0021) because "" is the shared default.
   waWebhookToken  String  @default("")
+  // DoubleTick only. Its send API requires a `from` sender number, and its
+  // webhook carries NO signature — it echoes a bearer token we choose at
+  // registration, so that token is what we verify instead of an HMAC.
+  waFromNumber    String  @default("")
+  waWebhookAuth   String  @default("")
 
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt

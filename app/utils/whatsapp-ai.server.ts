@@ -100,6 +100,129 @@ export function parseInboundMessage(payload: any): InboundMessage | null {
   };
 }
 
+/**
+ * Pull a repliable customer message out of a DoubleTick webhook payload.
+ *
+ * DoubleTick's payload is flat where Interakt's is nested, and it distinguishes
+ * inbound from outbound by `status: "received"` rather than an event type. That
+ * check is the loop guard: our own sends come back as "sent"/"delivered"/"read",
+ * and replying to those would make the bot talk to itself.
+ *
+ * `from` is the customer (international format, no +); `to` is the business
+ * number. Non-text messages carry a media url and no usable text — return null
+ * and stay silent, exactly as the Interakt parser does.
+ */
+export function parseDoubleTickInbound(payload: any): InboundMessage | null {
+  if (!payload || typeof payload !== "object") return null;
+
+  if (String(payload.status ?? "").toLowerCase() !== "received") return null;
+
+  const msg = payload.message;
+  if (!msg || String(msg.type ?? "").toUpperCase() !== "TEXT") return null;
+
+  const text = String(msg.text ?? "").trim().slice(0, MAX_MESSAGE_CHARS);
+  const phone = String(payload.from ?? "").trim();
+  // dtMessageId is DoubleTick's own UUID; messageId is Meta's. Prefer the
+  // former — it is present on every event and is what their dashboard shows.
+  const messageId = String(payload.dtMessageId ?? payload.messageId ?? "").trim();
+  if (!text || !phone || !messageId) return null;
+
+  return {
+    phone,
+    text,
+    messageId,
+    customerName: String(payload?.contact?.name ?? "").trim(),
+  };
+}
+
+/**
+ * Verify a DoubleTick webhook.
+ *
+ * DoubleTick signs nothing — there is no HMAC to check. What it does offer is an
+ * `authorization` block at registration whose value it echoes on every delivery,
+ * so we generate a token per shop and compare that. Weaker than Interakt's HMAC
+ * (a token replays; a body signature does not), but it is the strongest thing
+ * the provider supports, and the opaque per-shop URL token gates it further.
+ *
+ * Fails closed when no token is stored, matching verifyInteraktSignature.
+ */
+export function verifyDoubleTickAuth(header: string | null | undefined, expected: string): boolean {
+  if (!expected || !header) return false;
+
+  const received = String(header).trim().replace(/^Bearer\s+/i, "");
+  const a = Buffer.from(received, "utf8");
+  const b = Buffer.from(expected, "utf8");
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
+
+/**
+ * Register our webhook with DoubleTick so the merchant doesn't have to paste
+ * anything into their dashboard.
+ *
+ * Only MESSAGE_RECEIVED is requested — status updates would be pure noise here,
+ * and every one we ignore still costs a request. retryOnTimeout is left off: the
+ * route queues and returns immediately, so a timeout means something is broken
+ * badly enough that a retry would duplicate the reply rather than fix it.
+ */
+export async function registerDoubleTickWebhook(opts: {
+  apiKey: string;
+  url: string;
+  authToken: string;
+  fromNumber: string;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!opts.apiKey) return { ok: false, error: "no-api-key" };
+  if (!opts.url || !opts.authToken) return { ok: false, error: "no-webhook-url" };
+
+  const waba = opts.fromNumber.replace(/\D/g, "");
+
+  try {
+    const res = await fetch("https://public.doubletick.io/v2/webhook/register", {
+      method: "POST",
+      headers: {
+        Authorization: opts.apiKey,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({
+        name: "BadgeHQ Automated Replies",
+        url: opts.url,
+        method: "POST",
+        bodyFormat: "JSON",
+        retryOnTimeout: false,
+        // Echoed back to us on every delivery — this is what we verify.
+        authorization: { type: "BEARER", payload: opts.authToken },
+        webhookEvents: ["MESSAGE_RECEIVED"],
+        ...(waba ? { wabaNumbers: [waba] } : {}),
+      }),
+      signal: AbortSignal.timeout(10000),
+    });
+
+    const text = await res.text().catch(() => "");
+    if (!res.ok) {
+      if (res.status === 401 || res.status === 403) {
+        return { ok: false, error: "auth-failed (check the DoubleTick API key)" };
+      }
+      let body: any = null;
+      try {
+        body = text ? JSON.parse(text) : null;
+      } catch {
+        /* non-JSON error page */
+      }
+      return {
+        ok: false,
+        error: String(body?.message || body?.error || text || `http-${res.status}`).slice(0, 300),
+      };
+    }
+    return { ok: true };
+  } catch (e: any) {
+    return {
+      ok: false,
+      error: e?.name === "TimeoutError" ? "timeout" : String(e?.message || e).slice(0, 200),
+    };
+  }
+}
+
 const STOP_WORDS = new Set([
   "stop",
   "unsubscribe",

@@ -11,7 +11,7 @@ import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import prisma from "../db.server";
 import { buildSystemPrompt, callGemini } from "../utils/ai-replies.server";
-import { sendInteraktText } from "../utils/whatsapp.server";
+import { sendWhatsAppText } from "../utils/whatsapp.server";
 import {
   HANDOFF_REPLY,
   PURGE_AFTER_HOURS,
@@ -115,17 +115,27 @@ async function handleJob(job: {
     return { ok: false, error: "feature-disabled", permanent: true };
   }
   if (!settings.waApiKey) {
-    return { ok: false, error: "no-interakt-key", permanent: true };
+    return { ok: false, error: "no-wa-key", permanent: true };
   }
+  // DoubleTick refuses a send without a sender number; no amount of retrying
+  // supplies one.
+  if (settings.waProvider === "doubletick" && !settings.waFromNumber) {
+    return { ok: false, error: "no-sender-number", permanent: true };
+  }
+
+  const send = (message: string, callbackData: string) =>
+    sendWhatsAppText({
+      provider: settings.waProvider,
+      apiKey: settings.waApiKey,
+      fromNumber: settings.waFromNumber,
+      phone: job.phone,
+      message,
+      callbackData,
+    });
 
   // The handoff acknowledgement is a fixed string — no AI, no quota spent.
   if (job.message === "__handoff__") {
-    const wa = await sendInteraktText({
-      apiKey: settings.waApiKey,
-      phone: job.phone,
-      message: HANDOFF_REPLY,
-      callbackData: "badgehq-ai-handoff",
-    });
+    const wa = await send(HANDOFF_REPLY, "badgehq-ai-handoff");
     return wa.ok ? { ok: true } : { ok: false, error: wa.error };
   }
 
@@ -152,18 +162,14 @@ async function handleJob(job: {
     return { ok: false, error: `gemini:${ai.error}`, permanent };
   }
 
-  const wa = await sendInteraktText({
-    apiKey: settings.waApiKey,
-    phone: job.phone,
-    message: ai.text,
-    callbackData: "badgehq-ai",
-  });
+  const wa = await send(ai.text, "badgehq-ai");
 
   if (!wa.ok) {
-    // Outside the 24h service window a free-text send is refused. Do NOT fall
-    // back to a template: those cost money and need pre-approval.
+    // Outside the 24h service window a free-text send is refused by either
+    // provider. Do NOT fall back to a template: those cost money and need
+    // pre-approval.
     const permanent = wa.error.startsWith("outside-window") || wa.error === "invalid-phone";
-    return { ok: false, error: `interakt:${wa.error}`, permanent };
+    return { ok: false, error: `${settings.waProvider}:${wa.error}`, permanent };
   }
 
   // Record the exchange only once it actually reached the shopper.

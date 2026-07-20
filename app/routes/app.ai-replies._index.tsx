@@ -21,7 +21,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { bumpConfigVersion } from "../utils/config-version.server";
 import { buildSystemPrompt, callGemini } from "../utils/ai-replies.server";
-import { generateWebhookToken } from "../utils/whatsapp-ai.server";
+import { generateWebhookToken, registerDoubleTickWebhook } from "../utils/whatsapp-ai.server";
 
 const POSITIONS = ["bottom-right", "bottom-left"];
 
@@ -41,17 +41,23 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     accentColor: s?.accentColor ?? "#111111",
     position: s?.position ?? "bottom-right",
 
-    // WhatsApp (Interakt) inbound replies. Secrets follow the same rule as the
-    // Gemini key: only ever "is one saved" plus the last 4 characters.
+    // WhatsApp inbound replies. Secrets follow the same rule as the Gemini key:
+    // only ever "is one saved" plus the last 4 characters.
     waReplyEnabled: s?.waReplyEnabled ?? false,
+    waProvider: s?.waProvider ?? "interakt",
     hasWaKey: Boolean(s?.waApiKey),
     waKeyPreview: s?.waApiKey ? s.waApiKey.slice(-4) : "",
     hasWaSecret: Boolean(s?.waWebhookSecret),
+    waFromNumber: s?.waFromNumber ?? "",
+    // Whether the DoubleTick webhook has been registered for this shop.
+    hasWaAuth: Boolean(s?.waWebhookAuth),
     // Built from the app's own URL, never the request host — inside the Shopify
     // admin the request arrives on the embedded-app host, which would produce a
     // webhook URL that silently never receives anything.
     webhookUrl: s?.waWebhookToken
-      ? `${(process.env.SHOPIFY_APP_URL || "").replace(/\/$/, "")}/webhooks/interakt/${s.waWebhookToken}`
+      ? `${(process.env.SHOPIFY_APP_URL || "").replace(/\/$/, "")}/webhooks/${
+          s.waProvider === "doubletick" ? "doubletick" : "interakt"
+        }/${s.waWebhookToken}`
       : "",
   });
 };
@@ -112,26 +118,88 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const newKey = String(data.apiKey || "").trim();
   const newWaKey = String(data.waApiKey || "").trim();
   const newWaSecret = String(data.waWebhookSecret || "").trim();
+  const waProvider = data.waProvider === "doubletick" ? "doubletick" : "interakt";
+  const waFromNumber = String(data.waFromNumber || "").trim().replace(/[^\d+]/g, "").slice(0, 20);
 
-  // Enabling WhatsApp replies without both credentials would fail closed on
-  // every message — the merchant would just see silence. Refuse instead.
+  // Enabling WhatsApp replies without the credentials that provider needs would
+  // fail closed on every message — the merchant would just see silence. Refuse
+  // instead. The two providers need different things: Interakt HMACs its
+  // webhook (so it needs a shared secret), DoubleTick doesn't but requires a
+  // sender number on every send.
   const wantsWa = Boolean(data.waReplyEnabled);
+  const existing = await prisma.aiReplySettings.findUnique({ where: { shop } });
+  const willHaveWaKey = newWaKey || existing?.waApiKey;
+
   if (wantsWa) {
-    const existing = await prisma.aiReplySettings.findUnique({ where: { shop } });
-    const willHaveKey = newWaKey || existing?.waApiKey;
-    const willHaveSecret = newWaSecret || existing?.waWebhookSecret;
-    if (!willHaveKey || !willHaveSecret) {
+    if (!willHaveWaKey) {
       return json(
         {
-          error:
-            "To reply on WhatsApp you need both the Interakt API key and the webhook secret. Add them, then turn this on.",
+          error: `To reply on WhatsApp you need your ${
+            waProvider === "doubletick" ? "DoubleTick" : "Interakt"
+          } API key. Add it, then turn this on.`,
         },
         { status: 400 },
       );
     }
-    if (!existing?.waWebhookToken) {
+    if (waProvider === "doubletick") {
+      if (!waFromNumber) {
+        return json(
+          { error: "DoubleTick needs your WhatsApp sender number to reply." },
+          { status: 400 },
+        );
+      }
+    } else {
+      if (!(newWaSecret || existing?.waWebhookSecret)) {
+        return json(
+          {
+            error:
+              "To reply on WhatsApp you need both the Interakt API key and the webhook secret. Add them, then turn this on.",
+          },
+          { status: 400 },
+        );
+      }
+      if (!existing?.waWebhookToken) {
+        return json(
+          { error: "Generate the webhook URL first, then paste it into Interakt." },
+          { status: 400 },
+        );
+      }
+    }
+  }
+
+  // DoubleTick has no dashboard step for the merchant: we register the webhook
+  // for them. It signs nothing, so we mint a bearer token here and it echoes
+  // that back on every delivery — that token is what the route verifies.
+  //
+  // Registration happens BEFORE the save so a provider outage can't leave the
+  // feature switched on with a webhook that was never registered. The token is
+  // reused once minted, so re-saving re-registers the same URL rather than
+  // orphaning the previous one.
+  let waWebhookToken = existing?.waWebhookToken || "";
+  let waWebhookAuth = existing?.waWebhookAuth || "";
+  if (wantsWa && waProvider === "doubletick") {
+    if (!waWebhookToken) waWebhookToken = generateWebhookToken();
+    if (!waWebhookAuth) waWebhookAuth = generateWebhookToken();
+
+    const base = (process.env.SHOPIFY_APP_URL || "").replace(/\/$/, "");
+    if (!base) {
+      return json({ error: "App URL isn't configured — contact support." }, { status: 500 });
+    }
+
+    const reg = await registerDoubleTickWebhook({
+      apiKey: String(willHaveWaKey),
+      url: `${base}/webhooks/doubletick/${waWebhookToken}`,
+      authToken: waWebhookAuth,
+      fromNumber: waFromNumber,
+    });
+    if (!reg.ok) {
       return json(
-        { error: "Generate the webhook URL first, then paste it into Interakt." },
+        {
+          error:
+            reg.error.startsWith("auth-failed")
+              ? "DoubleTick rejected the API key. Check it and save again."
+              : `Couldn't register the webhook with DoubleTick: ${reg.error}`,
+        },
         { status: 400 },
       );
     }
@@ -141,6 +209,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const values = {
       isEnabled: Boolean(data.isEnabled),
       waReplyEnabled: wantsWa,
+      waProvider,
+      waFromNumber,
+      waWebhookToken,
+      waWebhookAuth,
       knowledge: String(data.knowledge ?? "").slice(0, 20000),
       botName: text(data.botName, "Support", 60),
       greeting: text(data.greeting, "Hi! Ask me about shipping, returns or sizing.", 300),
@@ -193,14 +265,18 @@ export default function AiRepliesPage() {
     accentColor: d.accentColor,
     position: d.position,
     waReplyEnabled: d.waReplyEnabled,
+    waProvider: d.waProvider,
     waApiKey: "",
     waWebhookSecret: "",
+    waFromNumber: d.waFromNumber,
   };
 
   const [enabled, setEnabled] = useState(initial.enabled);
   const [waReplyEnabled, setWaReplyEnabled] = useState(initial.waReplyEnabled);
+  const [waProvider, setWaProvider] = useState(initial.waProvider);
   const [waApiKey, setWaApiKey] = useState(initial.waApiKey);
   const [waWebhookSecret, setWaWebhookSecret] = useState(initial.waWebhookSecret);
+  const [waFromNumber, setWaFromNumber] = useState(initial.waFromNumber);
   const [apiKey, setApiKey] = useState(initial.apiKey);
   const [knowledge, setKnowledge] = useState(initial.knowledge);
   const [botName, setBotName] = useState(initial.botName);
@@ -223,8 +299,10 @@ export default function AiRepliesPage() {
     accentColor !== initial.accentColor ||
     position !== initial.position ||
     waReplyEnabled !== initial.waReplyEnabled ||
+    waProvider !== initial.waProvider ||
     waApiKey !== initial.waApiKey ||
-    waWebhookSecret !== initial.waWebhookSecret;
+    waWebhookSecret !== initial.waWebhookSecret ||
+    waFromNumber !== initial.waFromNumber;
 
   useEffect(() => {
     if (actionData?.success) {
@@ -248,8 +326,10 @@ export default function AiRepliesPage() {
     setAccentColor(initial.accentColor);
     setPosition(initial.position);
     setWaReplyEnabled(initial.waReplyEnabled);
+    setWaProvider(initial.waProvider);
     setWaApiKey(initial.waApiKey);
     setWaWebhookSecret(initial.waWebhookSecret);
+    setWaFromNumber(initial.waFromNumber);
   };
 
   const handleSave = () => {
@@ -266,13 +346,17 @@ export default function AiRepliesPage() {
           accentColor,
           position,
           waReplyEnabled,
+          waProvider,
           waApiKey,
           waWebhookSecret,
+          waFromNumber,
         }),
       },
       { method: "POST" },
     );
   };
+
+  const isDoubleTick = waProvider === "doubletick";
 
   const handleTest = () => submit({ intent: "test", testQuestion }, { method: "POST" });
   const handleRotateToken = () => submit({ intent: "rotate-token" }, { method: "POST" });
@@ -390,57 +474,108 @@ export default function AiRepliesPage() {
 
             <Card>
               <BlockStack gap="400">
-                <Text as="h2" variant="headingMd">Reply on WhatsApp (Interakt)</Text>
+                <Text as="h2" variant="headingMd">Reply on WhatsApp</Text>
                 <Text as="p" tone="subdued">
-                  When a customer messages your Interakt WhatsApp number, the assistant
-                  answers using the same store information as the storefront chat. Replies
-                  sent within 24 hours of the customer's message are free on WhatsApp — you
-                  only pay for Gemini usage.
+                  When a customer messages your WhatsApp number, the assistant answers using
+                  the same store information as the storefront chat. Replies sent within 24
+                  hours of the customer's message are free on WhatsApp — you only pay for
+                  Gemini usage.
                 </Text>
 
-                <Banner tone="info">
-                  <BlockStack gap="200">
-                    <Text as="p">
-                      <strong>Needs Interakt's Growth or Advanced plan</strong> — inbound
-                      webhooks aren't available on lower plans.
-                    </Text>
-                    <List type="number">
-                      <List.Item>Paste your Interakt API key and webhook secret below (Interakt → Settings → Developer Settings).</List.Item>
-                      <List.Item>Generate the webhook URL, then add it in Interakt's Developer Settings.</List.Item>
-                      <List.Item>Save, then turn on <strong>Reply to WhatsApp messages</strong>.</List.Item>
-                    </List>
-                  </BlockStack>
-                </Banner>
+                <Select
+                  label="WhatsApp provider"
+                  options={[
+                    { label: "Interakt", value: "interakt" },
+                    { label: "DoubleTick", value: "doubletick" },
+                  ]}
+                  value={waProvider}
+                  onChange={setWaProvider}
+                  helpText="Set separately from Back in Stock — you can use a different provider for each."
+                />
+
+                {isDoubleTick ? (
+                  <Banner tone="info">
+                    <BlockStack gap="200">
+                      <Text as="p">
+                        We set the webhook up in DoubleTick for you — there's nothing to paste
+                        into their dashboard.
+                      </Text>
+                      <List type="number">
+                        <List.Item>Paste your DoubleTick API key and sender number below.</List.Item>
+                        <List.Item>Turn on <strong>Reply to WhatsApp messages</strong> and Save.</List.Item>
+                      </List>
+                    </BlockStack>
+                  </Banner>
+                ) : (
+                  <Banner tone="info">
+                    <BlockStack gap="200">
+                      <Text as="p">
+                        <strong>Needs Interakt's Growth or Advanced plan</strong> — inbound
+                        webhooks aren't available on lower plans.
+                      </Text>
+                      <List type="number">
+                        <List.Item>Paste your Interakt API key and webhook secret below (Interakt → Settings → Developer Settings).</List.Item>
+                        <List.Item>Generate the webhook URL, then add it in Interakt's Developer Settings.</List.Item>
+                        <List.Item>Save, then turn on <strong>Reply to WhatsApp messages</strong>.</List.Item>
+                      </List>
+                    </BlockStack>
+                  </Banner>
+                )}
 
                 <TextField
-                  label="Interakt API key"
+                  label={isDoubleTick ? "DoubleTick API key" : "Interakt API key"}
                   value={waApiKey}
                   onChange={setWaApiKey}
                   autoComplete="off"
                   type="password"
-                  placeholder={d.hasWaKey ? "••••••••" : "Paste your Interakt API key"}
+                  placeholder={d.hasWaKey ? "••••••••" : "Paste your API key"}
                   helpText={
                     d.hasWaKey
-                      ? `Saved key ending in ${d.waKeyPreview} — enter a new key to replace it. If you use Back in Stock, this is the same key.`
-                      : "From Interakt → Settings → Developer Settings. The same key used for Back in Stock."
+                      ? `Saved key ending in ${d.waKeyPreview} — enter a new key to replace it.`
+                      : isDoubleTick
+                      ? "From DoubleTick → Settings → API key."
+                      : "From Interakt → Settings → Developer Settings."
                   }
                 />
 
-                <TextField
-                  label="Webhook secret"
-                  value={waWebhookSecret}
-                  onChange={setWaWebhookSecret}
-                  autoComplete="off"
-                  type="password"
-                  placeholder={d.hasWaSecret ? "••••••••" : "Paste the secret key from Interakt"}
-                  helpText={
-                    d.hasWaSecret
-                      ? "A secret is saved — enter a new one to replace it. Used to verify messages really came from Interakt."
-                      : "Set in Interakt when you add the webhook. Without it, messages are rejected."
-                  }
-                />
+                {isDoubleTick ? (
+                  <TextField
+                    label="Sender number"
+                    value={waFromNumber}
+                    onChange={setWaFromNumber}
+                    autoComplete="off"
+                    placeholder="+919999999999"
+                    helpText="Your DoubleTick WhatsApp business number — replies are sent from it."
+                  />
+                ) : (
+                  <TextField
+                    label="Webhook secret"
+                    value={waWebhookSecret}
+                    onChange={setWaWebhookSecret}
+                    autoComplete="off"
+                    type="password"
+                    placeholder={d.hasWaSecret ? "••••••••" : "Paste the secret key from Interakt"}
+                    helpText={
+                      d.hasWaSecret
+                        ? "A secret is saved — enter a new one to replace it. Used to verify messages really came from Interakt."
+                        : "Set in Interakt when you add the webhook. Without it, messages are rejected."
+                    }
+                  />
+                )}
 
-                {d.webhookUrl ? (
+                {isDoubleTick ? (
+                  d.hasWaAuth && d.webhookUrl ? (
+                    <Text as="p" tone="subdued" variant="bodySm">
+                      Webhook registered with DoubleTick. Saving again re-registers it — do
+                      that if you change your sender number.
+                    </Text>
+                  ) : (
+                    <Text as="p" tone="subdued" variant="bodySm">
+                      The webhook is registered automatically when you save with replies
+                      turned on.
+                    </Text>
+                  )
+                ) : d.webhookUrl ? (
                   <BlockStack gap="200">
                     <TextField
                       label="Webhook URL"
@@ -473,7 +608,11 @@ export default function AiRepliesPage() {
 
                 <Checkbox
                   label="Reply to WhatsApp messages"
-                  helpText="Needs the API key, webhook secret and webhook URL above. Replies usually arrive within a minute."
+                  helpText={
+                    isDoubleTick
+                      ? "Needs the API key and sender number above. Replies usually arrive within a minute."
+                      : "Needs the API key, webhook secret and webhook URL above. Replies usually arrive within a minute."
+                  }
                   checked={waReplyEnabled}
                   onChange={setWaReplyEnabled}
                 />
@@ -481,9 +620,9 @@ export default function AiRepliesPage() {
                 <Text as="p" tone="subdued" variant="bodySm">
                   Customers can send <strong>stop</strong>, <strong>agent</strong> or{" "}
                   <strong>human</strong> to pause the assistant so your team can take over in
-                  Interakt's inbox; <strong>start</strong> resumes it. Replying from Interakt
-                  yourself does not pause it automatically. Photos and voice notes are
-                  ignored, and only Indian (+91) numbers are supported.
+                  your provider's inbox; <strong>start</strong> resumes it. Replying yourself
+                  does not pause it automatically. Photos and voice notes are ignored, and
+                  only Indian (+91) numbers are supported.
                 </Text>
               </BlockStack>
             </Card>

@@ -1,0 +1,147 @@
+/**
+ * DoubleTick inbound webhook — POST /webhooks/doubletick/:token
+ *
+ * The DoubleTick twin of webhooks.interakt.$token.tsx. Same job, same 3-second
+ * budget (Gemini takes up to 15s, so this route only records the message and the
+ * cron does the slow work), but two things differ:
+ *
+ *   1. DoubleTick signs nothing. Interakt HMACs the raw body; here we compare the
+ *      bearer token DoubleTick echoes from our registration call. So there is no
+ *      need to read the body as raw text first.
+ *   2. Its payload is flat and marks direction with `status: "received"` rather
+ *      than an event type.
+ *
+ * The Interakt route returns 200 for everything because Interakt disables a
+ * webhook after 5 failures in 10 minutes. DoubleTick publishes no such rule, but
+ * the same shape is kept deliberately: a 500 here would leak that the token is
+ * valid, and silence is the right response to traffic we can't act on anyway.
+ *
+ * The shop is identified ONLY by the token in the URL — the payload's `to` names
+ * the business number, but merchants can move numbers between accounts.
+ */
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
+import prisma from "../db.server";
+import {
+  RATE_LIMIT_PER_HOUR,
+  RATE_WINDOW_MS,
+  checkOptOut,
+  parseDoubleTickInbound,
+  verifyDoubleTickAuth,
+} from "../utils/whatsapp-ai.server";
+import { toIndianTenDigit } from "../utils/whatsapp.server";
+
+const ack = () => new Response(null, { status: 200 });
+
+export const loader = async (_: LoaderFunctionArgs) =>
+  new Response("Method not allowed", { status: 405 });
+
+export const action = async ({ request, params }: ActionFunctionArgs) => {
+  if (request.method !== "POST") return new Response("Method not allowed", { status: 405 });
+
+  try {
+    const token = String(params.token || "");
+    if (!token) return ack();
+
+    const settings = await prisma.aiReplySettings.findFirst({
+      where: { waWebhookToken: token },
+    });
+    if (!settings) {
+      console.warn("[doubletick-webhook] unknown token");
+      return ack();
+    }
+
+    // The only non-200. Checked before parsing so a forged body is never read.
+    if (!verifyDoubleTickAuth(request.headers.get("Authorization"), settings.waWebhookAuth)) {
+      console.warn(`[doubletick-webhook] bad auth for ${settings.shop}`);
+      return new Response("Invalid authorization", { status: 401 });
+    }
+
+    // Guard against a shop that switched providers but left this URL registered
+    // in DoubleTick — otherwise we'd reply using Interakt credentials.
+    if (settings.waProvider !== "doubletick") return ack();
+    if (!settings.waReplyEnabled || !settings.isEnabled || !settings.apiKey) return ack();
+
+    let payload: any = null;
+    try {
+      payload = await request.json();
+    } catch {
+      console.warn(`[doubletick-webhook] non-JSON body for ${settings.shop}`);
+      return ack();
+    }
+
+    // Null for every status echo of our own sends — the loop guard.
+    const inbound = parseDoubleTickInbound(payload);
+    if (!inbound) return ack();
+
+    const shop = settings.shop;
+    const phone = toIndianTenDigit(inbound.phone);
+    if (!phone) {
+      // Fail closed: sends are hard-coded to +91, so a foreign number gets
+      // silence. Log it distinctly or it's invisible.
+      console.warn(`[doubletick-webhook] non-indian-number ignored for ${shop}`);
+      return ack();
+    }
+
+    const now = new Date();
+    const convo = await prisma.whatsAppConversation.findUnique({
+      where: { shop_phone: { shop, phone } },
+    });
+
+    // Handoff keywords, handled inline so a shopper asking for a person never
+    // waits on the cron.
+    const optOut = checkOptOut(inbound.text);
+    if (optOut) {
+      await prisma.whatsAppConversation.upsert({
+        where: { shop_phone: { shop, phone } },
+        create: { shop, phone, optedOut: optOut === "stop", lastInboundAt: now },
+        update: { optedOut: optOut === "stop", lastInboundAt: now },
+      });
+      if (optOut === "stop") {
+        await queueJob(shop, phone, "__handoff__", inbound.messageId);
+      }
+      return ack();
+    }
+
+    // Muted: a human has this thread in DoubleTick's inbox.
+    if (convo?.optedOut) return ack();
+
+    // Rate limit per shopper, enforced here so a flood never creates rows.
+    const windowExpired = !convo || now.getTime() - convo.windowStart.getTime() > RATE_WINDOW_MS;
+    const count = windowExpired ? 0 : convo.windowCount;
+    if (count >= RATE_LIMIT_PER_HOUR) {
+      console.warn(`[doubletick-webhook] rate limited ${shop} ${phone.slice(-4)}`);
+      return ack();
+    }
+
+    await prisma.whatsAppConversation.upsert({
+      where: { shop_phone: { shop, phone } },
+      create: { shop, phone, windowCount: 1, windowStart: now, lastInboundAt: now },
+      update: {
+        windowCount: windowExpired ? 1 : { increment: 1 },
+        ...(windowExpired ? { windowStart: now } : {}),
+        lastInboundAt: now,
+      },
+    });
+
+    await queueJob(shop, phone, inbound.text, inbound.messageId);
+    return ack();
+  } catch (e) {
+    console.error("[doubletick-webhook] failed", e);
+    return ack();
+  }
+};
+
+/**
+ * Record the message for the cron. The unique (shop, providerMessageId) makes a
+ * redelivered webhook a no-op — replying twice is worse than not replying.
+ */
+async function queueJob(shop: string, phone: string, message: string, providerMessageId: string) {
+  try {
+    await prisma.whatsAppReplyJob.create({
+      data: { shop, phone, message, providerMessageId },
+    });
+  } catch (e: any) {
+    if (e?.code === "P2002") return; // already queued — duplicate delivery
+    throw e;
+  }
+}

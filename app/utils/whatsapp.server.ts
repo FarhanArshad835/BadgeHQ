@@ -203,6 +203,103 @@ export async function sendInteraktText(opts: {
   }
 }
 
+const DOUBLETICK_TEXT_URL = "https://public.doubletick.io/whatsapp/message/text";
+
+/**
+ * Send a free-text WhatsApp message via DoubleTick.
+ *
+ * Same 24-hour service window rule as Interakt — free-text is only allowed when
+ * the shopper messaged first, which is exactly the AI-reply case.
+ *
+ * Shape differs from Interakt in three ways: numbers are international (+91…),
+ * the body is flat ({from, to, content:{text}}) rather than {countryCode,
+ * phoneNumber, data}, and success is 201 with an empty body — so there is no
+ * per-message status to inspect the way sendDoubleTickTemplate does.
+ */
+export async function sendDoubleTickText(opts: {
+  apiKey: string;
+  phone: string;
+  fromNumber: string;
+  message: string;
+}): Promise<InteraktResult> {
+  const ten = toIndianTenDigit(opts.phone);
+  if (!ten) return { ok: false, error: "invalid-phone" };
+  if (!opts.apiKey) return { ok: false, error: "no-api-key" };
+  if (!opts.fromNumber) return { ok: false, error: "no-sender-number" };
+
+  const message = String(opts.message ?? "").trim().slice(0, MAX_TEXT_CHARS);
+  if (!message) return { ok: false, error: "empty-message" };
+
+  const from = opts.fromNumber.startsWith("+")
+    ? opts.fromNumber
+    : "+" + opts.fromNumber.replace(/\D/g, "");
+
+  try {
+    const res = await fetch(DOUBLETICK_TEXT_URL, {
+      method: "POST",
+      headers: {
+        Authorization: opts.apiKey, // raw key, no scheme prefix
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({ from, to: "+91" + ten, content: { text: message } }),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+
+    const text = await res.text().catch(() => "");
+    let body: any = null;
+    try {
+      body = text ? JSON.parse(text) : null;
+    } catch {
+      /* 201 carries no body, and errors may be non-JSON */
+    }
+
+    if (!res.ok) {
+      if (res.status === 401 || res.status === 403) {
+        console.error("[doubletick] text auth", res.status, text.slice(0, 200));
+        return { ok: false, error: "auth-failed (check the DoubleTick API key)" };
+      }
+      const detail = String(body?.message || body?.error || text || `http-${res.status}`).slice(0, 300);
+      // Name the 24h-window rejection so the cron marks it permanent instead of
+      // retrying a send that cannot succeed until the shopper writes again.
+      const outsideWindow = /24\s*hour|session|window|expired|not\s*open/i.test(detail);
+      console.error("[doubletick] text send failed", res.status, detail);
+      return { ok: false, error: outsideWindow ? `outside-window: ${detail}` : detail };
+    }
+
+    return { ok: true, messageId: body?.messageId ?? body?.dtMessageId };
+  } catch (e: any) {
+    const msg = e?.name === "TimeoutError" ? "timeout" : String(e?.message || e).slice(0, 200);
+    console.error("[doubletick] text threw", msg);
+    return { ok: false, error: msg };
+  }
+}
+
+/** Provider-agnostic free-text send, for AI replies. */
+export async function sendWhatsAppText(opts: {
+  provider: string;
+  apiKey: string;
+  phone: string;
+  message: string;
+  fromNumber?: string;
+  callbackData?: string;
+}): Promise<InteraktResult> {
+  if (opts.provider === "doubletick") {
+    return sendDoubleTickText({
+      apiKey: opts.apiKey,
+      phone: opts.phone,
+      fromNumber: opts.fromNumber || "",
+      message: opts.message,
+    });
+  }
+  return sendInteraktText({
+    apiKey: opts.apiKey,
+    phone: opts.phone,
+    message: opts.message,
+    callbackData: opts.callbackData,
+  });
+}
+
 /** Provider-agnostic send. Routes to whichever provider the merchant configured. */
 export async function sendWhatsAppTemplate(opts: {
   provider: string;
