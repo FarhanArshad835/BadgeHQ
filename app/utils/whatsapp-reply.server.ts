@@ -16,7 +16,12 @@ import { waitUntil } from "@vercel/functions";
 import prisma from "../db.server";
 import { buildSystemPrompt, callAi } from "./ai-replies.server";
 import { sendWhatsAppText } from "./whatsapp.server";
-import { HANDOFF_REPLY, appendTurns, loadTurns } from "./whatsapp-ai.server";
+import {
+  HANDOFF_REPLY,
+  appendTurns,
+  fetchDoubleTickThread,
+  loadTurns,
+} from "./whatsapp-ai.server";
 
 export const MAX_ATTEMPTS = 3;
 
@@ -116,6 +121,7 @@ async function handleJob(job: {
   shop: string;
   phone: string;
   message: string;
+  providerMessageId: string;
 }): Promise<JobResult> {
   const settings = await prisma.aiReplySettings.findUnique({ where: { shop: job.shop } });
   if (!settings?.waReplyEnabled || !settings.isEnabled || !settings.apiKey) {
@@ -153,13 +159,41 @@ async function handleJob(job: {
   // Muted after the job was queued — a human has the thread now.
   if (convo?.optedOut) return { ok: false, error: "opted-out", permanent: true };
 
-  const history = loadTurns(convo?.turns);
+  // "whatsapp" swaps markdown links for bare URLs — WhatsApp renders no markdown.
+  let system = buildSystemPrompt(settings, "whatsapp");
+  let history = loadTurns(convo?.turns);
+
+  // Give the LLM the REAL thread — human agent replies, the button-menu bot,
+  // everything — not just its own memory. Without this it walked blind into
+  // disputes a human was already handling and could contradict them. DoubleTick
+  // only (Interakt exposes no thread API); on fetch failure the bot's own
+  // stored turns remain as the fallback.
+  if (settings.waProvider === "doubletick") {
+    const thread = await fetchDoubleTickThread({
+      apiKey: settings.waApiKey,
+      wabaNumber: settings.waFromNumber,
+      customerNumber: "91" + job.phone,
+      excludeMessageId: job.providerMessageId,
+    });
+    if (thread) {
+      system +=
+        "\n\n=== RECENT WHATSAPP CONVERSATION (oldest first) ===\n" +
+        thread +
+        "\n=== END OF CONVERSATION ===\n" +
+        "Rules for using the conversation above:\n" +
+        "1. Continue this conversation naturally — do not repeat information already given.\n" +
+        "2. Messages from \"Store team (human)\" are a human colleague. NEVER contradict or overrule what they said. If the customer asks for something the human already declined or is handling, refer back to that and suggest they continue with the team.\n" +
+        "3. If the thread shows an ongoing dispute or order-specific problem, keep your reply brief and defer to the store team.";
+      // The thread supersedes the bot's own partial memory — sending both
+      // would duplicate content and spend tokens twice.
+      history = [];
+    }
+  }
 
   const ai = await callAi({
     provider: settings.aiProvider,
     apiKey: settings.apiKey,
-    // "whatsapp" swaps markdown links for bare URLs — WhatsApp renders no markdown.
-    system: buildSystemPrompt(settings, "whatsapp"),
+    system,
     history,
     message: job.message,
   });

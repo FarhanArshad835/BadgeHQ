@@ -230,6 +230,113 @@ export async function registerDoubleTickWebhook(opts: {
   }
 }
 
+/** Caps for the fetched thread — this rides on every LLM call, so bound it. */
+const THREAD_MAX_MESSAGES = 30;
+const THREAD_MAX_LINE_CHARS = 300;
+const THREAD_MAX_TOTAL_CHARS = 5000;
+
+/**
+ * Fetch the customer's REAL WhatsApp thread from DoubleTick and format it as a
+ * labelled transcript for the LLM — including human agent replies, the
+ * button-menu bot, templates, everything. The bot's own stored turns miss all
+ * of that, and a support thread's meaning usually lives in what the human
+ * agent already said (see: a missing-item dispute where the agent had already
+ * refused a refund the bot knew nothing about).
+ *
+ * Labels distinguish who spoke: API-sent messages carry "(Public API)" in
+ * senderUser.name, manual inbox replies don't — so "Store team (human)" vs
+ * "Store assistant". The LLM is told not to contradict the human.
+ *
+ * Bounded hard (newest ~30 messages, ~5k chars) because this is prompt input
+ * on every reply. GET /chat-messages is free; the cost is merchant LLM tokens.
+ * Returns null on any failure — callers fall back to the bot's own history.
+ */
+export async function fetchDoubleTickThread(opts: {
+  apiKey: string;
+  wabaNumber: string;
+  /** International, digits only, e.g. "919354991605". */
+  customerNumber: string;
+  /** dtMessageId of the message being answered — excluded, it's sent as the user turn. */
+  excludeMessageId?: string;
+}): Promise<string | null> {
+  const waba = opts.wabaNumber.replace(/\D/g, "");
+  const cust = opts.customerNumber.replace(/\D/g, "");
+  if (!opts.apiKey || !waba || !cust) return null;
+
+  // DD-MM-YYYY, last 3 days — bounds a chatty thread without losing the
+  // context that matters. Omitting dates returns the ENTIRE history.
+  const fmt = (d: Date) =>
+    `${String(d.getUTCDate()).padStart(2, "0")}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${d.getUTCFullYear()}`;
+  const now = Date.now();
+  const qs = new URLSearchParams({
+    wabaNumber: waba,
+    customerNumber: cust,
+    startDate: fmt(new Date(now - 3 * 86400_000)),
+    endDate: fmt(new Date(now + 86400_000)),
+  });
+
+  try {
+    const res = await fetch(`https://public.doubletick.io/chat-messages?${qs}`, {
+      headers: { Authorization: opts.apiKey, Accept: "application/json" },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) {
+      console.error("[dt-thread] fetch failed", res.status);
+      return null;
+    }
+    const data: any = await res.json();
+    const msgs: any[] = Array.isArray(data?.messages) ? data.messages : [];
+    if (!msgs.length) return null;
+
+    // Order is not guaranteed — sort, then keep the newest N.
+    msgs.sort((a, b) => (a?.messageTime ?? 0) - (b?.messageTime ?? 0));
+
+    const lines: string[] = [];
+    for (const m of msgs.slice(-THREAD_MAX_MESSAGES)) {
+      if (opts.excludeMessageId && m?.id === opts.excludeMessageId) continue;
+
+      const mm = m?.message ?? {};
+      const type = String(mm.messageType ?? mm.type ?? "").toLowerCase();
+      let text = "";
+      if (type === "text") text = String(mm.text ?? "");
+      else if (type === "button") text = `[tapped button: ${String(mm.text ?? "")}]`;
+      else if (type === "template") {
+        try {
+          text = String(mm.templateMessage.body.data[0].text ?? "");
+        } catch {
+          text = "[template message]";
+        }
+      } else if (type) text = `[${type}]`;
+      text = text.replace(/\s+/g, " ").trim();
+      if (!text) continue;
+
+      const senderName = String(m?.senderUser?.name ?? "").trim();
+      const label =
+        m?.messageOriginType === "CUSTOMER"
+          ? "Customer"
+          : senderName && !senderName.includes("(Public API)")
+          ? "Store team (human)"
+          : "Store assistant";
+
+      lines.push(`${label}: ${text.slice(0, THREAD_MAX_LINE_CHARS)}`);
+    }
+    if (!lines.length) return null;
+
+    // Enforce the total budget from the END — the newest context wins.
+    let total = 0;
+    const kept: string[] = [];
+    for (let i = lines.length - 1; i >= 0; i--) {
+      total += lines[i].length + 1;
+      if (total > THREAD_MAX_TOTAL_CHARS) break;
+      kept.unshift(lines[i]);
+    }
+    return kept.join("\n");
+  } catch (e: any) {
+    console.error("[dt-thread] threw", String(e?.message || e).slice(0, 150));
+    return null;
+  }
+}
+
 const STOP_WORDS = new Set([
   "stop",
   "unsubscribe",
