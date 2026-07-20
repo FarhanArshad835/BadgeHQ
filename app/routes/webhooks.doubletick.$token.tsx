@@ -5,9 +5,10 @@
  * budget (Gemini takes up to 15s, so this route only records the message and the
  * cron does the slow work), but two things differ:
  *
- *   1. DoubleTick signs nothing. Interakt HMACs the raw body; here we compare the
- *      bearer token DoubleTick echoes from our registration call. So there is no
- *      need to read the body as raw text first.
+ *   1. DoubleTick signs nothing, and despite documenting an `authorization`
+ *      option it discards it — deliveries carry no Authorization header at all.
+ *      So the unguessable URL token is the only credential, and there is no raw
+ *      body to read for an HMAC.
  *   2. Its payload is flat and marks direction with `status: "received"` rather
  *      than an event type.
  *
@@ -50,10 +51,25 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       return ack();
     }
 
-    // The only non-200. Checked before parsing so a forged body is never read.
-    if (!verifyDoubleTickAuth(request.headers.get("Authorization"), settings.waWebhookAuth)) {
-      console.warn(`[doubletick-webhook] bad auth for ${settings.shop}`);
-      return new Response("Invalid authorization", { status: 401 });
+    // Authentication is the URL token alone: findFirst above already proved a
+    // 24-byte random path segment matched this shop.
+    //
+    // DoubleTick's register API accepts an `authorization: {type:"BEARER"}`
+    // block and then silently DISCARDS it — the stored webhook record has no
+    // such field, and deliveries arrive with no Authorization header. Verified
+    // against a live account. So requiring a bearer token 401'd every genuine
+    // message. When they send one we check it, but its absence can't be fatal.
+    //
+    // This makes the URL the sole secret. It is never displayed for DoubleTick
+    // and travels only over TLS, but it does mean anyone who obtains it could
+    // feed us messages — which is why parseDoubleTickInbound stays strict and
+    // the per-shopper rate limit is enforced below.
+    const authHeader = request.headers.get("Authorization");
+    if (authHeader && settings.waWebhookAuth) {
+      if (!verifyDoubleTickAuth(authHeader, settings.waWebhookAuth)) {
+        console.warn(`[doubletick-webhook] bad auth for ${settings.shop}`);
+        return new Response("Invalid authorization", { status: 401 });
+      }
     }
 
     // Guard against a shop that switched providers but left this URL registered
