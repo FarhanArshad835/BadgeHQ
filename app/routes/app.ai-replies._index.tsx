@@ -155,11 +155,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   //
   // A registration failure must not lose the merchant's other edits, so it
   // downgrades to a warning and leaves waReplyEnabled off rather than aborting.
-  // The token is reused once minted, so re-saving re-registers the same URL
-  // rather than orphaning the previous one.
+  //
+  // Registered ONCE, not on every save. DoubleTick's register endpoint creates a
+  // new webhook per call — it does not replace by URL — so re-saving used to pile
+  // up duplicates that each deliver the same message. (Harmless downstream,
+  // since the unique (shop, providerMessageId) collapses them to one reply, but
+  // it wasted a request per duplicate and cluttered their dashboard.)
+  //
+  // waWebhookAuth is the marker: it exists only after a successful registration.
+  // Changing the sender number needs a re-register, so that forces one too.
   let waWebhookToken = existing?.waWebhookToken || "";
   let waWebhookAuth = existing?.waWebhookAuth || "";
-  if (wantsWa && !waBlocked && waProvider === "doubletick") {
+  const alreadyRegistered =
+    Boolean(existing?.waWebhookAuth) &&
+    existing?.waProvider === "doubletick" &&
+    existing?.waFromNumber === waFromNumber;
+  if (wantsWa && !waBlocked && waProvider === "doubletick" && !alreadyRegistered) {
     const base = (process.env.SHOPIFY_APP_URL || "").replace(/\/$/, "");
     if (!base) {
       waBlocked = "WhatsApp replies stayed off: the app URL isn't configured — contact support.";
@@ -580,8 +591,8 @@ export default function AiRepliesPage() {
                 {isDoubleTick ? (
                   d.hasWaAuth && d.webhookUrl ? (
                     <Text as="p" tone="subdued" variant="bodySm">
-                      Webhook registered with DoubleTick. Saving again re-registers it — do
-                      that if you change your sender number.
+                      Webhook registered with DoubleTick. It's registered once, not on
+                      every save — changing your sender number registers a new one.
                     </Text>
                   ) : (
                     <Text as="p" tone="subdued" variant="bodySm">
