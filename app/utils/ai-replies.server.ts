@@ -116,7 +116,17 @@ export async function callGemini(opts: {
         system_instruction: { parts: [{ text: opts.system }] },
         generationConfig: {
           temperature: 0.7,
-          maxOutputTokens: 1024,
+          // 2.5-flash is a REASONING model: internal thinking is billed against
+          // this budget before a single reply token is emitted. Measured ~350
+          // thinking tokens for a simple question against a 2.4k-char knowledge
+          // base, so 1024 left little headroom — a harder question exhausted it
+          // and Gemini returned HTTP 200 with an EMPTY candidate and
+          // finishReason MAX_TOKENS, which surfaced to shoppers as a generic
+          // failure. Replies are capped at a few lines by the prompt, so the
+          // extra budget is spent on thinking, not length.
+          maxOutputTokens: 3072,
+          // Cap the thinking itself so it can never crowd out the answer.
+          thinkingConfig: { thinkingBudget: 1024 },
           topP: 0.95,
           topK: 40,
         },
@@ -148,9 +158,17 @@ export async function callGemini(opts: {
     const data = await res.json();
     const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!text || !String(text).trim()) {
-      // Usually a safety block or an empty candidate.
-      console.error("[ai-replies] empty candidate:", JSON.stringify(data).slice(0, 300));
-      return { ok: false, error: "no-answer" };
+      // MAX_TOKENS with no text means thinking consumed the whole budget —
+      // a config problem on our side, not a safety block, and worth telling
+      // apart because the fix is different.
+      const finish = data?.candidates?.[0]?.finishReason;
+      console.error(
+        "[ai-replies] empty candidate",
+        finish,
+        "thoughts=" + (data?.usageMetadata?.thoughtsTokenCount ?? "?"),
+        JSON.stringify(data).slice(0, 200),
+      );
+      return { ok: false, error: finish === "MAX_TOKENS" ? "thinking-overflow" : "no-answer" };
     }
     return { ok: true, text: String(text).trim() };
   } catch (e: any) {
