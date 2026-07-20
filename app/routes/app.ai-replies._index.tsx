@@ -43,6 +43,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
     // WhatsApp inbound replies. Secrets follow the same rule as the Gemini key:
     // only ever "is one saved" plus the last 4 characters.
+    // What is actually STORED, so the page can state plainly whether WhatsApp
+    // replies are live. Without this a merchant who ticked everything has no way
+    // to tell a saved config from one the server refused.
     waReplyEnabled: s?.waReplyEnabled ?? false,
     waProvider: s?.waProvider ?? "interakt",
     hasWaKey: Boolean(s?.waApiKey),
@@ -470,6 +473,28 @@ export default function AiRepliesPage() {
                   hours of the customer's message are free on WhatsApp — you only pay for
                   Gemini usage.
                 </Text>
+
+                {/* Reads from what's SAVED, never from the form state — the
+                    point is to show what the server actually has. */}
+                <Banner tone={d.waReplyEnabled ? "success" : "warning"}>
+                  <BlockStack gap="100">
+                    <Text as="p" fontWeight="semibold">
+                      {d.waReplyEnabled
+                        ? "WhatsApp replies are live."
+                        : "WhatsApp replies are not running."}
+                    </Text>
+                    <Text as="p" variant="bodySm">
+                      Saved: {d.waProvider === "doubletick" ? "DoubleTick" : "Interakt"}
+                      {" · "}
+                      API key {d.hasWaKey ? `ending ${d.waKeyPreview}` : "not saved"}
+                      {d.waProvider === "doubletick"
+                        ? ` · sender ${d.waFromNumber || "not saved"} · webhook ${
+                            d.hasWaAuth ? "registered" : "not registered"
+                          }`
+                        : ` · webhook secret ${d.hasWaSecret ? "saved" : "not saved"}`}
+                    </Text>
+                  </BlockStack>
+                </Banner>
 
                 <Select
                   label="WhatsApp provider"
