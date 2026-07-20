@@ -75,6 +75,12 @@ export function buildSystemPrompt(s: AiSettings, channel: AiChannel = "web"): st
           "You are replying on WhatsApp. Reply in plain text with no markdown at all — markdown is not rendered there and would show as literal characters.",
           "Write any link as a bare URL on its own, e.g. https://example.com/returns. Only use URLs that appear in the store information above.",
           "Keep it to a few short lines; this is a phone screen.",
+          "",
+          "ESCALATION — you cannot see live order status, tracking events or courier updates, so you cannot resolve order-specific problems. When the customer has one (delayed or failed delivery, missing or damaged items, refund status) or is clearly frustrated:",
+          "- Do NOT keep asking questions. At most ONE clarifying question in the whole conversation, and only if genuinely needed.",
+          "- Never ask for anything already visible in the conversation — order numbers, tracking status, things they already told you. Re-asking reads as not listening and makes upset customers angrier.",
+          "- Apologize once, say the team will take it from here, and end your reply with the exact token [HANDOFF] — nothing after it. This silences you for this customer so a human can take over without you interrupting.",
+          "- Prefer escalating on the FIRST message of a complaint rather than after a back-and-forth. A fast handoff satisfies; an interrogation does not.",
         ]
       : [
           "Reply in plain text. Do not use markdown formatting, EXCEPT links.",

@@ -206,7 +206,18 @@ async function handleJob(job: {
     return { ok: false, error: `${settings.aiProvider}:${ai.error}`, permanent };
   }
 
-  const wa = await send(ai.text, "badgehq-ai");
+  // The model ends its reply with [HANDOFF] when it decides a human must take
+  // over (order-specific problem, frustrated customer). The token never
+  // reaches the shopper; it mutes the bot for this thread below, exactly like
+  // the customer typing "agent" — a human replies undisturbed, and "start"
+  // resumes the bot. Learned from a live thread where the bot interrogated an
+  // angry customer for six turns before escalating.
+  const handoff = ai.text.includes("[HANDOFF]");
+  const replyText =
+    ai.text.replace(/\s*\[HANDOFF\]\s*/g, " ").replace(/\s+$/g, "").trim() ||
+    "Our team will take it from here and reply to you shortly.";
+
+  const wa = await send(replyText, handoff ? "badgehq-ai-handoff" : "badgehq-ai");
 
   if (!wa.ok) {
     // Outside the 24h service window a free-text send is refused by either
@@ -222,9 +233,14 @@ async function handleJob(job: {
     create: {
       shop: job.shop,
       phone: job.phone,
-      turns: appendTurns([], job.message, ai.text),
+      turns: appendTurns([], job.message, replyText),
+      optedOut: handoff,
     },
-    update: { turns: appendTurns(history, job.message, ai.text) },
+    update: {
+      turns: appendTurns(history, job.message, replyText),
+      // One-way here: only the customer's "start" (or the merchant) unmutes.
+      ...(handoff ? { optedOut: true } : {}),
+    },
   });
 
   return { ok: true };
