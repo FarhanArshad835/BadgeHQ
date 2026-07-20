@@ -283,6 +283,12 @@ model AiReplySettings {
   // registration, so that token is what we verify instead of an HMAC.
   waFromNumber    String  @default("")
   waWebhookAuth   String  @default("")
+  // Hard ceiling on AI replies per UTC day. Free LLM tiers are capped by
+  // TOKENS per day, not requests (Groq: 100K/day), and a chatty thread spends
+  // ~1.3K input tokens per reply — so a busy afternoon can exhaust the quota
+  // and silence the bot for everyone until midnight. 150 keeps a normal day
+  // inside the budget; 0 disables the cap.
+  waDailyLimit    Int     @default(150)
 
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt

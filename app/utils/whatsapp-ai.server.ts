@@ -230,10 +230,18 @@ export async function registerDoubleTickWebhook(opts: {
   }
 }
 
-/** Caps for the fetched thread — this rides on every LLM call, so bound it. */
-const THREAD_MAX_MESSAGES = 30;
-const THREAD_MAX_LINE_CHARS = 300;
-const THREAD_MAX_TOTAL_CHARS = 5000;
+/**
+ * Caps for the fetched thread. This rides on EVERY llm call, so it dominates
+ * token spend: measured live, 72 replies burned 92.3K input tokens against a
+ * 100K/day free-tier ceiling — 33x more input than output. The first cut of
+ * these caps (30 messages / 5000 chars) was set by what reads well, not by
+ * what a daily budget allows. These are set by the budget: ~1200 chars is
+ * ~300 tokens, which keeps a reply near 350 input tokens total and a day's
+ * traffic inside the cap with room to spare.
+ */
+const THREAD_MAX_MESSAGES = 8;
+const THREAD_MAX_LINE_CHARS = 160;
+const THREAD_MAX_TOTAL_CHARS = 1200;
 
 /**
  * Fetch the customer's REAL WhatsApp thread from DoubleTick and format it as a

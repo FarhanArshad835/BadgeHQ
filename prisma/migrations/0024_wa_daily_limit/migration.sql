@@ -1,0 +1,14 @@
+-- Cap AI replies per UTC day, per shop.
+--
+-- Free LLM tiers are bounded by TOKENS per day rather than request count
+-- (Groq free: 100K/day). With conversation context attached, one reply costs
+-- roughly 1.3K input tokens, so ~75 replies can consume an entire day's quota
+-- and leave the bot silent until UTC midnight. Measured live on 2026-07-20:
+-- 72 requests -> 95.1K tokens (92.3K of it input).
+--
+-- 150 is a deliberately loose default: high enough that a normal support day
+-- never notices it, low enough that a flood or a loop cannot drain the quota.
+-- 0 disables the cap for merchants on a paid tier.
+--
+-- Idempotent, matching every migration since 0008.
+ALTER TABLE "AiReplySettings" ADD COLUMN IF NOT EXISTS "waDailyLimit" INTEGER NOT NULL DEFAULT 150;

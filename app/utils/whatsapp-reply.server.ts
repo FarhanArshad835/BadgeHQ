@@ -159,6 +159,23 @@ async function handleJob(job: {
   // Muted after the job was queued — a human has the thread now.
   if (convo?.optedOut) return { ok: false, error: "opted-out", permanent: true };
 
+  // Daily ceiling, checked BEFORE the LLM call — the whole point is to not
+  // spend the token that would break the budget. Free tiers cap tokens per
+  // day, and one exhausted quota silences the bot for every customer until
+  // UTC midnight, so refusing one reply is much cheaper than refusing all of
+  // tomorrow morning's.
+  if (settings.waDailyLimit > 0) {
+    const since = new Date();
+    since.setUTCHours(0, 0, 0, 0);
+    const today = await prisma.whatsAppReplyJob.count({
+      where: { shop: job.shop, status: "done", updatedAt: { gte: since } },
+    });
+    if (today >= settings.waDailyLimit) {
+      console.warn(`[wa-reply] daily limit ${settings.waDailyLimit} reached for ${job.shop}`);
+      return { ok: false, error: "daily-limit", permanent: true };
+    }
+  }
+
   // "whatsapp" swaps markdown links for bare URLs — WhatsApp renders no markdown.
   let system = buildSystemPrompt(settings, "whatsapp");
   let history = loadTurns(convo?.turns);
