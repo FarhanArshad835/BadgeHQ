@@ -14,6 +14,7 @@ import {
   Checkbox,
   Banner,
   Button,
+  Badge,
   List,
 } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
@@ -24,6 +25,9 @@ import { buildSystemPrompt, callGemini } from "../utils/ai-replies.server";
 import { generateWebhookToken, registerDoubleTickWebhook } from "../utils/whatsapp-ai.server";
 
 const POSITIONS = ["bottom-right", "bottom-left"];
+
+/** Explicit "empty the knowledge base" signal, since blank now means "keep". */
+const CLEAR_KNOWLEDGE = "__badgehq_clear_knowledge__";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -93,6 +97,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           ? "Gemini didn't respond in time. Try again."
           : "Couldn't reach Gemini. Check the key and try again.",
     });
+  }
+
+  // The only way to empty the knowledge base, now that a blank field means
+  // "keep". Confirmed in the UI before it gets here.
+  if (formData.get("intent") === "clear-knowledge") {
+    await prisma.aiReplySettings.update({
+      where: { shop },
+      data: { knowledge: "" },
+    });
+    await bumpConfigVersion(shop);
+    return json({ success: true });
   }
 
   // Generate or rotate the per-shop webhook token. Rotation immediately breaks
@@ -202,7 +217,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       waFromNumber,
       waWebhookToken,
       waWebhookAuth,
-      knowledge: String(data.knowledge ?? "").slice(0, 20000),
+      // Blank means "keep what's saved", the same rule the API keys follow.
+      // Without this, one save submitted from a stale or not-yet-hydrated form
+      // silently wiped the whole knowledge base, and the bot kept answering
+      // "I don't have that detail" with no indication why. Clearing it
+      // deliberately is done with the Clear button, which sends a sentinel.
+      knowledge:
+        data.knowledge === CLEAR_KNOWLEDGE
+          ? ""
+          : String(data.knowledge ?? "").trim()
+          ? String(data.knowledge).slice(0, 20000)
+          : existing?.knowledge ?? "",
       botName: text(data.botName, "Support", 60),
       greeting: text(data.greeting, "Hi! Ask me about shipping, returns or sizing.", 300),
       supportEmail: text(data.supportEmail, "", 200),
@@ -425,7 +450,16 @@ export default function AiRepliesPage() {
 
             <Card>
               <BlockStack gap="400">
-                <Text as="h2" variant="headingMd">Store information</Text>
+                <InlineStack align="space-between" blockAlign="center">
+                  <Text as="h2" variant="headingMd">Store information</Text>
+                  {/* From the loader, so it reflects what's actually stored —
+                      the one signal that the bot has anything to answer from. */}
+                  <Badge tone={d.knowledge.length ? "success" : "critical"}>
+                    {d.knowledge.length
+                      ? `${d.knowledge.length} characters saved`
+                      : "Empty — the assistant can't answer anything"}
+                  </Badge>
+                </InlineStack>
                 <Text as="p" tone="subdued">
                   Everything the assistant is allowed to answer from: shipping times, returns
                   and exchanges, sizing, payment methods, current offers, contact details.
@@ -443,8 +477,23 @@ export default function AiRepliesPage() {
                     "RETURNS\n7 day return window. Items must be unused with tags attached...\n\n" +
                     "SIZING\nSee our size chart at /pages/size-chart..."
                   }
-                  helpText="Plain text. Keep it accurate — the assistant repeats what you write here."
+                  helpText="Plain text. Keep it accurate — the assistant repeats what you write here. Leaving this blank keeps your saved text; use Clear to empty it."
                 />
+                {d.knowledge.length > 0 && (
+                  <InlineStack gap="200" blockAlign="center">
+                    <Button
+                      tone="critical"
+                      variant="plain"
+                      onClick={() => {
+                        if (window.confirm("Delete all saved store information? The assistant will stop answering questions.")) {
+                          submit({ intent: "clear-knowledge" }, { method: "POST" });
+                        }
+                      }}
+                    >
+                      Clear saved store information
+                    </Button>
+                  </InlineStack>
+                )}
               </BlockStack>
             </Card>
 
