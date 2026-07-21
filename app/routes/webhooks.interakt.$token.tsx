@@ -24,6 +24,7 @@ import {
   RATE_LIMIT_PER_HOUR,
   RATE_WINDOW_MS,
   checkOptOut,
+  isMuted,
   parseInboundMessage,
   verifyInteraktSignature,
 } from "../utils/whatsapp-ai.server";
@@ -104,8 +105,10 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     if (optOut) {
       await prisma.whatsAppConversation.upsert({
         where: { shop_phone: { shop, phone } },
-        create: { shop, phone, optedOut: optOut === "stop", lastInboundAt: now },
-        update: { optedOut: optOut === "stop", lastInboundAt: now },
+        // An explicit stop/start is PERMANENT — mutedUntil stays null, which is
+        // what distinguishes it from the bot muting itself after a handoff.
+        create: { shop, phone, optedOut: optOut === "stop", mutedUntil: null, lastInboundAt: now },
+        update: { optedOut: optOut === "stop", mutedUntil: null, lastInboundAt: now },
       });
       if (optOut === "stop") {
         // Acknowledge once, via a job so the send stays off this 3s path.
@@ -116,7 +119,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     }
 
     // Muted: a human is handling this thread in Interakt's inbox.
-    if (convo?.optedOut) return ack();
+    if (isMuted(convo)) return ack();
 
     // Rate limit per shopper. Enforced HERE rather than in the cron so a flood
     // never even creates rows.

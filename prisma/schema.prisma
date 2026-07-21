@@ -320,7 +320,15 @@ model WhatsAppConversation {
   shop          String
   phone         String // normalised 10-digit — the conversation key
   turns         String   @default("[]") // JSON ChatTurn[]; capped via trimHistory()
-  optedOut      Boolean  @default(false) // handoff keyword sent; bot stays silent
+  // Bot silenced for this shopper. Two sources with different lifetimes:
+  //  - the shopper typed "stop"/"agent": permanent until they type "start"
+  //  - the bot escalated a complaint itself: temporary, see mutedUntil
+  optedOut      Boolean  @default(false)
+  // When an automatic handoff mute expires. Null means permanent (an explicit
+  // opt-out). Without this a single complaint silenced the bot for that number
+  // forever, including for unrelated questions weeks later, because no real
+  // shopper knows to type "start".
+  mutedUntil    DateTime?
   windowCount   Int      @default(0) // replies sent in the current rate-limit window
   windowStart   DateTime @default(now())
   lastInboundAt DateTime @default(now())

@@ -26,6 +26,7 @@ import {
   RATE_LIMIT_PER_HOUR,
   RATE_WINDOW_MS,
   checkOptOut,
+  isMuted,
   parseDoubleTickInbound,
   verifyDoubleTickAuth,
 } from "../utils/whatsapp-ai.server";
@@ -114,8 +115,10 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     if (optOut) {
       await prisma.whatsAppConversation.upsert({
         where: { shop_phone: { shop, phone } },
-        create: { shop, phone, optedOut: optOut === "stop", lastInboundAt: now },
-        update: { optedOut: optOut === "stop", lastInboundAt: now },
+        // An explicit stop/start is PERMANENT — mutedUntil stays null, which is
+        // what distinguishes it from the bot muting itself after a handoff.
+        create: { shop, phone, optedOut: optOut === "stop", mutedUntil: null, lastInboundAt: now },
+        update: { optedOut: optOut === "stop", mutedUntil: null, lastInboundAt: now },
       });
       if (optOut === "stop") {
         const jobId = await queueJob(shop, phone, "__handoff__", inbound.messageId);
@@ -125,7 +128,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     }
 
     // Muted: a human has this thread in DoubleTick's inbox.
-    if (convo?.optedOut) return ack();
+    if (isMuted(convo)) return ack();
 
     // Rate limit per shopper, enforced here so a flood never creates rows.
     const windowExpired = !convo || now.getTime() - convo.windowStart.getTime() > RATE_WINDOW_MS;

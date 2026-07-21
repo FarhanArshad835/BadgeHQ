@@ -20,6 +20,29 @@ export const RATE_WINDOW_MS = 60 * 60 * 1000;
 export const PURGE_AFTER_HOURS = 24;
 
 /**
+ * How long an AUTOMATIC handoff mute lasts.
+ *
+ * When the bot escalates a complaint it mutes itself so a human can work the
+ * thread without interruption. That mute used to be permanent, clearable only
+ * by the shopper typing "start" — which no real shopper knows to do. So one
+ * complaint silenced the bot for that number forever, including for unrelated
+ * questions weeks later.
+ *
+ * 12 hours covers a working day: long enough that the team finishes the
+ * conversation undisturbed, short enough that the next unrelated question gets
+ * answered. An explicit "stop" from the shopper stays permanent.
+ */
+export const HANDOFF_MUTE_HOURS = 12;
+
+/** True when the bot must stay silent for this conversation right now. */
+export function isMuted(convo: { optedOut: boolean; mutedUntil?: Date | null } | null): boolean {
+  if (!convo?.optedOut) return false;
+  // null = permanent (explicit opt-out); a date = automatic, expires.
+  if (!convo.mutedUntil) return true;
+  return convo.mutedUntil.getTime() > Date.now();
+}
+
+/**
  * Verify Interakt's `Interakt-Signature` header: "sha256=" + hex HMAC-SHA256 of
  * the RAW request body, keyed with the merchant's secret.
  *

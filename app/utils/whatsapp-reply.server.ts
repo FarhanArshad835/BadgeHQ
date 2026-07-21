@@ -17,9 +17,11 @@ import prisma from "../db.server";
 import { buildSystemPrompt, callAi } from "./ai-replies.server";
 import { sendWhatsAppText } from "./whatsapp.server";
 import {
+  HANDOFF_MUTE_HOURS,
   HANDOFF_REPLY,
   appendTurns,
   fetchDoubleTickThread,
+  isMuted,
   loadTurns,
 } from "./whatsapp-ai.server";
 
@@ -157,7 +159,7 @@ async function handleJob(job: {
     where: { shop_phone: { shop: job.shop, phone: job.phone } },
   });
   // Muted after the job was queued — a human has the thread now.
-  if (convo?.optedOut) return { ok: false, error: "opted-out", permanent: true };
+  if (isMuted(convo)) return { ok: false, error: "opted-out", permanent: true };
 
   // Daily ceiling, checked BEFORE the LLM call — the whole point is to not
   // spend the token that would break the budget. Free tiers cap tokens per
@@ -165,8 +167,15 @@ async function handleJob(job: {
   // UTC midnight, so refusing one reply is much cheaper than refusing all of
   // tomorrow morning's.
   if (settings.waDailyLimit > 0) {
-    const since = new Date();
-    since.setUTCHours(0, 0, 0, 0);
+    // Day boundary in IST, not UTC. UTC midnight is 05:30 IST, so a UTC day
+    // splits an Indian working day in half: the cap would reset mid-morning
+    // and the previous evening's replies would count against it. Every shop
+    // using this is +91-only (see toIndianTenDigit), so IST is the right
+    // boundary rather than a per-shop setting.
+    const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+    const nowIst = new Date(Date.now() + IST_OFFSET_MS);
+    nowIst.setUTCHours(0, 0, 0, 0);
+    const since = new Date(nowIst.getTime() - IST_OFFSET_MS);
     const today = await prisma.whatsAppReplyJob.count({
       where: { shop: job.shop, status: "done", updatedAt: { gte: since } },
     });
@@ -256,11 +265,17 @@ async function handleJob(job: {
       phone: job.phone,
       turns: appendTurns([], job.message, replyText),
       optedOut: handoff,
+      mutedUntil: handoff ? new Date(Date.now() + HANDOFF_MUTE_HOURS * 3600_000) : null,
     },
     update: {
       turns: appendTurns(history, job.message, replyText),
-      // One-way here: only the customer's "start" (or the merchant) unmutes.
-      ...(handoff ? { optedOut: true } : {}),
+      // Automatic mute EXPIRES — an explicit "stop" from the shopper does not
+      // (that path leaves mutedUntil null). Permanent was wrong: no shopper
+      // knows to type "start", so one complaint silenced the bot for that
+      // number forever, including for unrelated questions later.
+      ...(handoff
+        ? { optedOut: true, mutedUntil: new Date(Date.now() + HANDOFF_MUTE_HOURS * 3600_000) }
+        : {}),
     },
   });
 
