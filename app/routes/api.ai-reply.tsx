@@ -71,7 +71,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const result = await callAi({
     provider: settings.aiProvider,
     apiKey: settings.apiKey,
-    system: buildSystemPrompt(settings),
+    system: buildSystemPrompt(settings, "web", message),
     history: trimHistory(body?.history),
     message,
   });

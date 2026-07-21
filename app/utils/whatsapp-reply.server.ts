@@ -177,7 +177,7 @@ async function handleJob(job: {
   }
 
   // "whatsapp" swaps markdown links for bare URLs — WhatsApp renders no markdown.
-  let system = buildSystemPrompt(settings, "whatsapp");
+  let system = buildSystemPrompt(settings, "whatsapp", job.message);
   let history = loadTurns(convo?.turns);
 
   // Give the LLM the REAL thread — human agent replies, the button-menu bot,

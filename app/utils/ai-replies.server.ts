@@ -45,7 +45,64 @@ export type AiChannel = "web" | "whatsapp";
  * markdown links into anchors, but WhatsApp has no markdown, so the same
  * instruction there would render a literal "[Returns](https://…)".
  */
-export function buildSystemPrompt(s: AiSettings, channel: AiChannel = "web"): string {
+/**
+ * Pick the knowledge-base sections worth sending for this question.
+ *
+ * The knowledge base is the single biggest token cost: it rides on EVERY call,
+ * and at ~2.4k chars it was ~670 of the ~1580 tokens a reply consumed — more
+ * than the conversation history. Most of it is irrelevant to any one question:
+ * a shopper asking about sizing does not need the returns process.
+ *
+ * Keyword match, not AI — an extra model call to save model calls would be
+ * self-defeating. Sections are split on markdown headings, which is how these
+ * knowledge bases are already written.
+ *
+ * Deliberately generous: any section that MIGHT be relevant is kept, and if
+ * nothing matches (or the text has no headings) the whole thing is sent. A
+ * wrong answer costs far more than a few hundred tokens, so this only trims
+ * what is clearly unrelated.
+ */
+export function selectKnowledge(knowledge: string, question: string): string {
+  const text = String(knowledge || "");
+  if (text.length < 1200) return text; // too small to be worth splitting
+
+  // Split on markdown headings, keeping the heading with its body.
+  const parts = text.split(/\n(?=#{1,3}\s)/);
+  if (parts.length < 3) return text;
+
+  const q = question.toLowerCase();
+  const words = q.match(/[a-z]{4,}/g) || [];
+  if (!words.length) return text;
+
+  // Always keep the preamble (anything before the first heading) — it usually
+  // holds the brand rules and contact details that apply to every answer.
+  const preamble = /^#{1,3}\s/.test(parts[0]) ? "" : parts.shift() || "";
+
+  const scored = parts.map((section) => {
+    const lower = section.toLowerCase();
+    let score = 0;
+    for (const w of words) if (lower.includes(w)) score++;
+    return { section, score };
+  });
+
+  const hits = scored.filter((x) => x.score > 0);
+  // No section matched: the question may be phrased unlike the source text, so
+  // send everything rather than answer from a partial view.
+  if (!hits.length) return text;
+
+  hits.sort((a, b) => b.score - a.score);
+  const kept = hits.slice(0, 4).map((x) => x.section);
+
+  const out = [preamble, ...kept].filter(Boolean).join("\n").trim();
+  // Never let "trimming" produce something larger than the original.
+  return out.length < text.length ? out : text;
+}
+
+export function buildSystemPrompt(
+  s: AiSettings,
+  channel: AiChannel = "web",
+  question?: string,
+): string {
   const contact = [
     s.supportEmail ? `email ${s.supportEmail}` : "",
     s.supportUrl ? `or use ${s.supportUrl}` : "",
@@ -57,7 +114,8 @@ export function buildSystemPrompt(s: AiSettings, channel: AiChannel = "web"): st
     `You are ${s.botName || "Support"}, a customer support assistant for this online store.`,
     "",
     "=== STORE INFORMATION (your only source of truth) ===",
-    s.knowledge || "(The merchant has not provided any store information yet.)",
+    (question ? selectKnowledge(s.knowledge, question) : s.knowledge) ||
+      "(The merchant has not provided any store information yet.)",
     "",
     "=== RULES ===",
     "1. Answer ONLY from the store information above.",

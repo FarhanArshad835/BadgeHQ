@@ -84,7 +84,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const result = await callAi({
       provider: s.aiProvider,
       apiKey: s.apiKey,
-      system: buildSystemPrompt(s),
+      system: buildSystemPrompt(s, "web", question),
       history: [],
       message: question.slice(0, 1000),
     });
