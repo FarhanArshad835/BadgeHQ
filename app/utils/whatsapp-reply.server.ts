@@ -191,6 +191,10 @@ async function handleJob(job: {
       wabaNumber: settings.waFromNumber,
       customerNumber: "91" + job.phone,
       excludeMessageId: job.providerMessageId,
+      recent: settings.waThreadRecent,
+      opening: settings.waThreadOpening,
+      maxLineChars: settings.waThreadLineChars,
+      maxTotalChars: settings.waThreadTotalChars,
     });
     if (thread) {
       system +=

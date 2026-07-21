@@ -26,6 +26,14 @@ import { generateWebhookToken, registerDoubleTickWebhook } from "../utils/whatsa
 
 const POSITIONS = ["bottom-right", "bottom-left"];
 
+/** Parse a numeric setting, falling back on anything unparseable and clamping
+ *  to a sane range — these fields spend the merchant's LLM quota. */
+function intIn(v: unknown, fallback: number, min: number, max: number): number {
+  const n = parseInt(String(v ?? ""), 10);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
+}
+
 /** Explicit "empty the knowledge base" signal, since blank now means "keep". */
 const CLEAR_KNOWLEDGE = "__badgehq_clear_knowledge__";
 
@@ -53,6 +61,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     // to tell a saved config from one the server refused.
     waReplyEnabled: s?.waReplyEnabled ?? false,
     waProvider: s?.waProvider ?? "interakt",
+    // Cost controls. Sent as strings so the number fields stay editable while
+    // the merchant is mid-typing (a bare number would coerce "" back to 0).
+    waDailyLimit: String(s?.waDailyLimit ?? 2000),
+    waThreadRecent: String(s?.waThreadRecent ?? 20),
+    waThreadOpening: String(s?.waThreadOpening ?? 4),
+    waThreadLineChars: String(s?.waThreadLineChars ?? 400),
+    waThreadTotalChars: String(s?.waThreadTotalChars ?? 4000),
     hasWaKey: Boolean(s?.waApiKey),
     waKeyPreview: s?.waApiKey ? s.waApiKey.slice(-4) : "",
     hasWaSecret: Boolean(s?.waWebhookSecret),
@@ -228,6 +243,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       waFromNumber,
       waWebhookToken,
       waWebhookAuth,
+      // Cost controls, clamped server-side: a stray keystroke here spends the
+      // merchant's LLM quota, and 0 in a thread field would send no context at
+      // all, which reads to a shopper as a bot that ignores them.
+      waDailyLimit: intIn(data.waDailyLimit, 2000, 0, 100000),
+      waThreadRecent: intIn(data.waThreadRecent, 20, 1, 100),
+      waThreadOpening: intIn(data.waThreadOpening, 4, 0, 20),
+      waThreadLineChars: intIn(data.waThreadLineChars, 400, 40, 2000),
+      waThreadTotalChars: intIn(data.waThreadTotalChars, 4000, 200, 20000),
       // Blank means "keep what's saved", the same rule the API keys follow.
       // Without this, one save submitted from a stale or not-yet-hydrated form
       // silently wiped the whole knowledge base, and the bot kept answering
@@ -294,6 +317,11 @@ export default function AiRepliesPage() {
     position: d.position,
     waReplyEnabled: d.waReplyEnabled,
     waProvider: d.waProvider,
+    waDailyLimit: d.waDailyLimit,
+    waThreadRecent: d.waThreadRecent,
+    waThreadOpening: d.waThreadOpening,
+    waThreadLineChars: d.waThreadLineChars,
+    waThreadTotalChars: d.waThreadTotalChars,
     waApiKey: "",
     waWebhookSecret: "",
     waFromNumber: d.waFromNumber,
@@ -303,6 +331,11 @@ export default function AiRepliesPage() {
   const [aiProvider, setAiProvider] = useState(initial.aiProvider);
   const [waReplyEnabled, setWaReplyEnabled] = useState(initial.waReplyEnabled);
   const [waProvider, setWaProvider] = useState(initial.waProvider);
+  const [waDailyLimit, setWaDailyLimit] = useState(initial.waDailyLimit);
+  const [waThreadRecent, setWaThreadRecent] = useState(initial.waThreadRecent);
+  const [waThreadOpening, setWaThreadOpening] = useState(initial.waThreadOpening);
+  const [waThreadLineChars, setWaThreadLineChars] = useState(initial.waThreadLineChars);
+  const [waThreadTotalChars, setWaThreadTotalChars] = useState(initial.waThreadTotalChars);
   const [waApiKey, setWaApiKey] = useState(initial.waApiKey);
   const [waWebhookSecret, setWaWebhookSecret] = useState(initial.waWebhookSecret);
   const [waFromNumber, setWaFromNumber] = useState(initial.waFromNumber);
@@ -330,6 +363,11 @@ export default function AiRepliesPage() {
     position !== initial.position ||
     waReplyEnabled !== initial.waReplyEnabled ||
     waProvider !== initial.waProvider ||
+    waDailyLimit !== initial.waDailyLimit ||
+    waThreadRecent !== initial.waThreadRecent ||
+    waThreadOpening !== initial.waThreadOpening ||
+    waThreadLineChars !== initial.waThreadLineChars ||
+    waThreadTotalChars !== initial.waThreadTotalChars ||
     waApiKey !== initial.waApiKey ||
     waWebhookSecret !== initial.waWebhookSecret ||
     waFromNumber !== initial.waFromNumber;
@@ -361,6 +399,11 @@ export default function AiRepliesPage() {
     setPosition(initial.position);
     setWaReplyEnabled(initial.waReplyEnabled);
     setWaProvider(initial.waProvider);
+    setWaDailyLimit(initial.waDailyLimit);
+    setWaThreadRecent(initial.waThreadRecent);
+    setWaThreadOpening(initial.waThreadOpening);
+    setWaThreadLineChars(initial.waThreadLineChars);
+    setWaThreadTotalChars(initial.waThreadTotalChars);
     setWaApiKey(initial.waApiKey);
     setWaWebhookSecret(initial.waWebhookSecret);
     setWaFromNumber(initial.waFromNumber);
@@ -382,6 +425,11 @@ export default function AiRepliesPage() {
           position,
           waReplyEnabled,
           waProvider,
+          waDailyLimit,
+          waThreadRecent,
+          waThreadOpening,
+          waThreadLineChars,
+          waThreadTotalChars,
           waApiKey,
           waWebhookSecret,
           waFromNumber,
@@ -739,6 +787,96 @@ export default function AiRepliesPage() {
                   does not pause it automatically. Photos and voice notes are ignored, and
                   only Indian (+91) numbers are supported.
                 </Text>
+              </BlockStack>
+            </Card>
+
+            <Card>
+              <BlockStack gap="400">
+                <Text as="h2" variant="headingMd">Cost controls</Text>
+                <Text as="p" tone="subdued">
+                  Every reply sends your store information plus recent conversation history to
+                  the AI, and that history is what stops the bot asking things the customer has
+                  already answered. These limits cap what one reply can cost. Raise them for
+                  better answers, lower them to stretch a free tier.
+                </Text>
+
+                <TextField
+                  label="Maximum replies per day"
+                  type="number"
+                  value={waDailyLimit}
+                  onChange={setWaDailyLimit}
+                  autoComplete="off"
+                  helpText="Counts replies, not conversations — one thread often runs 8 to 20 replies. 2000 covers roughly 250 conversations a day. Set 0 for no limit."
+                />
+
+                <InlineStack gap="400" wrap={false}>
+                  <div style={{ flex: 1 }}>
+                    <TextField
+                      label="Recent messages to include"
+                      type="number"
+                      value={waThreadRecent}
+                      onChange={setWaThreadRecent}
+                      autoComplete="off"
+                      helpText="Newest messages sent with each reply."
+                    />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <TextField
+                      label="Opening messages to keep"
+                      type="number"
+                      value={waThreadOpening}
+                      onChange={setWaThreadOpening}
+                      autoComplete="off"
+                      helpText="From the start of a long thread, where the order number usually is. 0 to skip."
+                    />
+                  </div>
+                </InlineStack>
+
+                <InlineStack gap="400" wrap={false}>
+                  <div style={{ flex: 1 }}>
+                    <TextField
+                      label="Characters per message"
+                      type="number"
+                      value={waThreadLineChars}
+                      onChange={setWaThreadLineChars}
+                      autoComplete="off"
+                      helpText="Longer messages are trimmed to this."
+                    />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <TextField
+                      label="Total history characters"
+                      type="number"
+                      value={waThreadTotalChars}
+                      onChange={setWaThreadTotalChars}
+                      autoComplete="off"
+                      helpText="Overall ceiling. ~3.6 characters is 1 token."
+                    />
+                  </div>
+                </InlineStack>
+
+                <Banner tone="info">
+                  Roughly{" "}
+                  <strong>
+                    {Math.round(
+                      (Number(waThreadTotalChars) || 0) / 3.6 +
+                        (d.knowledge.length || 0) / 3.6 +
+                        580,
+                    )}{" "}
+                    tokens
+                  </strong>{" "}
+                  per reply at these settings, with your {d.knowledge.length}-character store
+                  information. A thread with {waThreadRecent} replies costs roughly{" "}
+                  {Math.round(
+                    ((Number(waThreadTotalChars) || 0) / 3.6 +
+                      (d.knowledge.length || 0) / 3.6 +
+                      580) *
+                      (Number(waThreadRecent) || 1) *
+                      0.6,
+                  ).toLocaleString()}{" "}
+                  tokens — history grows as the thread does, so later replies cost more than
+                  the first.
+                </Banner>
               </BlockStack>
             </Card>
 

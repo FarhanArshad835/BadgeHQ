@@ -291,6 +291,22 @@ model AiReplySettings {
   // draining the merchant's whole quota. 0 disables the cap.
   waDailyLimit    Int     @default(2000)
 
+  // How much WhatsApp history to send the model with each reply. These are the
+  // dominant input cost after the knowledge base, and the right value differs
+  // per shop: a store with long troubleshooting threads needs more than one
+  // answering quick sizing questions.
+  //
+  // waThreadRecent: newest messages always included.
+  // waThreadOpening: messages from the START of the thread, kept because a long
+  //   thread's opening usually holds the order number and the original problem
+  //   while the newest messages hold only the live question.
+  // waThreadLineChars / waThreadTotalChars: per-message and overall ceilings,
+  //   the hard stop on what any one reply can cost.
+  waThreadRecent     Int @default(20)
+  waThreadOpening    Int @default(4)
+  waThreadLineChars  Int @default(400)
+  waThreadTotalChars Int @default(4000)
+
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 

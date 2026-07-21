@@ -231,24 +231,19 @@ export async function registerDoubleTickWebhook(opts: {
 }
 
 /**
- * Caps for the fetched thread.
+ * Defaults for the fetched thread. Each is overridable per shop from the admin
+ * — these are the dominant input cost after the knowledge base, and the right
+ * value differs by shop: long troubleshooting threads need more history than
+ * quick sizing questions, and merchants are on different LLM plans.
  *
- * These were cut hard (8 messages / 1200 chars) in a panic when a day's Groq
- * quota hit 95%. That was the wrong lever: measured against real questions the
- * knowledge base was the larger cost, and support threads genuinely need
- * history — a single agent message in a dispute runs past 160 chars on its
- * own, so truncating each line to that turns context into noise and the bot
- * starts asking things the customer already answered.
- *
- * Set for comprehension first: enough turns to follow a dispute, enough
- * characters that a message survives intact. ~4000 chars is ~1100 tokens,
- * which is the single biggest input cost per reply and worth every token —
- * a reply that ignores what was already said costs a customer, not a fraction
- * of a cent.
+ * Set for comprehension first. A single agent message in a dispute runs past
+ * 160 chars on its own, so a tight per-line cap turns history into fragments
+ * and the bot starts asking what the customer already answered.
  */
-const THREAD_MAX_MESSAGES = 20;
-const THREAD_MAX_LINE_CHARS = 400;
-const THREAD_MAX_TOTAL_CHARS = 4000;
+const THREAD_DEFAULT_RECENT = 20;
+const THREAD_DEFAULT_OPENING = 4;
+const THREAD_DEFAULT_LINE_CHARS = 400;
+const THREAD_DEFAULT_TOTAL_CHARS = 4000;
 
 /**
  * Fetch the customer's REAL WhatsApp thread from DoubleTick and format it as a
@@ -273,6 +268,14 @@ export async function fetchDoubleTickThread(opts: {
   customerNumber: string;
   /** dtMessageId of the message being answered — excluded, it's sent as the user turn. */
   excludeMessageId?: string;
+  /** Newest messages to include. */
+  recent?: number;
+  /** Messages from the START of the thread — a long thread's opening usually
+   *  holds the order number and the original problem, which the newest
+   *  messages no longer mention. 0 disables. */
+  opening?: number;
+  maxLineChars?: number;
+  maxTotalChars?: number;
 }): Promise<string | null> {
   const waba = opts.wabaNumber.replace(/\D/g, "");
   const cust = opts.customerNumber.replace(/\D/g, "");
@@ -303,11 +306,30 @@ export async function fetchDoubleTickThread(opts: {
     const msgs: any[] = Array.isArray(data?.messages) ? data.messages : [];
     if (!msgs.length) return null;
 
-    // Order is not guaranteed — sort, then keep the newest N.
+    const recent = Math.max(1, opts.recent ?? THREAD_DEFAULT_RECENT);
+    const opening = Math.max(0, opts.opening ?? THREAD_DEFAULT_OPENING);
+    const lineChars = Math.max(40, opts.maxLineChars ?? THREAD_DEFAULT_LINE_CHARS);
+    const totalChars = Math.max(200, opts.maxTotalChars ?? THREAD_DEFAULT_TOTAL_CHARS);
+
+    // Order is not guaranteed.
     msgs.sort((a, b) => (a?.messageTime ?? 0) - (b?.messageTime ?? 0));
 
+    // Take the opening AND the newest messages. On a 60-message thread the
+    // newest 20 alone lose the order number and the original problem, which is
+    // exactly the context a late question depends on. `gapAfter` marks where
+    // the middle was dropped so the model does not read it as continuous.
+    let selected: any[];
+    let gapAfter = -1;
+    if (opening > 0 && msgs.length > recent + opening) {
+      selected = msgs.slice(0, opening).concat(msgs.slice(-recent));
+      gapAfter = opening - 1;
+    } else {
+      selected = msgs.slice(-recent);
+    }
+
     const lines: string[] = [];
-    for (const m of msgs.slice(-THREAD_MAX_MESSAGES)) {
+    for (let idx = 0; idx < selected.length; idx++) {
+      const m = selected[idx];
       if (opts.excludeMessageId && m?.id === opts.excludeMessageId) continue;
 
       const mm = m?.message ?? {};
@@ -333,19 +355,26 @@ export async function fetchDoubleTickThread(opts: {
           ? "Store team (human)"
           : "Store assistant";
 
-      lines.push(`${label}: ${text.slice(0, THREAD_MAX_LINE_CHARS)}`);
+      lines.push(`${label}: ${text.slice(0, lineChars)}`);
+      if (idx === gapAfter) lines.push("[... earlier messages omitted ...]");
     }
     if (!lines.length) return null;
 
-    // Enforce the total budget from the END — the newest context wins.
+    // Enforce the budget from the END so the newest context always survives,
+    // but reserve room for the opening lines first — they were selected
+    // precisely because the recent messages cannot replace them.
+    const openingLines = gapAfter >= 0 ? lines.slice(0, gapAfter + 2) : [];
+    const openingCost = openingLines.reduce((n, l) => n + l.length + 1, 0);
+    const budget = Math.max(200, totalChars - openingCost);
+
     let total = 0;
     const kept: string[] = [];
-    for (let i = lines.length - 1; i >= 0; i--) {
+    for (let i = lines.length - 1; i >= openingLines.length; i--) {
       total += lines[i].length + 1;
-      if (total > THREAD_MAX_TOTAL_CHARS) break;
+      if (total > budget) break;
       kept.unshift(lines[i]);
     }
-    return kept.join("\n");
+    return openingLines.concat(kept).join("\n");
   } catch (e: any) {
     console.error("[dt-thread] threw", String(e?.message || e).slice(0, 150));
     return null;
