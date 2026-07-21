@@ -58,13 +58,19 @@ export type AiChannel = "web" | "whatsapp";
  * knowledge bases are already written.
  *
  * Deliberately generous: any section that MIGHT be relevant is kept, and if
- * nothing matches (or the text has no headings) the whole thing is sent. A
- * wrong answer costs far more than a few hundred tokens, so this only trims
- * what is clearly unrelated.
+ * nothing matches (or the text has no headings) the whole thing is sent.
+ *
+ * Measured caveat: on paraphrased questions ("the shoes dont fit me",
+ * "kitne din lagenge") no keyword matches and the FULL text is sent, so the
+ * real-world saving is small. That is the correct trade — a partial
+ * knowledge base produces wrong answers, which cost far more than tokens.
+ * This only pays off on very large knowledge bases, hence the 4k floor.
  */
 export function selectKnowledge(knowledge: string, question: string): string {
   const text = String(knowledge || "");
-  if (text.length < 1200) return text; // too small to be worth splitting
+  // Only worth it for large knowledge bases. Below this the saving is small
+  // and the risk of dropping a relevant section is not worth taking.
+  if (text.length < 4000) return text;
 
   // Split on markdown headings, keeping the heading with its body.
   const parts = text.split(/\n(?=#{1,3}\s)/);
@@ -91,7 +97,9 @@ export function selectKnowledge(knowledge: string, question: string): string {
   if (!hits.length) return text;
 
   hits.sort((a, b) => b.score - a.score);
-  const kept = hits.slice(0, 4).map((x) => x.section);
+  // Keep generously — a missed section produces a wrong answer, which costs
+  // far more than the tokens saved.
+  const kept = hits.slice(0, 8).map((x) => x.section);
 
   const out = [preamble, ...kept].filter(Boolean).join("\n").trim();
   // Never let "trimming" produce something larger than the original.

@@ -231,17 +231,24 @@ export async function registerDoubleTickWebhook(opts: {
 }
 
 /**
- * Caps for the fetched thread. This rides on EVERY llm call, so it dominates
- * token spend: measured live, 72 replies burned 92.3K input tokens against a
- * 100K/day free-tier ceiling — 33x more input than output. The first cut of
- * these caps (30 messages / 5000 chars) was set by what reads well, not by
- * what a daily budget allows. These are set by the budget: ~1200 chars is
- * ~300 tokens, which keeps a reply near 350 input tokens total and a day's
- * traffic inside the cap with room to spare.
+ * Caps for the fetched thread.
+ *
+ * These were cut hard (8 messages / 1200 chars) in a panic when a day's Groq
+ * quota hit 95%. That was the wrong lever: measured against real questions the
+ * knowledge base was the larger cost, and support threads genuinely need
+ * history — a single agent message in a dispute runs past 160 chars on its
+ * own, so truncating each line to that turns context into noise and the bot
+ * starts asking things the customer already answered.
+ *
+ * Set for comprehension first: enough turns to follow a dispute, enough
+ * characters that a message survives intact. ~4000 chars is ~1100 tokens,
+ * which is the single biggest input cost per reply and worth every token —
+ * a reply that ignores what was already said costs a customer, not a fraction
+ * of a cent.
  */
-const THREAD_MAX_MESSAGES = 8;
-const THREAD_MAX_LINE_CHARS = 160;
-const THREAD_MAX_TOTAL_CHARS = 1200;
+const THREAD_MAX_MESSAGES = 20;
+const THREAD_MAX_LINE_CHARS = 400;
+const THREAD_MAX_TOTAL_CHARS = 4000;
 
 /**
  * Fetch the customer's REAL WhatsApp thread from DoubleTick and format it as a
