@@ -860,7 +860,11 @@ export default function AiRepliesPage() {
                       {d.activity.replied.length === 0 ? (
                         <Text as="p" tone="subdued" variant="bodySm">Nothing yet.</Text>
                       ) : (
-                        d.activity.replied.slice(0, 15).map((r, i) => (
+                        // Scrolls within the card rather than pushing the
+                        // settings below it off the page — 60 rows is normal.
+                        <div style={{ maxHeight: 280, overflowY: "auto", paddingRight: 8 }}>
+                        <BlockStack gap="200">
+                        {d.activity.replied.map((r, i) => (
                           <InlineStack key={i} gap="200" blockAlign="center" wrap={false}>
                             <div style={{ minWidth: 120 }}>
                               <Text as="span" variant="bodySm" fontWeight="semibold">{r.phone}</Text>
@@ -872,7 +876,9 @@ export default function AiRepliesPage() {
                               {r.message}{r.error ? ` — ${r.error}` : ""}
                             </Text>
                           </InlineStack>
-                        ))
+                        ))}
+                        </BlockStack>
+                        </div>
                       )}
                     </BlockStack>
 
@@ -892,7 +898,9 @@ export default function AiRepliesPage() {
                       {d.activity.skipped.length === 0 ? (
                         <Text as="p" tone="subdued" variant="bodySm">Nothing skipped.</Text>
                       ) : (
-                        d.activity.skipped.slice(0, 15).map((k, i) => (
+                        <div style={{ maxHeight: 220, overflowY: "auto", paddingRight: 8 }}>
+                        <BlockStack gap="200">
+                        {d.activity.skipped.map((k, i) => (
                           <InlineStack key={i} gap="200" blockAlign="center" wrap={false}>
                             <div style={{ minWidth: 120 }}>
                               <Text as="span" variant="bodySm" fontWeight="semibold">{k.phone}</Text>
@@ -900,7 +908,9 @@ export default function AiRepliesPage() {
                             <Badge tone="attention">{k.reason}</Badge>
                             <Text as="span" variant="bodySm" tone="subdued">{k.preview}</Text>
                           </InlineStack>
-                        ))
+                        ))}
+                        </BlockStack>
+                        </div>
                       )}
                     </BlockStack>
                   </BlockStack>
