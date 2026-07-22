@@ -34,6 +34,44 @@ export const PURGE_AFTER_HOURS = 24;
  */
 export const HANDOFF_MUTE_HOURS = 12;
 
+/**
+ * Questions the bot CANNOT answer, matched in code rather than left to the
+ * prompt.
+ *
+ * The prompt already tells the model to escalate delivery and refund problems
+ * immediately, and it does not reliably obey: in one live thread a customer
+ * asked "Where is my order", then "Where is my parcel", then "When it will
+ * deliver", then "When??" — and the bot's reply was to ask for an order number
+ * that the thread never contained. Four chances to hand off, taken none.
+ *
+ * These need live order status, tracking events or courier data, none of which
+ * the bot can see. Answering is impossible; the only useful response is a fast
+ * handoff, so the decision is made here where it cannot be talked out of.
+ *
+ * Deliberately narrow — matching a general question would silence the bot for
+ * things it answers well. Only where/when-is-my-order phrasings and explicit
+ * refund chasing.
+ */
+const MUST_ESCALATE = [
+  /where\s+(is|are)\s+(my|the)\s+(order|parcel|package|shipment|delivery|item)/i,
+  /when\s+(will|is|it)\s*(it|my|the)?\s*(be\s+)?(deliver|arriv|com|reach|ship)/i,
+  /(order|parcel|package|delivery)\s+(not|hasn'?t|haven'?t|didn'?t)\s+(received|arrived|delivered|come)/i,
+  /not\s+(yet\s+)?(received|delivered|arrived)/i,
+  /(kab|kaha)\s+(tak|hai|aayega|milega)/i,
+  /refund\s+(status|kab|not|hasn'?t|pending)/i,
+  /where.{0,12}refund/i,
+];
+
+/**
+ * True when a message needs a human because live order data is required.
+ * Checked BEFORE the LLM call, so it costs no tokens and cannot be ignored.
+ */
+export function needsHumanNow(text: string): boolean {
+  const t = String(text || "").trim();
+  if (t.length > 300) return false; // long messages are usually narrative, not a status chase
+  return MUST_ESCALATE.some((re) => re.test(t));
+}
+
 /** True when the bot must stay silent for this conversation right now. */
 export function isMuted(convo: { optedOut: boolean; mutedUntil?: Date | null } | null): boolean {
   if (!convo?.optedOut) return false;
@@ -309,10 +347,18 @@ export async function fetchDoubleTickThread(opts: {
   const fmt = (d: Date) =>
     `${String(d.getUTCDate()).padStart(2, "0")}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${d.getUTCFullYear()}`;
   const now = Date.now();
+  // 30 days, not 3. The order-confirmation and shipping templates carry the
+  // order number and AWB, and they are sent when the order is PLACED — often
+  // a week or more before the customer asks where it is. With a 3-day window
+  // a shopper asking "when will it deliver" produced a bot that could not see
+  // their order number anywhere and asked for it, while the confirmation sat
+  // just outside the window. Fetching is free (DoubleTick charges nothing for
+  // reads); only what we forward to the model costs tokens, and that is
+  // capped separately below.
   const qs = new URLSearchParams({
     wabaNumber: waba,
     customerNumber: cust,
-    startDate: fmt(new Date(now - 3 * 86400_000)),
+    startDate: fmt(new Date(now - 30 * 86400_000)),
     endDate: fmt(new Date(now + 86400_000)),
   });
 
@@ -348,6 +394,45 @@ export async function fetchDoubleTickThread(opts: {
       gapAfter = opening - 1;
     } else {
       selected = msgs.slice(-recent);
+    }
+
+    // Order confirmations and shipping notices are the highest-value messages
+    // in a support thread — they carry the order number and AWB — but they are
+    // sent when the order is PLACED, so in a long thread they sit in the middle
+    // that the opening+recent window drops. Observed live: a customer asked
+    // where their order was, the confirmation was ten days back, and the bot
+    // asked for an order number the thread did contain.
+    //
+    // Pull any message carrying an order number or AWB back in, newest first,
+    // and place them with the opening block so they read as background.
+    // A "#" often sits between the label and the digits ("Order
+    // Number: #205946"), so it must be optional rather than absent —
+    // without it the order-confirmation template, the most useful message
+    // in the thread, was the one thing this failed to match.
+    const ORDER_REF =
+      /(?:order\s*(?:number|no\.?|id)?\s*[:#\s]*#?\s*\d{5,}|awb\s*[:#]?\s*\d{8,}|\d{9,})/i;
+    const chosen = new Set(selected);
+    const orderRefs: any[] = [];
+    for (let i = msgs.length - 1; i >= 0 && orderRefs.length < 3; i--) {
+      const m = msgs[i];
+      if (chosen.has(m)) continue;
+      const mm = m?.message ?? {};
+      let body = String(mm.text ?? "");
+      if (!body) {
+        try {
+          body = String(mm.templateMessage.body.data[0].text ?? "");
+        } catch {
+          body = "";
+        }
+      }
+      if (body && ORDER_REF.test(body)) orderRefs.push(m);
+    }
+    if (orderRefs.length) {
+      orderRefs.reverse();
+      const head = gapAfter >= 0 ? selected.slice(0, gapAfter + 1) : [];
+      const tail = gapAfter >= 0 ? selected.slice(gapAfter + 1) : selected;
+      selected = head.concat(orderRefs, tail);
+      gapAfter = head.length + orderRefs.length - 1;
     }
 
     const lines: string[] = [];
