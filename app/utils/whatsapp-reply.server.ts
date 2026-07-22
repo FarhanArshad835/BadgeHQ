@@ -19,6 +19,7 @@ import { sendWhatsAppText } from "./whatsapp.server";
 import {
   HANDOFF_MUTE_HOURS,
   HANDOFF_REPLY,
+  cheapReplyKind,
   appendTurns,
   fetchDoubleTickThread,
   isMuted,
@@ -203,6 +204,43 @@ async function handleJob(job: {
       console.warn(`[wa-reply] daily limit ${settings.waDailyLimit} reached for ${job.shop}`);
       return { ok: false, error: "daily-limit", permanent: true };
     }
+  }
+
+  // Answer greetings and nudges without a model call. On a real day these were
+  // 21 of 53 inbound messages and consumed half the free daily quota, while
+  // genuine questions behind them were rate-limited into silence. A greeting
+  // always gets the same words anyway, and a nudge ("are u there", "reply
+  // please") means the bot already failed — asking a model to apologise again
+  // helps nobody.
+  const cheap = cheapReplyKind(job.message);
+  if (cheap === "greeting") {
+    const wa = await send(
+      settings.greeting || "Hi! How can I help you today?",
+      "badgehq-ai-greeting",
+    );
+    return wa.ok ? { ok: true } : { ok: false, error: wa.error };
+  }
+  if (cheap === "nudge") {
+    // Hand off rather than reply: the customer is chasing an answer they did
+    // not get, so a person should pick this up.
+    const wa = await send(HANDOFF_REPLY, "badgehq-ai-nudge");
+    if (wa.ok) {
+      await prisma.whatsAppConversation.upsert({
+        where: { shop_phone: { shop: job.shop, phone: job.phone } },
+        create: {
+          shop: job.shop,
+          phone: job.phone,
+          optedOut: true,
+          mutedUntil: new Date(Date.now() + HANDOFF_MUTE_HOURS * 3600_000),
+        },
+        update: {
+          optedOut: true,
+          mutedUntil: new Date(Date.now() + HANDOFF_MUTE_HOURS * 3600_000),
+        },
+      });
+      return { ok: true };
+    }
+    return { ok: false, error: wa.error };
   }
 
   // "whatsapp" swaps markdown links for bare URLs — WhatsApp renders no markdown.

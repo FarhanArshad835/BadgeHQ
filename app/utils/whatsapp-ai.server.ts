@@ -35,6 +35,36 @@ export const PURGE_AFTER_HOURS = 24;
 export const HANDOFF_MUTE_HOURS = 12;
 
 /**
+ * Messages that deserve a reply but not a model call.
+ *
+ * Measured on a real day's traffic: of 53 inbound messages, 21 were bare
+ * greetings ("Hi", "Hlo", "Hii", "Okay thanks") or nudges ("Are u there",
+ * "Reply please", "Merko urgent hai"). At ~2.3K tokens each those consumed
+ * HALF the free daily quota and produced nothing a fixed string could not —
+ * while genuine questions further down the queue got rate-limited into
+ * silence.
+ *
+ * A greeting gets the merchant's configured greeting. A nudge means the bot
+ * has already failed to answer, so it hands off rather than apologising again.
+ */
+const TRIVIAL_GREETING =
+  /^(hi+|hey+|h[ie]l+o+|hii+|heyy+|hlo|namaste|good\s*(morning|evening|afternoon)|ok(ay)?(\s*thanks?)?|thanks?(\s*you)?|thank\s*u|ty|k|hmm+|yes|no|ji|acha)[\s.!,👍🙏]*$/i;
+
+const NUDGE =
+  /^(are\s*u(you)?\s*there|reply\s*please|plz\s*rply|please\s*revert|call\s*me\s*pls|it'?s?\s*urgent|merko\s*urgent\s*hai|hello\?+|\?+|hlo\s*plz\s*rply)[\s.!?]*$/i;
+
+export type CheapReply = "greeting" | "nudge" | null;
+
+/** Classify a message that can be answered without spending LLM tokens. */
+export function cheapReplyKind(text: string): CheapReply {
+  const t = String(text || "").trim();
+  if (!t || t.length > 40) return null; // anything longer carries real content
+  if (TRIVIAL_GREETING.test(t)) return "greeting";
+  if (NUDGE.test(t)) return "nudge";
+  return null;
+}
+
+/**
  * Questions the bot CANNOT answer, matched in code rather than left to the
  * prompt.
  *
