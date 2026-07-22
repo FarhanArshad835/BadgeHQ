@@ -203,6 +203,94 @@ export async function sendInteraktText(opts: {
   }
 }
 
+const DOUBLETICK_LIST_URL = "https://public.doubletick.io/whatsapp/message/interactive-list";
+
+/**
+ * Send an interactive list message via DoubleTick — the tappable menu that
+ * replaces the flow bot's button template. Free-form, so it obeys the same
+ * 24-hour window as text; since we only ever send it in reply to an inbound
+ * message, the window is open by definition.
+ *
+ * Limits (verified against their docs): 10 rows, 24-char row titles, 72-char
+ * descriptions, 1024-char body. Values are trimmed here so a config change
+ * can never turn into a 400 at send time.
+ */
+export async function sendDoubleTickList(opts: {
+  apiKey: string;
+  phone: string;
+  fromNumber: string;
+  body: string;
+  buttonLabel: string;
+  rows: { id: string; title: string; description?: string }[];
+}): Promise<InteraktResult> {
+  const ten = toIndianTenDigit(opts.phone);
+  if (!ten) return { ok: false, error: "invalid-phone" };
+  if (!opts.apiKey) return { ok: false, error: "no-api-key" };
+  if (!opts.fromNumber) return { ok: false, error: "no-sender-number" };
+  if (!opts.rows.length) return { ok: false, error: "empty-menu" };
+
+  const from = opts.fromNumber.startsWith("+")
+    ? opts.fromNumber
+    : "+" + opts.fromNumber.replace(/\D/g, "");
+
+  const payload = {
+    from,
+    to: "+91" + ten,
+    content: {
+      body: String(opts.body).slice(0, 1024),
+      button: String(opts.buttonLabel).slice(0, 20),
+      sections: [
+        {
+          title: "Support",
+          rows: opts.rows.slice(0, 10).map((r) => ({
+            id: String(r.id).slice(0, 60),
+            title: String(r.title).slice(0, 24),
+            ...(r.description ? { description: String(r.description).slice(0, 72) } : {}),
+          })),
+        },
+      ],
+    },
+  };
+
+  try {
+    const res = await fetch(DOUBLETICK_LIST_URL, {
+      method: "POST",
+      headers: {
+        Authorization: opts.apiKey, // raw key, no scheme prefix
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+
+    const text = await res.text().catch(() => "");
+    let body: any = null;
+    try {
+      body = text ? JSON.parse(text) : null;
+    } catch {
+      /* success may carry no body */
+    }
+
+    if (!res.ok) {
+      if (res.status === 401 || res.status === 403) {
+        console.error("[doubletick] list auth", res.status, text.slice(0, 200));
+        return { ok: false, error: "auth-failed (check the DoubleTick API key)" };
+      }
+      const detail = String(body?.message || body?.error || text || `http-${res.status}`).slice(0, 300);
+      const outsideWindow = /24\s*hour|session|window|expired|not\s*open/i.test(detail);
+      console.error("[doubletick] list send failed", res.status, detail);
+      return { ok: false, error: outsideWindow ? `outside-window: ${detail}` : detail };
+    }
+
+    return { ok: true, messageId: body?.messageId ?? body?.dtMessageId };
+  } catch (e: any) {
+    const msg = e?.name === "TimeoutError" ? "timeout" : String(e?.message || e).slice(0, 200);
+    console.error("[doubletick] list threw", msg);
+    return { ok: false, error: msg };
+  }
+}
+
 const DOUBLETICK_TEXT_URL = "https://public.doubletick.io/whatsapp/message/text";
 
 /**

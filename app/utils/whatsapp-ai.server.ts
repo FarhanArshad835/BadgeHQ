@@ -216,9 +216,22 @@ export function parseDoubleTickInbound(payload: any): InboundMessage | null {
   if (status != null && String(status).toLowerCase() !== "received") return null;
 
   const msg = payload.message;
-  if (!msg || String(msg.type ?? "").toUpperCase() !== "TEXT") return null;
+  if (!msg) return null;
 
-  const text = String(msg.text ?? "").trim().slice(0, MAX_MESSAGE_CHARS);
+  // TEXT plus tap replies. A tapped quick-reply or list row arrives as
+  // BUTTON / LIST_REPLY with the row's id in `id` (and its label in `text`) —
+  // captured live 2026-07-22: {"type":"BUTTON","text":"Return/Exchange",
+  // "payload":"Return/Exchange","id":"Return/Exchange"}. The id is what the
+  // menu router matches on, so it wins over the label. Media types still
+  // return null: silence cannot loop.
+  const kind = String(msg.type ?? "").toUpperCase();
+  let raw: unknown;
+  if (kind === "TEXT") raw = msg.text;
+  else if (kind === "BUTTON" || kind === "LIST_REPLY" || kind === "INTERACTIVE") {
+    raw = msg.id ?? msg.payload ?? msg.title ?? msg.text;
+  } else return null;
+
+  const text = String(raw ?? "").trim().slice(0, MAX_MESSAGE_CHARS);
   const phone = String(payload.from ?? "").trim();
   // dtMessageId is DoubleTick's own UUID; messageId is Meta's. Prefer the
   // former — it is present on every event and is what their dashboard shows.

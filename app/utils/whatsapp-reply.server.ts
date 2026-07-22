@@ -15,7 +15,7 @@
 import { waitUntil } from "@vercel/functions";
 import prisma from "../db.server";
 import { buildSystemPrompt, callAi } from "./ai-replies.server";
-import { sendWhatsAppText } from "./whatsapp.server";
+import { sendDoubleTickList, sendWhatsAppText } from "./whatsapp.server";
 import {
   HANDOFF_MUTE_HOURS,
   HANDOFF_REPLY,
@@ -25,6 +25,16 @@ import {
   isMuted,
   loadTurns,
 } from "./whatsapp-ai.server";
+import {
+  HANDOVER_REPLY,
+  MENU_BODY,
+  MENU_BUTTON,
+  MENU_REPLIES,
+  MENU_ROWS,
+  OFF_HOURS_REPLY,
+  isBusinessHoursIST,
+  matchMenuIntent,
+} from "./whatsapp-menu.server";
 
 export const MAX_ATTEMPTS = 3;
 
@@ -306,6 +316,21 @@ async function handleJob(job: {
   // helps nobody.
   const cheap = cheapReplyKind(job.message);
   if (cheap === "greeting") {
+    // On DoubleTick a greeting opens the tappable support menu — the
+    // replacement for the merchant's flow bot, which used to fire this menu on
+    // every message. Interakt has no list endpoint here, so it keeps the plain
+    // greeting.
+    if (settings.waProvider === "doubletick") {
+      const wa = await sendDoubleTickList({
+        apiKey: settings.waApiKey,
+        phone: job.phone,
+        fromNumber: settings.waFromNumber,
+        body: MENU_BODY,
+        buttonLabel: MENU_BUTTON,
+        rows: MENU_ROWS,
+      });
+      return wa.ok ? { ok: true } : { ok: false, error: wa.error };
+    }
     const wa = await send(
       settings.greeting || "Hi! How can I help you today?",
       "badgehq-ai-greeting",
@@ -333,6 +358,42 @@ async function handleJob(job: {
       return { ok: true };
     }
     return { ok: false, error: wa.error };
+  }
+
+  // The deterministic menu: button taps and short typed questions that the
+  // merchant's canned answers already cover. Zero LLM tokens, instant, and it
+  // is what lets the flow bot in DoubleTick be switched off without losing the
+  // button experience. Longer messages fall through to the AI, which sees the
+  // whole thread.
+  const intent = matchMenuIntent(job.message);
+  if (intent === "human") {
+    // The flow's "Talk to Us" branch: hours-aware, then the team owns the
+    // thread — mute the bot exactly as a handoff does.
+    const wa = await send(
+      isBusinessHoursIST() ? HANDOVER_REPLY : OFF_HOURS_REPLY,
+      "badgehq-menu-human",
+    );
+    if (wa.ok) {
+      await prisma.whatsAppConversation.upsert({
+        where: { shop_phone: { shop: job.shop, phone: job.phone } },
+        create: {
+          shop: job.shop,
+          phone: job.phone,
+          optedOut: true,
+          mutedUntil: new Date(Date.now() + HANDOFF_MUTE_HOURS * 3600_000),
+        },
+        update: {
+          optedOut: true,
+          mutedUntil: new Date(Date.now() + HANDOFF_MUTE_HOURS * 3600_000),
+        },
+      });
+      return { ok: true };
+    }
+    return { ok: false, error: wa.error };
+  }
+  if (intent) {
+    const wa = await send(MENU_REPLIES[intent], `badgehq-menu-${intent}`);
+    return wa.ok ? { ok: true } : { ok: false, error: wa.error };
   }
 
   // "whatsapp" swaps markdown links for bare URLs — WhatsApp renders no markdown.
