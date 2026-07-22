@@ -58,21 +58,21 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }),
   ]);
 
-  // Mask the middle of each number: enough to recognise a customer in the
-  // provider inbox, not a full contact list rendered into the page.
-  const mask = (p: string) => (p.length >= 10 ? `${p.slice(0, 3)}xxxxx${p.slice(-3)}` : p);
+  // Stored as bare 10 digits (see toIndianTenDigit); shown with +91 so the
+  // number can be copied straight into a provider search or a dialler.
+  const fmtPhone = (p: string) => (p.length === 10 ? `+91 ${p}` : p);
 
   return json({
     activity: {
       replied: replied.map((j) => ({
-        phone: mask(j.phone),
+        phone: fmtPhone(j.phone),
         message: j.message.slice(0, 60),
         status: j.status,
         error: j.error,
         at: j.updatedAt,
       })),
       skipped: skipped.map((k) => ({
-        phone: mask(k.phone),
+        phone: fmtPhone(k.phone),
         reason: k.reason,
         preview: k.preview,
         at: k.createdAt,
@@ -835,8 +835,7 @@ export default function AiRepliesPage() {
               <BlockStack gap="400">
                 <Text as="h2" variant="headingMd">Recent WhatsApp activity</Text>
                 <Text as="p" tone="subdued">
-                  Numbers are part-masked. Find the full conversation in your provider's
-                  inbox by the last three digits.
+                  Search a number in your provider's inbox to open the full conversation.
                 </Text>
 
                 {d.activity.replied.length === 0 && d.activity.skipped.length === 0 ? (
