@@ -47,18 +47,32 @@ export const HANDOFF_MUTE_HOURS = 12;
  * A greeting gets the merchant's configured greeting. A nudge means the bot
  * has already failed to answer, so it hands off rather than apologising again.
  */
+// Conversation OPENERS — a menu in reply makes sense here.
 const TRIVIAL_GREETING =
-  /^(hi+|hey+|h[ie]l+o+|hii+|heyy+|hlo|namaste|good\s*(morning|evening|afternoon)|ok(ay)?(\s*thanks?)?|thanks?(\s*you)?|thank\s*u|ty|k|hmm+|yes|no|ji|acha)[\s.!,👍🙏]*$/i;
+  /^(hi+|hey+|h[ie]l+o+|hii+|heyy+|hlo|namaste|good\s*(morning|evening|afternoon))[\s.!,👍🙏]*$/i;
+
+// Acknowledgements — the conversation is ENDING, not starting. Observed live:
+// a customer thanked the human agent handling her delivery and the bot replied
+// with "Choose an option", re-opening a conversation that was closing. The
+// right reply to thanks is nothing at all.
+const ACK =
+  /^(ok(ay)?(\s*thanks?)?|thanks?(\s*you)?(\s*so\s*much)?|thank\s*u|thanku|ty|tysm|k+|hmm+|yes|no|ji|acha|done|great|nice|perfect|cool|👍+|🙏+|❤+)[\s.!,👍🙏❤]*$/i;
 
 const NUDGE =
   /^(are\s*u(you)?\s*there|reply\s*please|plz\s*rply|please\s*revert|call\s*me\s*pls|it'?s?\s*urgent|merko\s*urgent\s*hai|hello\?+|\?+|hlo\s*plz\s*rply)[\s.!?]*$/i;
 
-export type CheapReply = "greeting" | "nudge" | null;
+export type CheapReply = "greeting" | "nudge" | "ack" | null;
 
 /** Classify a message that can be answered without spending LLM tokens. */
 export function cheapReplyKind(text: string): CheapReply {
-  const t = String(text || "").trim();
+  // Skin-tone modifiers and variation selectors break emoji matching — a
+  // shopper's 👍🏻 is 👍 followed by U+1F3FB, which the character class never
+  // sees as a plain 👍. Strip them before classifying.
+  const t = String(text || "")
+    .replace(/[\u{1F3FB}-\u{1F3FF}\u{FE0F}]/gu, "")
+    .trim();
   if (!t || t.length > 40) return null; // anything longer carries real content
+  if (ACK.test(t)) return "ack";
   if (TRIVIAL_GREETING.test(t)) return "greeting";
   if (NUDGE.test(t)) return "nudge";
   return null;
@@ -380,7 +394,7 @@ export async function fetchDoubleTickThread(opts: {
   opening?: number;
   maxLineChars?: number;
   maxTotalChars?: number;
-}): Promise<string | null> {
+}): Promise<{ transcript: string; humanActiveAt: number | null } | null> {
   const waba = opts.wabaNumber.replace(/\D/g, "");
   const cust = opts.customerNumber.replace(/\D/g, "");
   if (!opts.apiKey || !waba || !cust) return null;
@@ -525,7 +539,24 @@ export async function fetchDoubleTickThread(opts: {
       if (total > budget) break;
       kept.unshift(lines[i]);
     }
-    return openingLines.concat(kept).join("\n");
+
+    // When a PERSON last wrote in this thread — scanned over the full message
+    // set, not just the selected transcript, because the guard that uses this
+    // ("stand down while an agent is working the thread") must see a human
+    // reply even if selection dropped it. API sends carry "(Public API)" in
+    // the sender name; manual inbox replies do not.
+    let humanActiveAt: number | null = null;
+    for (const m of msgs) {
+      if (m?.messageOriginType !== "CUSTOMER") {
+        const name = String(m?.senderUser?.name ?? "").trim();
+        if (name && !name.includes("(Public API)")) {
+          const ts = Number(m?.messageTime ?? 0);
+          if (ts > (humanActiveAt ?? 0)) humanActiveAt = ts;
+        }
+      }
+    }
+
+    return { transcript: openingLines.concat(kept).join("\n"), humanActiveAt };
   } catch (e: any) {
     console.error("[dt-thread] threw", String(e?.message || e).slice(0, 150));
     return null;

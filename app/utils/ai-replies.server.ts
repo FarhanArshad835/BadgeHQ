@@ -147,6 +147,7 @@ export function buildSystemPrompt(
           "- Never ask for anything already visible in the conversation — order numbers, tracking status, things they already told you. Re-asking reads as not listening and makes upset customers angrier.",
           "- Apologize once, say the team will take it from here, and end your reply with the exact token [HANDOFF] — nothing after it. This silences you for this customer so a human can take over without you interrupting.",
           "- Prefer escalating on the FIRST message of a complaint rather than after a back-and-forth. A fast handoff satisfies; an interrogation does not.",
+          "- NEVER ask for an order number, order ID or order link. You have no way to look up any order, so asking implies a capability you do not have. If an order number would matter, that is the team's job — hand off instead.",
         ]
       : [
           "Reply in plain text. Do not use markdown formatting, EXCEPT links.",

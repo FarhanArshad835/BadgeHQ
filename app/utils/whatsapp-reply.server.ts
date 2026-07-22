@@ -24,6 +24,7 @@ import {
   fetchDoubleTickThread,
   isMuted,
   loadTurns,
+  needsHumanNow,
 } from "./whatsapp-ai.server";
 import {
   HANDOVER_REPLY,
@@ -315,6 +316,13 @@ async function handleJob(job: {
   // please") means the bot already failed — asking a model to apologise again
   // helps nobody.
   const cheap = cheapReplyKind(job.message);
+  // "Thank you" / "ok" / 👍 closes a conversation. The right response is
+  // nothing: replying re-opens a thread that was ending, and doing it with the
+  // menu (as happened live, mid-agent-conversation) reads as a machine that
+  // does not know when to stop. Mark the job done without sending.
+  if (cheap === "ack") {
+    return { ok: true };
+  }
   if (cheap === "greeting") {
     // On DoubleTick a greeting opens the tappable support menu — the
     // replacement for the merchant's flow bot, which used to fire this menu on
@@ -396,6 +404,35 @@ async function handleJob(job: {
     return wa.ok ? { ok: true } : { ok: false, error: wa.error };
   }
 
+  // Deterministic escalation, decided in code where the model cannot talk its
+  // way past it. The prompt already orders the LLM to hand off on delivery and
+  // refund chasing; it does not reliably obey — observed live promising to
+  // "check the status" of an order it has no way to look up. These patterns
+  // need live order data nobody here has, so a fast handoff IS the answer.
+  if (needsHumanNow(job.message)) {
+    const wa = await send(
+      isBusinessHoursIST() ? HANDOVER_REPLY : OFF_HOURS_REPLY,
+      "badgehq-escalate",
+    );
+    if (wa.ok) {
+      await prisma.whatsAppConversation.upsert({
+        where: { shop_phone: { shop: job.shop, phone: job.phone } },
+        create: {
+          shop: job.shop,
+          phone: job.phone,
+          optedOut: true,
+          mutedUntil: new Date(Date.now() + HANDOFF_MUTE_HOURS * 3600_000),
+        },
+        update: {
+          optedOut: true,
+          mutedUntil: new Date(Date.now() + HANDOFF_MUTE_HOURS * 3600_000),
+        },
+      });
+      return { ok: true };
+    }
+    return { ok: false, error: wa.error };
+  }
+
   // "whatsapp" swaps markdown links for bare URLs — WhatsApp renders no markdown.
   let system = buildSystemPrompt(settings, "whatsapp", job.message);
   let history = loadTurns(convo?.turns);
@@ -406,7 +443,7 @@ async function handleJob(job: {
   // only (Interakt exposes no thread API); on fetch failure the bot's own
   // stored turns remain as the fallback.
   if (settings.waProvider === "doubletick") {
-    const thread = await fetchDoubleTickThread({
+    const threadRes = await fetchDoubleTickThread({
       apiKey: settings.waApiKey,
       wabaNumber: settings.waFromNumber,
       customerNumber: "91" + job.phone,
@@ -416,13 +453,21 @@ async function handleJob(job: {
       maxLineChars: settings.waThreadLineChars,
       maxTotalChars: settings.waThreadTotalChars,
     });
-    // A human replying in the provider inbox is the clearest signal the bot is
-    // not needed — but nothing marks the thread as handled, so a queued reply
-    // would still arrive later and answer what the team already resolved.
-    // The thread text labels human messages distinctly (see
-    // fetchDoubleTickThread), so a human line after the customer's last one
-    // means: stand down.
-    if (thread && humanRepliedLast(thread)) {
+    const thread = threadRes?.transcript ?? null;
+
+    // A human working the thread means the bot is not needed. Two signals:
+    //  - the human's message is the LAST one (humanRepliedLast), or
+    //  - a human wrote within the last 30 minutes, even if the customer
+    //    answered after. Observed live: an agent assigned herself, replied,
+    //    the customer said thanks and added a detail — and the bot barged in
+    //    three minutes into the agent's conversation, because "last message"
+    //    was the customer's again. Recency is the better definition of
+    //    "the thread is owned".
+    const HUMAN_ACTIVE_MS = 30 * 60 * 1000;
+    const humanActive =
+      threadRes?.humanActiveAt != null &&
+      Date.now() - threadRes.humanActiveAt < HUMAN_ACTIVE_MS;
+    if (thread && (humanActive || humanRepliedLast(thread))) {
       return { ok: false, error: "human-replied", permanent: true };
     }
 
