@@ -151,6 +151,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             }.`
           : result.error === "bad-model"
           ? `${name} no longer offers the model this app requests (providers retire older models). This needs an app update — your API key is fine.`
+          : result.error === "quota-exhausted"
+          ? isGroq
+            ? "Groq's DAILY token quota is used up (free tier: 100,000 tokens, roughly 40 replies at current settings). It resets at 00:00 UTC. Queued replies are held and sent automatically once it does — enable billing at console.groq.com for a higher ceiling."
+            : "Gemini's daily quota is used up. It resets at 00:00 Pacific. Enable billing in Google AI Studio for a higher ceiling."
           : result.error === "rate-limited"
           ? isGroq
             ? "Groq is rate-limiting this key. The free tier allows 30 requests a minute — wait a moment and try again."

@@ -309,9 +309,15 @@ export async function callGemini(opts: {
       // "bad-key" sent merchants hunting for a broken key when the real cause
       // was Gemini's free-tier rate limit, which clears on its own.
       const quota = /quota|rate.?limit|RESOURCE_EXHAUSTED|exceeded/i.test(detail);
+      // A per-DAY limit and a per-MINUTE limit both arrive as 429, but they
+      // need opposite handling: one clears in seconds, the other not until the
+      // quota resets. Providers name the window in the message.
+      const daily = /per\s*day|daily|TPD|RPD|requests per day|tokens per day/i.test(detail);
       const error =
         res.status === 404
           ? "bad-model"
+          : (res.status === 429 || quota) && daily
+          ? "quota-exhausted"
           : res.status === 429 || quota
           ? "rate-limited"
           : res.status === 400 || res.status === 403

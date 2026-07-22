@@ -230,9 +230,21 @@ async function handleJob(job: {
 
   if (!ai.ok) {
     // bad-key / bad-model are configuration problems: retrying burns quota and
-    // will fail identically every time. A rate limit is the opposite — it
-    // clears on its own, so the job stays pending and the next tick retries.
+    // will fail identically every time.
+    //
+    // Rate limits are the opposite — they clear on their own, so the job goes
+    // back to pending. But MAX_ATTEMPTS is 3 and the cron runs every minute,
+    // so a PER-DAY quota burned all three retries within three minutes and the
+    // message was dropped as failed, hours before the quota would reset. Reset
+    // the attempt counter for those so the job survives until the quota does.
     const permanent = ai.error === "bad-key" || ai.error === "bad-model";
+    if (ai.error === "quota-exhausted") {
+      await prisma.whatsAppReplyJob.update({
+        where: { id: job.id },
+        data: { status: "pending", attempts: 0, error: `${settings.aiProvider}:quota-exhausted` },
+      });
+      return { ok: false, error: `${settings.aiProvider}:quota-exhausted` };
+    }
     return { ok: false, error: `${settings.aiProvider}:${ai.error}`, permanent };
   }
 
