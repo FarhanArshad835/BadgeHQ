@@ -28,6 +28,16 @@ import {
 
 export const MAX_ATTEMPTS = 3;
 
+/**
+ * Past this age a queued reply is dropped instead of sent.
+ *
+ * Throttled jobs retry every minute until the limit clears, which for a daily
+ * quota means midnight. Without this, a question asked at 2pm was answered at
+ * 00:00 — long after a human had handled it or the customer had given up. Two
+ * hours is roughly how long a support answer stays useful.
+ */
+export const STALE_REPLY_MS = 2 * 60 * 60 * 1000;
+
 export type JobResult = { ok: true } | { ok: false; error: string; permanent?: boolean };
 
 /**
@@ -139,12 +149,28 @@ export function drainJobSoon(id: string): void {
   }
 }
 
+/**
+ * True when the last non-customer line in the transcript came from a person
+ * rather than from us. Cheap string work on text already fetched — no extra
+ * API call, no tokens.
+ */
+function humanRepliedLast(thread: string): boolean {
+  const lines = thread.split("\n").filter(Boolean);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (lines[i].startsWith("Customer:")) return false;
+    if (lines[i].startsWith("Store team (human):")) return true;
+    // "Store assistant:" is us — keep looking further back.
+  }
+  return false;
+}
+
 async function handleJob(job: {
   id: string;
   shop: string;
   phone: string;
   message: string;
   providerMessageId: string;
+  createdAt: Date;
 }): Promise<JobResult> {
   const settings = await prisma.aiReplySettings.findUnique({ where: { shop: job.shop } });
   if (!settings?.waReplyEnabled || !settings.isEnabled || !settings.apiKey) {
@@ -181,6 +207,15 @@ async function handleJob(job: {
   });
   // Muted after the job was queued — a human has the thread now.
   if (isMuted(convo)) return { ok: false, error: "opted-out", permanent: true };
+
+  // Too old to be worth sending. A message throttled all afternoon would
+  // otherwise go out when the quota resets at midnight, answering a question
+  // from hours earlier — by which time the customer has been helped, given up,
+  // or forgotten asking. Silence beats a reply that arrives out of time.
+  const ageMs = Date.now() - job.createdAt.getTime();
+  if (ageMs > STALE_REPLY_MS) {
+    return { ok: false, error: "too-old", permanent: true };
+  }
 
   // Daily ceiling, checked BEFORE the LLM call — the whole point is to not
   // spend the token that would break the budget. Free tiers cap tokens per
@@ -263,6 +298,16 @@ async function handleJob(job: {
       maxLineChars: settings.waThreadLineChars,
       maxTotalChars: settings.waThreadTotalChars,
     });
+    // A human replying in the provider inbox is the clearest signal the bot is
+    // not needed — but nothing marks the thread as handled, so a queued reply
+    // would still arrive later and answer what the team already resolved.
+    // The thread text labels human messages distinctly (see
+    // fetchDoubleTickThread), so a human line after the customer's last one
+    // means: stand down.
+    if (thread && humanRepliedLast(thread)) {
+      return { ok: false, error: "human-replied", permanent: true };
+    }
+
     if (thread) {
       system +=
         "\n\n=== RECENT WHATSAPP CONVERSATION (oldest first) ===\n" +

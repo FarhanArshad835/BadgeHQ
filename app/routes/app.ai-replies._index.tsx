@@ -56,6 +56,8 @@ function outcomeOf(status: string, error: string): { label: string; tone: "succe
   if (status === "failed") {
     if (error.includes("outside-window")) return { label: "too late (24h window closed)", tone: "critical" };
     if (error.includes("opted-out")) return { label: "not sent — thread muted", tone: "attention" };
+    if (error.includes("human-replied")) return { label: "not sent — your team replied", tone: "attention" };
+    if (error.includes("too-old")) return { label: "not sent — too old to be useful", tone: "attention" };
     if (error.includes("bad-key")) return { label: "not sent — API key rejected", tone: "critical" };
     if (error.includes("daily-limit")) return { label: "not sent — your daily cap", tone: "attention" };
     return { label: "not sent", tone: "critical" };
