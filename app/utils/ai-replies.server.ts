@@ -10,7 +10,10 @@
  * tier is 30 RPM / 1000 RPD / 12K TPM — in practice ~100+ replies a day once the
  * ~700-token system prompt is counted, which is 5x Gemini and actually usable.
  * Gemini stays supported for merchants who already have a key or pay for one.
+ * Anthropic Claude is the third, paid option — most capable, model-selectable.
  */
+
+import { CLAUDE_MODELS, CLAUDE_DEFAULT_MODEL } from "./ai-models";
 
 // gemini-2.0-flash was shut down on 2026-06-01 and now 404s. 2.5-flash is the
 // current stable best-price-performance model. If this ever 404s again the
@@ -178,7 +181,9 @@ export function trimHistory(history: unknown): ChatTurn[] {
 const GROQ_MODEL = "llama-3.3-70b-versatile";
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 
-export type AiProvider = "gemini" | "groq";
+const CLAUDE_URL = "https://api.anthropic.com/v1/messages";
+
+export type AiProvider = "gemini" | "groq" | "claude";
 export type AiResult = { ok: true; text: string } | { ok: false; error: string };
 
 /**
@@ -250,16 +255,103 @@ export async function callGroq(opts: {
   }
 }
 
-/** Provider-agnostic entry point. Every caller should use this, not the two above. */
+/**
+ * Anthropic Claude (Messages API).
+ *
+ * Same shape as the other two clients, so the caller never sees the difference.
+ * Two Claude-isms handled here: the system prompt is a top-level field (not a
+ * message), and the assistant turn is called "assistant" like OpenAI. `model`
+ * is merchant-selectable — an unknown/empty value falls back to the cheapest
+ * supported model rather than 404ing the request.
+ */
+export async function callClaude(opts: {
+  apiKey: string;
+  system: string;
+  history: ChatTurn[];
+  message: string;
+  model?: string;
+}): Promise<AiResult> {
+  const model =
+    opts.model && CLAUDE_MODELS.some((m) => m.id === opts.model)
+      ? opts.model
+      : CLAUDE_DEFAULT_MODEL;
+
+  const messages = [
+    ...opts.history.map((t) => ({
+      role: t.role === "model" ? "assistant" : "user",
+      content: t.text,
+    })),
+    { role: "user", content: opts.message },
+  ];
+
+  try {
+    const res = await fetch(CLAUDE_URL, {
+      method: "POST",
+      headers: {
+        "x-api-key": opts.apiKey,
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        system: opts.system,
+        messages,
+        max_tokens: 400,
+      }),
+      signal: AbortSignal.timeout(15000),
+    });
+
+    if (!res.ok) {
+      // Log server-side only — an upstream body can echo the key back.
+      const detail = await res.text().catch(() => "");
+      console.error("[ai-replies] claude", model, res.status, detail.slice(0, 300));
+      // Mirror the Gemini error taxonomy so the admin Test surfaces the same
+      // labels regardless of provider. Anthropic reports credit exhaustion as a
+      // 400 with type "billing_error"; treat it like a quota problem so the
+      // merchant knows it needs money, not a new key.
+      const billing = /billing|credit|insufficient|quota/i.test(detail);
+      const error =
+        res.status === 404
+          ? "bad-model"
+          : res.status === 429
+          ? "rate-limited"
+          : (res.status === 400 && billing) || res.status === 402
+          ? "quota-exhausted"
+          : res.status === 401 || res.status === 403
+          ? "bad-key"
+          : "upstream";
+      return { ok: false, error };
+    }
+
+    const data = await res.json();
+    // Content is an array of blocks; the text lives in the first text block.
+    const text = Array.isArray(data?.content)
+      ? data.content.find((b: any) => b?.type === "text")?.text
+      : undefined;
+    if (!text || !String(text).trim()) {
+      console.error("[ai-replies] claude empty:", JSON.stringify(data).slice(0, 200));
+      return { ok: false, error: "no-answer" };
+    }
+    return { ok: true, text: String(text).trim() };
+  } catch (e: any) {
+    console.error("[ai-replies] claude threw:", String(e?.message || e).slice(0, 200));
+    return { ok: false, error: e?.name === "TimeoutError" ? "timeout" : "network" };
+  }
+}
+
+/** Provider-agnostic entry point. Every caller should use this, not the three above. */
 export async function callAi(opts: {
   provider: string;
   apiKey: string;
   system: string;
   history: ChatTurn[];
   message: string;
+  model?: string;
 }): Promise<AiResult> {
-  const { provider, ...rest } = opts;
-  return provider === "groq" ? callGroq(rest) : callGemini(rest);
+  const { provider, model, ...rest } = opts;
+  if (provider === "groq") return callGroq(rest);
+  if (provider === "claude") return callClaude({ ...rest, model });
+  return callGemini(rest);
 }
 
 export async function callGemini(opts: {

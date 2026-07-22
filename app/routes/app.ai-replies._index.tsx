@@ -28,6 +28,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { bumpConfigVersion } from "../utils/config-version.server";
 import { buildSystemPrompt, callAi } from "../utils/ai-replies.server";
+import { CLAUDE_MODELS } from "../utils/ai-models";
 import { generateWebhookToken, registerDoubleTickWebhook } from "../utils/whatsapp-ai.server";
 
 const POSITIONS = ["bottom-right", "bottom-left"];
@@ -155,6 +156,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     },
     isEnabled: s?.isEnabled ?? false,
     aiProvider: s?.aiProvider ?? "gemini",
+    aiModel: s?.aiModel ?? "",
     // The key itself never leaves the server — only whether one is saved.
     hasKey: Boolean(s?.apiKey),
     keyPreview: s?.apiKey ? s.apiKey.slice(-4) : "",
@@ -211,6 +213,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const result = await callAi({
       provider: s.aiProvider,
       apiKey: s.apiKey,
+      model: s.aiModel,
       system: buildSystemPrompt(s, "web", question),
       history: [],
       message: question.slice(0, 1000),
@@ -351,7 +354,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   try {
     const values = {
       isEnabled: Boolean(data.isEnabled),
-      aiProvider: data.aiProvider === "groq" ? "groq" : "gemini",
+      aiProvider:
+        data.aiProvider === "groq"
+          ? "groq"
+          : data.aiProvider === "claude"
+          ? "claude"
+          : "gemini",
+      // Only Claude has selectable models; store the id only when it's a known
+      // Claude model, otherwise "" so the provider uses its own default.
+      aiModel:
+        data.aiProvider === "claude" &&
+        CLAUDE_MODELS.some((m) => m.id === data.aiModel)
+          ? data.aiModel
+          : "",
       // Never store "on" when it can't work — the cron would drop every job as
       // permanently failed and the merchant would just see silence.
       waReplyEnabled: wantsWa && !waBlocked,
@@ -426,6 +441,7 @@ export default function AiRepliesPage() {
   const initial = {
     enabled: d.isEnabled,
     aiProvider: d.aiProvider,
+    aiModel: d.aiModel,
     apiKey: "",
     knowledge: d.knowledge,
     botName: d.botName,
@@ -448,6 +464,7 @@ export default function AiRepliesPage() {
 
   const [enabled, setEnabled] = useState(initial.enabled);
   const [aiProvider, setAiProvider] = useState(initial.aiProvider);
+  const [aiModel, setAiModel] = useState(initial.aiModel);
   const [waReplyEnabled, setWaReplyEnabled] = useState(initial.waReplyEnabled);
   const [waProvider, setWaProvider] = useState(initial.waProvider);
   const [waDailyLimit, setWaDailyLimit] = useState(initial.waDailyLimit);
@@ -474,6 +491,7 @@ export default function AiRepliesPage() {
   const isDirty =
     enabled !== initial.enabled ||
     aiProvider !== initial.aiProvider ||
+    aiModel !== initial.aiModel ||
     apiKey !== initial.apiKey ||
     knowledge !== initial.knowledge ||
     botName !== initial.botName ||
@@ -510,6 +528,7 @@ export default function AiRepliesPage() {
   const handleDiscard = () => {
     setEnabled(initial.enabled);
     setAiProvider(initial.aiProvider);
+    setAiModel(initial.aiModel);
     setApiKey(initial.apiKey);
     setKnowledge(initial.knowledge);
     setBotName(initial.botName);
@@ -536,6 +555,7 @@ export default function AiRepliesPage() {
         data: JSON.stringify({
           isEnabled: enabled,
           aiProvider,
+          aiModel,
           apiKey,
           knowledge,
           botName,
@@ -624,11 +644,22 @@ export default function AiRepliesPage() {
                   options={[
                     { label: "Groq — free, recommended", value: "groq" },
                     { label: "Google Gemini", value: "gemini" },
+                    { label: "Anthropic Claude — paid, most capable", value: "claude" },
                   ]}
                   value={aiProvider}
                   onChange={setAiProvider}
                   helpText="Each provider needs its own key. Changing this means pasting a new one."
                 />
+
+                {aiProvider === "claude" && (
+                  <Select
+                    label="Claude model"
+                    options={CLAUDE_MODELS.map((m) => ({ label: m.label, value: m.id }))}
+                    value={aiModel || CLAUDE_MODELS[0].id}
+                    onChange={setAiModel}
+                    helpText="Haiku is the cheapest and handles most support chat; step up for harder questions."
+                  />
+                )}
 
                 {aiProvider === "gemini" && (
                   <Banner tone="warning">
@@ -638,8 +669,21 @@ export default function AiRepliesPage() {
                   </Banner>
                 )}
 
+                {aiProvider === "claude" && (
+                  <Banner tone="info">
+                    Claude has <strong>no free tier</strong> — your Anthropic key needs credit.
+                    It&apos;s the most capable option; Groq stays free if cost matters more than nuance.
+                  </Banner>
+                )}
+
                 <TextField
-                  label={aiProvider === "groq" ? "Groq API key" : "Gemini API key"}
+                  label={
+                    aiProvider === "groq"
+                      ? "Groq API key"
+                      : aiProvider === "claude"
+                      ? "Anthropic API key"
+                      : "Gemini API key"
+                  }
                   value={apiKey}
                   onChange={setApiKey}
                   autoComplete="off"
@@ -652,6 +696,8 @@ export default function AiRepliesPage() {
                   helpText={
                     aiProvider === "groq"
                       ? "Free from console.groq.com — no card needed. Stored securely, never sent to your storefront."
+                      : aiProvider === "claude"
+                      ? "From console.anthropic.com (needs billing set up). Stored securely — never sent to your storefront."
                       : "From Google AI Studio. Stored securely — never sent to your storefront."
                   }
                 />

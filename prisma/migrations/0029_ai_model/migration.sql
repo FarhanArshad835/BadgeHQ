@@ -1,0 +1,11 @@
+-- Let merchants pick a specific model for their LLM provider.
+--
+-- Only Claude (Anthropic) exposes a picker today: Haiku 4.5 (cheapest), Sonnet 5,
+-- or Opus 4.8. Gemini and Groq stay pinned to one model each, so this column is
+-- ignored for them.
+--
+-- Defaults to '' — meaning "use the provider's own default model" — so every
+-- existing shop keeps replying exactly as before.
+--
+-- Idempotent, matching every migration since 0008.
+ALTER TABLE "AiReplySettings" ADD COLUMN IF NOT EXISTS "aiModel" TEXT NOT NULL DEFAULT '';

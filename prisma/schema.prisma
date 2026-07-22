@@ -253,9 +253,12 @@ model AiReplySettings {
   id           String   @id @default(cuid())
   shop         String   @unique
   isEnabled    Boolean  @default(false)
-  // "gemini" | "groq". Groq is the practical default for new shops: Gemini's
-  // free tier allows 20 requests A DAY, which no storefront can run on.
+  // "gemini" | "groq" | "claude". Groq is the practical default for new shops:
+  // Gemini's free tier allows 20 requests A DAY, which no storefront can run on.
   aiProvider   String   @default("gemini")
+  // Provider-specific model id. Only Claude exposes a picker today (Gemini and
+  // Groq are pinned to one model each); "" means the provider's own default.
+  aiModel      String   @default("")
   apiKey       String   @default("") // merchant's LLM key — server-side only
   knowledge    String   @default("") // policies/FAQ text the bot may answer from
   botName      String   @default("Support")

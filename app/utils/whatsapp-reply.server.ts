@@ -494,6 +494,7 @@ async function handleJob(job: {
   const ai = await callAi({
     provider: settings.aiProvider,
     apiKey: settings.apiKey,
+    model: settings.aiModel,
     system,
     history,
     message: job.message,
