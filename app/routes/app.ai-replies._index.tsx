@@ -1,6 +1,12 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useActionData, useLoaderData, useNavigation, useSubmit } from "@remix-run/react";
+import {
+  useActionData,
+  useLoaderData,
+  useNavigation,
+  useRevalidator,
+  useSubmit,
+} from "@remix-run/react";
 import { useState, useEffect } from "react";
 import {
   Page,
@@ -412,6 +418,9 @@ export default function AiRepliesPage() {
   const actionData = useActionData<ActionData>();
   const submit = useSubmit();
   const nav = useNavigation();
+  // Re-runs the loader in place: refreshes the activity list without a full
+  // page reload, so unsaved edits in the settings fields survive.
+  const revalidator = useRevalidator();
   const busy = nav.state === "submitting";
 
   const initial = {
@@ -904,8 +913,18 @@ export default function AiRepliesPage() {
 
             <Card>
               <BlockStack gap="400">
-                <Text as="h2" variant="headingMd">Recent WhatsApp activity</Text>
+                <InlineStack align="space-between" blockAlign="center">
+                  <Text as="h2" variant="headingMd">Recent WhatsApp activity</Text>
+                  <Button
+                    onClick={() => revalidator.revalidate()}
+                    loading={revalidator.state === "loading"}
+                    variant="tertiary"
+                  >
+                    Sync
+                  </Button>
+                </InlineStack>
                 <Text as="p" tone="subdued">
+                  A snapshot from when this page loaded — press Sync for the latest.
                   Search a number in your provider's inbox to open the full conversation.
                 </Text>
 
