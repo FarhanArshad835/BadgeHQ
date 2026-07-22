@@ -122,16 +122,30 @@ export function matchMenuIntent(text: string): MenuIntent | null {
   if (t.length > 120) return null;
   const s = t.toLowerCase();
 
-  if (/\b(track|tracking)\b/.test(s)) return "track";
-  // "where is my order/parcel" gets the canned tracking answer — the single
-  // most common question in the queue, and the old flow bot answered it the
-  // same way. Longer variants ("when will I receive...") still go to the AI,
-  // which can see the thread and escalate.
-  if (/where\s+is\s+(my|the)\s+(order|parcel|package|shipment)/.test(s)) return "track";
-  if (/\bcancel/.test(s)) return "cancel";
-  if (/\b(return|exchange)\b/.test(s)) return "return";
-  if (/\brefund/.test(s)) return "refund";
-  if (/\b(shipping|courier|cod|cash on delivery|delivery charge)/.test(s)) return "shipping";
-  if (/\bsize\b/.test(s)) return "size";
-  return null;
+  // A message can carry two questions — "I want to exchange, also do you have
+  // COD?" — and a canned reply would answer the first and silently ignore the
+  // second, which reads as not listening. Two guards, both free:
+  //   1. If the text matches MORE THAN ONE intent, it is a compound question.
+  //   2. If it matches one intent but also carries a joining word or a second
+  //      sentence, there is probably a second ask the canned text won't cover.
+  // Either way the AI takes it: it sees the knowledge base and can answer both
+  // parts. The bias is deliberate — spending tokens beats half-answering.
+  const intentChecks: [MenuIntent, RegExp][] = [
+    ["track", /\b(track|tracking)\b|where\s+is\s+(my|the)\s+(order|parcel|package|shipment)/],
+    ["cancel", /\bcancel/],
+    ["return", /\b(return|exchange)\b/],
+    ["refund", /\brefund/],
+    ["shipping", /\b(shipping|courier|cod|cash on delivery|delivery charge)/],
+    ["size", /\bsize\b/],
+  ];
+  const matched = intentChecks.filter(([, re]) => re.test(s)).map(([k]) => k);
+  if (matched.length !== 1) return null;
+
+  const hasSecondClause =
+    /[?][^?]*[?]/.test(t) || // two question marks
+    /\b(and|also|but|plus|as well|aur|bhi)\b/.test(s) ||
+    /[.?!]\s+\S/.test(t); // a second sentence
+  if (hasSecondClause) return null;
+
+  return matched[0];
 }
