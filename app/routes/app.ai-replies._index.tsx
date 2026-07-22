@@ -62,15 +62,52 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   // number can be copied straight into a provider search or a dialler.
   const fmtPhone = (p: string) => (p.length === 10 ? `+91 ${p}` : p);
 
+  // Group by number rather than listing every message. One customer sending
+  // seven messages produced seven rows scattered among other people's, which
+  // made it hard to see that a single person was being failed repeatedly.
+  //
+  // The row carries the WORST status of the thread (failed beats pending beats
+  // done): a customer whose first five messages failed should not look
+  // resolved because the sixth happened to succeed.
+  const RANK: Record<string, number> = { failed: 3, claimed: 2, pending: 2, done: 1 };
+  const byPhone = new Map<
+    string,
+    { phone: string; count: number; status: string; error: string; last: string; at: Date }
+  >();
+  for (const j of replied) {
+    const key = j.phone;
+    const row = byPhone.get(key);
+    if (!row) {
+      byPhone.set(key, {
+        phone: fmtPhone(j.phone),
+        count: 1,
+        status: j.status,
+        error: j.error,
+        last: j.message.slice(0, 60),
+        at: j.updatedAt,
+      });
+      continue;
+    }
+    row.count++;
+    // `replied` is newest-first, so the first message seen is the latest one
+    // and must stay as `last`; only the status escalates.
+    if ((RANK[j.status] ?? 0) > (RANK[row.status] ?? 0)) {
+      row.status = j.status;
+      row.error = j.error;
+    }
+  }
+
   return json({
     activity: {
-      replied: replied.map((j) => ({
+      // Every message, so an expanded row can show the individual history.
+      messages: replied.map((j) => ({
         phone: fmtPhone(j.phone),
         message: j.message.slice(0, 60),
         status: j.status,
         error: j.error,
         at: j.updatedAt,
       })),
+      replied: Array.from(byPhone.values()),
       skipped: skipped.map((k) => ({
         phone: fmtPhone(k.phone),
         reason: k.reason,
@@ -390,6 +427,8 @@ export default function AiRepliesPage() {
   const [position, setPosition] = useState(initial.position);
   const [testQuestion, setTestQuestion] = useState("");
   const [showSuccess, setShowSuccess] = useState(false);
+  // Which grouped number is expanded to show its individual messages.
+  const [expanded, setExpanded] = useState<string | null>(null);
 
   const isDirty =
     enabled !== initial.enabled ||
@@ -847,14 +886,18 @@ export default function AiRepliesPage() {
                   <BlockStack gap="500">
                     <BlockStack gap="200">
                       <Text as="h3" variant="headingSm">
-                        Inbound messages ({d.activity.replied.length})
+                        Customers ({d.activity.replied.length}) ·{" "}
+                        {d.activity.messages.length} messages
                       </Text>
                       <Text as="p" tone="subdued" variant="bodySm">
-                        {d.activity.replied.filter((r) => r.status === "done").length} replied ·{" "}
-                        {d.activity.replied.filter((r) => r.status === "pending").length} waiting to
-                        retry · {d.activity.replied.filter((r) => r.status === "failed").length}{" "}
-                        failed. A <strong>rate-limited</strong> row means your LLM plan's
-                        per-minute or per-day limit was hit; those retry automatically.
+                        {d.activity.replied.filter((r) => r.status === "done").length} answered ·{" "}
+                        {d.activity.replied.filter((r) => r.status === "pending" || r.status === "claimed").length}{" "}
+                        waiting to retry ·{" "}
+                        {d.activity.replied.filter((r) => r.status === "failed").length} failed.
+                        The badge shows a customer's WORST outcome, so a thread that failed
+                        earlier stays visible. Click a row with several messages to expand it.
+                        A <strong>rate-limited</strong> row means your LLM plan's per-minute or
+                        per-day limit was hit; those retry automatically.
                       </Text>
                       {d.activity.replied.length === 0 ? (
                         <Text as="p" tone="subdued" variant="bodySm">Nothing yet.</Text>
@@ -863,19 +906,69 @@ export default function AiRepliesPage() {
                         // settings below it off the page — 60 rows is normal.
                         <div style={{ maxHeight: 280, overflowY: "auto", paddingRight: 8 }}>
                         <BlockStack gap="200">
-                        {d.activity.replied.map((r, i) => (
-                          <InlineStack key={i} gap="200" blockAlign="center" wrap={false}>
-                            <div style={{ minWidth: 120 }}>
-                              <Text as="span" variant="bodySm" fontWeight="semibold">{r.phone}</Text>
-                            </div>
-                            <Badge tone={r.status === "done" ? "success" : r.status === "failed" ? "critical" : "attention"}>
-                              {r.status}
-                            </Badge>
-                            <Text as="span" variant="bodySm" tone="subdued">
-                              {r.message}{r.error ? ` — ${r.error}` : ""}
-                            </Text>
-                          </InlineStack>
-                        ))}
+                        {d.activity.replied.map((r) => {
+                          const open = expanded === r.phone;
+                          const thread = d.activity.messages.filter((m) => m.phone === r.phone);
+                          return (
+                            <BlockStack key={r.phone} gap="100">
+                              <div
+                                onClick={() => setExpanded(open ? null : r.phone)}
+                                style={{ cursor: r.count > 1 ? "pointer" : "default" }}
+                              >
+                                <InlineStack gap="200" blockAlign="center" wrap={false}>
+                                  <div style={{ minWidth: 130 }}>
+                                    <Text as="span" variant="bodySm" fontWeight="semibold">
+                                      {r.phone}
+                                    </Text>
+                                  </div>
+                                  <Badge
+                                    tone={
+                                      r.status === "done"
+                                        ? "success"
+                                        : r.status === "failed"
+                                        ? "critical"
+                                        : "attention"
+                                    }
+                                  >
+                                    {r.status}
+                                  </Badge>
+                                  {r.count > 1 && (
+                                    <Text as="span" variant="bodySm" tone="subdued">
+                                      {open ? "▾" : "▸"} {r.count} messages
+                                    </Text>
+                                  )}
+                                  <Text as="span" variant="bodySm" tone="subdued">
+                                    {r.last}
+                                    {r.error ? ` — ${r.error}` : ""}
+                                  </Text>
+                                </InlineStack>
+                              </div>
+
+                              {open &&
+                                thread.map((m, j) => (
+                                  <div key={j} style={{ paddingLeft: 24 }}>
+                                    <InlineStack gap="200" blockAlign="center" wrap={false}>
+                                      <Badge
+                                        tone={
+                                          m.status === "done"
+                                            ? "success"
+                                            : m.status === "failed"
+                                            ? "critical"
+                                            : "attention"
+                                        }
+                                      >
+                                        {m.status}
+                                      </Badge>
+                                      <Text as="span" variant="bodySm" tone="subdued">
+                                        {m.message}
+                                        {m.error ? ` — ${m.error}` : ""}
+                                      </Text>
+                                    </InlineStack>
+                                  </div>
+                                ))}
+                            </BlockStack>
+                          );
+                        })}
                         </BlockStack>
                         </div>
                       )}
