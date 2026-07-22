@@ -64,6 +64,26 @@ export async function processReplyJob(id: string): Promise<"sent" | "failed" | "
       return "sent";
     }
 
+    // A rate limit is not a failed attempt — it means we never got to try.
+    // Counting it burned all three retries inside three minutes against a
+    // per-minute window a burst keeps saturated, and the message was then
+    // dropped forever (the cron only ever picks up "pending"). Observed live:
+    // 13 of 15 customers silently lost, including "It's urgent" and "Call me
+    // pls". Rate-limited jobs go back to pending with the attempt refunded.
+    const throttled =
+      result.error.endsWith(":rate-limited") || result.error.endsWith(":quota-exhausted");
+    if (throttled) {
+      await prisma.whatsAppReplyJob.update({
+        where: { id },
+        data: {
+          status: "pending",
+          attempts: Math.max(0, job.attempts - 1),
+          error: result.error.slice(0, 300),
+        },
+      });
+      return "failed";
+    }
+
     const giveUp = job.attempts >= MAX_ATTEMPTS || result.permanent;
     await prisma.whatsAppReplyJob.update({
       where: { id },
@@ -238,13 +258,6 @@ async function handleJob(job: {
     // message was dropped as failed, hours before the quota would reset. Reset
     // the attempt counter for those so the job survives until the quota does.
     const permanent = ai.error === "bad-key" || ai.error === "bad-model";
-    if (ai.error === "quota-exhausted") {
-      await prisma.whatsAppReplyJob.update({
-        where: { id: job.id },
-        data: { status: "pending", attempts: 0, error: `${settings.aiProvider}:quota-exhausted` },
-      });
-      return { ok: false, error: `${settings.aiProvider}:quota-exhausted` };
-    }
     return { ok: false, error: `${settings.aiProvider}:${ai.error}`, permanent };
   }
 

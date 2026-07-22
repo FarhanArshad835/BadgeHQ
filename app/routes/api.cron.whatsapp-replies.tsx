@@ -16,7 +16,7 @@ import { PURGE_AFTER_HOURS } from "../utils/whatsapp-ai.server";
 import { processReplyJob } from "../utils/whatsapp-reply.server";
 
 /** Bounded so one run can't exceed the function timeout. */
-const BATCH = 10;
+const BATCH = 8; // paced 4s apart below — keep BATCH * 4s under maxDuration
 /** A row claimed longer ago than this is assumed abandoned and retried. */
 const STALE_CLAIM_MS = 5 * 60 * 1000;
 
@@ -29,6 +29,20 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const now = new Date();
   const staleBefore = new Date(now.getTime() - STALE_CLAIM_MS);
+
+  // Revive messages dropped by throttling. Before rate limits stopped counting
+  // as attempts, a burst could mark a customer failed within three minutes and
+  // the cron never looks at "failed" again — so those people got permanent
+  // silence for a limit that cleared a minute later. Recent ones are worth one
+  // more try; older than an hour, a reply would arrive too late to be useful.
+  await prisma.whatsAppReplyJob.updateMany({
+    where: {
+      status: "failed",
+      error: { contains: "rate-limited" },
+      updatedAt: { gt: new Date(now.getTime() - 3600_000) },
+    },
+    data: { status: "pending", attempts: 0 },
+  });
 
   // Recover rows abandoned by a run that died mid-flight.
   await prisma.whatsAppReplyJob.updateMany({
@@ -64,8 +78,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   let failed = 0;
 
   // Same worker the webhooks' instant path runs — see whatsapp-reply.server.ts.
-  for (const { id } of claimed) {
-    const outcome = await processReplyJob(id);
+  //
+  // Spaced, not fired together. Groq's free tier allows ~12K tokens a minute,
+  // which at ~2.3K a reply is about five; a batch of ten sent at once put every
+  // one of them over the limit. A short gap between calls keeps a burst inside
+  // the window instead of failing the whole batch.
+  for (let i = 0; i < claimed.length; i++) {
+    if (i > 0) await new Promise((r) => setTimeout(r, 4000));
+    const outcome = await processReplyJob(claimed[i].id);
     if (outcome === "sent") sent++;
     else if (outcome === "failed") failed++;
   }

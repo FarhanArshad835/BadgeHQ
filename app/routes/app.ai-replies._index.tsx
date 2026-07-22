@@ -848,7 +848,14 @@ export default function AiRepliesPage() {
                   <BlockStack gap="500">
                     <BlockStack gap="200">
                       <Text as="h3" variant="headingSm">
-                        Replied ({d.activity.replied.filter((r) => r.status === "done").length})
+                        Inbound messages ({d.activity.replied.length})
+                      </Text>
+                      <Text as="p" tone="subdued" variant="bodySm">
+                        {d.activity.replied.filter((r) => r.status === "done").length} replied ·{" "}
+                        {d.activity.replied.filter((r) => r.status === "pending").length} waiting to
+                        retry · {d.activity.replied.filter((r) => r.status === "failed").length}{" "}
+                        failed. A <strong>rate-limited</strong> row means your LLM plan's
+                        per-minute or per-day limit was hit; those retry automatically.
                       </Text>
                       {d.activity.replied.length === 0 ? (
                         <Text as="p" tone="subdued" variant="bodySm">Nothing yet.</Text>
