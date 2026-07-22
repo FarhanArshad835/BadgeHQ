@@ -146,7 +146,20 @@ export function drainJobSoon(id: string): void {
   // ride on inbound traffic, so a busy shop clears its rate-limited queue
   // within minutes (exactly when messages are flowing) and an idle shop costs
   // nothing at all. The cron still sweeps hourly as the backstop.
-  const work = drainJobNow(id).then(() => drainPendingBacklog(2));
+  //
+  // Skipped when this message's own reply was throttled: the quota is plainly
+  // gone, so piggybacked attempts would each spend an 8s thread fetch just to
+  // hear the same 429. During quota exhaustion — the busiest hours — that
+  // multiplied held-open wall time by ~5x for zero delivered replies.
+  const work = drainJobNow(id).then(async () => {
+    const own = await prisma.whatsAppReplyJob.findUnique({
+      where: { id },
+      select: { error: true },
+    });
+    const throttled =
+      own?.error?.includes("rate-limited") || own?.error?.includes("quota-exhausted");
+    if (!throttled) await drainPendingBacklog(2);
+  });
   try {
     waitUntil(work);
   } catch {
@@ -172,7 +185,11 @@ export async function drainPendingBacklog(max: number): Promise<void> {
 
     for (let i = 0; i < max; i++) {
       const next = await prisma.whatsAppReplyJob.findFirst({
-        where: { status: "pending" },
+        // The backoff filter is what stops a stuck job being hammered: without
+        // it, the OLDEST pending job was re-picked by every inbound webhook,
+        // failing the same way each time. Three minutes between attempts on
+        // any one job caps the waste while a per-minute limit still clears.
+        where: { status: "pending", updatedAt: { lt: new Date(Date.now() - 3 * 60_000) } },
         orderBy: { createdAt: "asc" },
         select: { id: true },
       });
