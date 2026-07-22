@@ -80,5 +80,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   // A no-op once empty; kept until the general job-table purge lands.
   await prisma.whatsAppReplyJob.deleteMany({ where: { shop: "__dt_capture__" } });
 
+  // Skip records are diagnostics for the admin's activity view, not history —
+  // 7 days is long enough to answer "why didn't it reply to her on Tuesday"
+  // and short enough that the table cannot grow without bound.
+  await prisma.whatsAppSkip.deleteMany({
+    where: { createdAt: { lt: new Date(now.getTime() - 7 * 24 * 3600_000) } },
+  });
+
   return json({ ok: true, claimed: claimed.length, sent, failed, purged: purged.count });
 };

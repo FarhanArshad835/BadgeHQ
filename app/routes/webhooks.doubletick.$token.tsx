@@ -39,6 +39,23 @@ export const config = { maxDuration: 60 };
 
 const ack = () => new Response(null, { status: 200 });
 
+/**
+ * Record a message the bot chose not to answer.
+ *
+ * These decisions all happen before a reply job exists, so without this they
+ * leave no trace and a merchant asking "why didn't it reply to her" has
+ * nothing to look at. Never throws — a logging failure must not cost a 200.
+ */
+async function noteSkip(shop: string, phone: string, reason: string, preview: string) {
+  try {
+    await prisma.whatsAppSkip.create({
+      data: { shop, phone, reason, preview: preview.slice(0, 120) },
+    });
+  } catch {
+    /* diagnostics only */
+  }
+}
+
 export const loader = async (_: LoaderFunctionArgs) =>
   new Response("Method not allowed", { status: 405 });
 
@@ -101,6 +118,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       // Fail closed: sends are hard-coded to +91, so a foreign number gets
       // silence. Log it distinctly or it's invisible.
       console.warn(`[doubletick-webhook] non-indian-number ignored for ${shop}`);
+      await noteSkip(shop, String(inbound.phone).slice(-12), "non-indian", inbound.text);
       return ack();
     }
 
@@ -128,13 +146,17 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     }
 
     // Muted: a human has this thread in DoubleTick's inbox.
-    if (isMuted(convo)) return ack();
+    if (isMuted(convo)) {
+      await noteSkip(shop, phone, "muted", inbound.text);
+      return ack();
+    }
 
     // Rate limit per shopper, enforced here so a flood never creates rows.
     const windowExpired = !convo || now.getTime() - convo.windowStart.getTime() > RATE_WINDOW_MS;
     const count = windowExpired ? 0 : convo.windowCount;
     if (count >= RATE_LIMIT_PER_HOUR) {
       console.warn(`[doubletick-webhook] rate limited ${shop} ${phone.slice(-4)}`);
+      await noteSkip(shop, phone, "rate-limited", inbound.text);
       return ack();
     }
 

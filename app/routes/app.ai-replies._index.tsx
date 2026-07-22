@@ -39,8 +39,45 @@ const CLEAR_KNOWLEDGE = "__badgehq_clear_knowledge__";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
-  const s = await prisma.aiReplySettings.findUnique({ where: { shop: session.shop } });
+  const shop = session.shop;
+  const [s, replied, skipped] = await Promise.all([
+    prisma.aiReplySettings.findUnique({ where: { shop } }),
+    // Who the bot actually answered, newest first.
+    prisma.whatsAppReplyJob.findMany({
+      where: { shop },
+      orderBy: { updatedAt: "desc" },
+      take: 60,
+      select: { phone: true, message: true, status: true, error: true, updatedAt: true },
+    }),
+    // And who it deliberately did not — the more useful half.
+    prisma.whatsAppSkip.findMany({
+      where: { shop },
+      orderBy: { createdAt: "desc" },
+      take: 40,
+      select: { phone: true, reason: true, preview: true, createdAt: true },
+    }),
+  ]);
+
+  // Mask the middle of each number: enough to recognise a customer in the
+  // provider inbox, not a full contact list rendered into the page.
+  const mask = (p: string) => (p.length >= 10 ? `${p.slice(0, 3)}xxxxx${p.slice(-3)}` : p);
+
   return json({
+    activity: {
+      replied: replied.map((j) => ({
+        phone: mask(j.phone),
+        message: j.message.slice(0, 60),
+        status: j.status,
+        error: j.error,
+        at: j.updatedAt,
+      })),
+      skipped: skipped.map((k) => ({
+        phone: mask(k.phone),
+        reason: k.reason,
+        preview: k.preview,
+        at: k.createdAt,
+      })),
+    },
     isEnabled: s?.isEnabled ?? false,
     aiProvider: s?.aiProvider ?? "gemini",
     // The key itself never leaves the server — only whether one is saved.
@@ -787,6 +824,76 @@ export default function AiRepliesPage() {
                   does not pause it automatically. Photos and voice notes are ignored, and
                   only Indian (+91) numbers are supported.
                 </Text>
+              </BlockStack>
+            </Card>
+
+            <Card>
+              <BlockStack gap="400">
+                <Text as="h2" variant="headingMd">Recent WhatsApp activity</Text>
+                <Text as="p" tone="subdued">
+                  Numbers are part-masked. Find the full conversation in your provider's
+                  inbox by the last three digits.
+                </Text>
+
+                {d.activity.replied.length === 0 && d.activity.skipped.length === 0 ? (
+                  <Banner tone="info">
+                    No inbound WhatsApp messages yet. Once customers message your business
+                    number, replies and skips both appear here.
+                  </Banner>
+                ) : (
+                  <BlockStack gap="500">
+                    <BlockStack gap="200">
+                      <Text as="h3" variant="headingSm">
+                        Replied ({d.activity.replied.filter((r) => r.status === "done").length})
+                      </Text>
+                      {d.activity.replied.length === 0 ? (
+                        <Text as="p" tone="subdued" variant="bodySm">Nothing yet.</Text>
+                      ) : (
+                        d.activity.replied.slice(0, 15).map((r, i) => (
+                          <InlineStack key={i} gap="200" blockAlign="center" wrap={false}>
+                            <div style={{ minWidth: 120 }}>
+                              <Text as="span" variant="bodySm" fontWeight="semibold">{r.phone}</Text>
+                            </div>
+                            <Badge tone={r.status === "done" ? "success" : r.status === "failed" ? "critical" : "attention"}>
+                              {r.status}
+                            </Badge>
+                            <Text as="span" variant="bodySm" tone="subdued">
+                              {r.message}{r.error ? ` — ${r.error}` : ""}
+                            </Text>
+                          </InlineStack>
+                        ))
+                      )}
+                    </BlockStack>
+
+                    <BlockStack gap="200">
+                      <Text as="h3" variant="headingSm">
+                        Not replied ({d.activity.skipped.length})
+                      </Text>
+                      <Text as="p" tone="subdued" variant="bodySm">
+                        <strong>muted</strong> — your team took the thread over (after a
+                        handoff, or the customer sent stop/agent). Clears automatically 12
+                        hours after an automatic handoff; a customer's own stop lasts until
+                        they send start.{" "}
+                        <strong>rate-limited</strong> — more than 20 messages from that
+                        number in an hour.{" "}
+                        <strong>non-indian</strong> — only +91 numbers are supported.
+                      </Text>
+                      {d.activity.skipped.length === 0 ? (
+                        <Text as="p" tone="subdued" variant="bodySm">Nothing skipped.</Text>
+                      ) : (
+                        d.activity.skipped.slice(0, 15).map((k, i) => (
+                          <InlineStack key={i} gap="200" blockAlign="center" wrap={false}>
+                            <div style={{ minWidth: 120 }}>
+                              <Text as="span" variant="bodySm" fontWeight="semibold">{k.phone}</Text>
+                            </div>
+                            <Badge tone="attention">{k.reason}</Badge>
+                            <Text as="span" variant="bodySm" tone="subdued">{k.preview}</Text>
+                          </InlineStack>
+                        ))
+                      )}
+                    </BlockStack>
+                  </BlockStack>
+                )}
               </BlockStack>
             </Card>
 

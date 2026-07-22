@@ -342,6 +342,25 @@ model WhatsAppConversation {
 /// Inbound message awaiting an AI reply. Exists because Interakt demands a 200
 /// within 3s while Gemini can take 15s — the webhook records the job and a cron
 /// drains it. A row is also the only durable record if a send fails.
+/// One inbound message the bot deliberately did NOT answer.
+///
+/// These decisions happen in the webhook, before a WhatsAppReplyJob exists, so
+/// without this row they leave no trace anywhere: a merchant asking "why didn't
+/// it reply to this customer" had nothing to look at. Skips are far more
+/// interesting than successes — they are where the feature disappoints someone.
+model WhatsAppSkip {
+  id        String   @id @default(cuid())
+  shop      String
+  phone     String
+  /// muted | rate-limited | non-indian | not-text | feature-off
+  reason    String
+  /// First part of the message, for recognising the conversation. Truncated.
+  preview   String   @default("")
+  createdAt DateTime @default(now())
+
+  @@index([shop, createdAt])
+}
+
 model WhatsAppReplyJob {
   id                String   @id @default(cuid())
   shop              String
