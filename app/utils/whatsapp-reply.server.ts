@@ -141,11 +141,51 @@ export async function drainJobNow(id: string): Promise<void> {
  * rejects, and the cron sweep still covers a process that exits too soon.
  */
 export function drainJobSoon(id: string): void {
-  const work = drainJobNow(id);
+  // After answering this message, opportunistically drain a little of the
+  // pending backlog. This is what replaced the every-minute cron: retries now
+  // ride on inbound traffic, so a busy shop clears its rate-limited queue
+  // within minutes (exactly when messages are flowing) and an idle shop costs
+  // nothing at all. The cron still sweeps hourly as the backstop.
+  const work = drainJobNow(id).then(() => drainPendingBacklog(2));
   try {
     waitUntil(work);
   } catch {
     void work;
+  }
+}
+
+/**
+ * Drain up to `max` of the oldest pending jobs, paced apart so this burst and
+ * the reply that preceded it stay inside the LLM's per-minute token window.
+ *
+ * Total by construction — runs inside waitUntil where a throw would vanish.
+ * Also recovers stale claims first: with the cron now hourly, a crashed
+ * invocation would otherwise strand its job as "claimed" for up to an hour,
+ * and this makes the next inbound message rescue it instead.
+ */
+export async function drainPendingBacklog(max: number): Promise<void> {
+  try {
+    await prisma.whatsAppReplyJob.updateMany({
+      where: { status: "claimed", updatedAt: { lt: new Date(Date.now() - 5 * 60_000) } },
+      data: { status: "pending" },
+    });
+
+    for (let i = 0; i < max; i++) {
+      const next = await prisma.whatsAppReplyJob.findFirst({
+        where: { status: "pending" },
+        orderBy: { createdAt: "asc" },
+        select: { id: true },
+      });
+      if (!next) return;
+
+      // Space the calls out; the webhook's own reply just spent tokens.
+      await new Promise((r) => setTimeout(r, 4000));
+      if (await claimReplyJob(next.id)) {
+        await processReplyJob(next.id);
+      }
+    }
+  } catch (e) {
+    console.error("[wa-reply] backlog drain failed", e);
   }
 }
 

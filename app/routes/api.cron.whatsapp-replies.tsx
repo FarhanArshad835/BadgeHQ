@@ -1,13 +1,20 @@
 /**
- * Cron sweep for inbound WhatsApp AI replies — /api/cron/whatsapp-replies
+ * Hourly maintenance sweep for WhatsApp AI replies — /api/cron/whatsapp-replies
  *
- * Runs every minute (see vercel.json). Since the webhooks drain their own jobs
- * instantly via waitUntil(), this is the SAFETY NET, not the primary path: it
- * picks up whatever the instant path dropped — a crashed invocation, a
- * rate-limited retry, a stale claim. Most ticks find nothing and exit in
- * milliseconds.
+ * HOURLY, deliberately. This ran every minute and was the app's single biggest
+ * infrastructure cost: 43,200 invocations and ~345,000 database queries a
+ * month, almost all finding nothing — and a query every few seconds kept the
+ * Neon endpoint permanently awake, defeating its auto-suspend.
  *
- * Guarded by CRON_SECRET because every run can spend the merchant's LLM quota.
+ * It could drop to hourly because it is not the delivery path. New messages
+ * are answered in-invocation by the webhooks (waitUntil), and retries ride on
+ * inbound traffic: every webhook piggybacks a drain of the oldest pending jobs
+ * (drainPendingBacklog), so a busy shop clears its backlog within minutes —
+ * precisely when traffic exists — and an idle shop spends nothing.
+ *
+ * What remains here is what genuinely needs a clock: reviving throttled jobs
+ * during quiet spells, stale-claim recovery as a backstop, and retention
+ * purges. Guarded by CRON_SECRET because a run can spend the merchant's quota.
  */
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
@@ -99,6 +106,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   // diagnosis) — they held raw webhook bodies with real customer messages.
   // A no-op once empty; kept until the general job-table purge lands.
   await prisma.whatsAppReplyJob.deleteMany({ where: { shop: "__dt_capture__" } });
+
+  // Finished jobs are kept 30 days for the activity view, then dropped — this
+  // table previously grew without bound, which on Neon is paid storage that
+  // never shrinks. Pending/claimed rows are never touched here.
+  await prisma.whatsAppReplyJob.deleteMany({
+    where: {
+      status: { in: ["done", "failed"] },
+      updatedAt: { lt: new Date(now.getTime() - 30 * 24 * 3600_000) },
+    },
+  });
 
   // Skip records are diagnostics for the admin's activity view, not history —
   // 7 days is long enough to answer "why didn't it reply to her on Tuesday"

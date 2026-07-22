@@ -35,7 +35,10 @@ import { drainJobSoon } from "../utils/whatsapp-reply.server";
 
 // The instant drain keeps running AFTER the 200 goes back (waitUntil), and it
 // includes an LLM call of up to 15s plus the send — give it headroom.
-export const config = { maxDuration: 60 };
+// Own reply (~20s worst) plus up to two piggybacked backlog drains, paced
+// 4s apart. Fluid compute bills active CPU, so the paced waiting is cheap;
+// the budget just has to exist.
+export const config = { maxDuration: 120 };
 
 const ack = () => new Response(null, { status: 200 });
 

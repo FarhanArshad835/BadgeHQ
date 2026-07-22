@@ -34,7 +34,10 @@ import { drainJobSoon } from "../utils/whatsapp-reply.server";
 // The instant drain runs AFTER the 200 is sent (waitUntil), so Interakt's
 // 3-second rule still sees a sub-second response — but the invocation itself
 // now carries an LLM call of up to 15s plus the send. Give it headroom.
-export const config = { maxDuration: 60 };
+// Own reply (~20s worst) plus up to two piggybacked backlog drains, paced
+// 4s apart. Fluid compute bills active CPU, so the paced waiting is cheap;
+// the budget just has to exist.
+export const config = { maxDuration: 120 };
 
 /** 200 with no body — the "received, nothing to do" response. */
 const ack = () => new Response(null, { status: 200 });
