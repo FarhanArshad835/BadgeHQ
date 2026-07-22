@@ -252,6 +252,15 @@ Button taps arrive as `message.type: "BUTTON"` with the button label in `text` a
 Prefer `dtMessageId` (DoubleTick's UUID) over `messageId` (Meta's `wamid.…`) as an
 idempotency key — it's present on every event and it's what their dashboard displays.
 
+### Not found: chatbot flows
+
+No endpoint lists or manages the chatbots built in the dashboard. Probed 12
+plausible paths (`/bots`, `/v2/bots`, `/chatbots`, `/flows`, `/automations`,
+variants) — all `404` — and the docs confirm: flows are dashboard-only. The
+only bot-adjacent API is "Initiate AI Bot Call", which *triggers* a voice bot.
+The bots' output is still observable: their messages appear in `/chat-messages`
+with sender `Bot(Public API)` or as templates.
+
 ### Not found: mark-as-done
 
 Probed repeatedly across two sessions (`/chats/done`, `/chat/done`, `/v2/chat/done`,
