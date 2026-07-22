@@ -34,6 +34,36 @@ function intIn(v: unknown, fallback: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, n));
 }
 
+/**
+ * Turn a job's internal state into what actually happened to the customer.
+ *
+ * The raw status is about the queue, not the person: a rate-limited message is
+ * stored as "pending" because the cron will retry it, which read as "on its
+ * way" next to an error saying rate-limited. If the daily quota is gone that
+ * message may wait hours, so "pending" was actively misleading.
+ */
+function outcomeOf(status: string, error: string): { label: string; tone: "success" | "critical" | "attention" | "warning" } {
+  if (status === "done") return { label: "answered", tone: "success" };
+
+  const throttled = error.includes("rate-limited") || error.includes("quota-exhausted");
+  if (throttled) {
+    // Distinguishable because the fix differs: one clears in a minute, the
+    // other needs a bigger plan or tomorrow.
+    return error.includes("quota-exhausted")
+      ? { label: "waiting — daily quota used up", tone: "warning" }
+      : { label: "waiting — AI rate limit", tone: "warning" };
+  }
+  if (status === "failed") {
+    if (error.includes("outside-window")) return { label: "too late (24h window closed)", tone: "critical" };
+    if (error.includes("opted-out")) return { label: "not sent — thread muted", tone: "attention" };
+    if (error.includes("bad-key")) return { label: "not sent — API key rejected", tone: "critical" };
+    if (error.includes("daily-limit")) return { label: "not sent — your daily cap", tone: "attention" };
+    return { label: "not sent", tone: "critical" };
+  }
+  if (status === "claimed") return { label: "sending…", tone: "attention" };
+  return { label: "queued", tone: "attention" };
+}
+
 /** Explicit "empty the knowledge base" signal, since blank now means "keep". */
 const CLEAR_KNOWLEDGE = "__badgehq_clear_knowledge__";
 
@@ -891,13 +921,13 @@ export default function AiRepliesPage() {
                       </Text>
                       <Text as="p" tone="subdued" variant="bodySm">
                         {d.activity.replied.filter((r) => r.status === "done").length} answered ·{" "}
-                        {d.activity.replied.filter((r) => r.status === "pending" || r.status === "claimed").length}{" "}
-                        waiting to retry ·{" "}
-                        {d.activity.replied.filter((r) => r.status === "failed").length} failed.
-                        The badge shows a customer's WORST outcome, so a thread that failed
-                        earlier stays visible. Click a row with several messages to expand it.
-                        A <strong>rate-limited</strong> row means your LLM plan's per-minute or
-                        per-day limit was hit; those retry automatically.
+                        {d.activity.replied.filter((r) => r.error.includes("rate-limited") || r.error.includes("quota-exhausted")).length}{" "}
+                        waiting on the AI limit ·{" "}
+                        {d.activity.replied.filter((r) => r.status === "failed" && !r.error.includes("rate-limited") && !r.error.includes("quota-exhausted")).length}{" "}
+                        not sent. The badge shows a customer's WORST outcome, so a thread that
+                        failed earlier stays visible. Click a row with several messages to
+                        expand it. <strong>Waiting</strong> rows retry by themselves — a
+                        per-minute limit clears in about a minute, a daily quota at midnight.
                       </Text>
                       {d.activity.replied.length === 0 ? (
                         <Text as="p" tone="subdued" variant="bodySm">Nothing yet.</Text>
@@ -921,16 +951,8 @@ export default function AiRepliesPage() {
                                       {r.phone}
                                     </Text>
                                   </div>
-                                  <Badge
-                                    tone={
-                                      r.status === "done"
-                                        ? "success"
-                                        : r.status === "failed"
-                                        ? "critical"
-                                        : "attention"
-                                    }
-                                  >
-                                    {r.status}
+                                  <Badge tone={outcomeOf(r.status, r.error).tone}>
+                                    {outcomeOf(r.status, r.error).label}
                                   </Badge>
                                   {r.count > 1 && (
                                     <Text as="span" variant="bodySm" tone="subdued">
@@ -939,7 +961,6 @@ export default function AiRepliesPage() {
                                   )}
                                   <Text as="span" variant="bodySm" tone="subdued">
                                     {r.last}
-                                    {r.error ? ` — ${r.error}` : ""}
                                   </Text>
                                 </InlineStack>
                               </div>
@@ -948,20 +969,11 @@ export default function AiRepliesPage() {
                                 thread.map((m, j) => (
                                   <div key={j} style={{ paddingLeft: 24 }}>
                                     <InlineStack gap="200" blockAlign="center" wrap={false}>
-                                      <Badge
-                                        tone={
-                                          m.status === "done"
-                                            ? "success"
-                                            : m.status === "failed"
-                                            ? "critical"
-                                            : "attention"
-                                        }
-                                      >
-                                        {m.status}
+                                      <Badge tone={outcomeOf(m.status, m.error).tone}>
+                                        {outcomeOf(m.status, m.error).label}
                                       </Badge>
                                       <Text as="span" variant="bodySm" tone="subdued">
                                         {m.message}
-                                        {m.error ? ` — ${m.error}` : ""}
                                       </Text>
                                     </InlineStack>
                                   </div>
