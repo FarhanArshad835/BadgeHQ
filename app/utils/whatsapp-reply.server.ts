@@ -25,6 +25,7 @@ import {
   isMuted,
   loadTurns,
   needsHumanNow,
+  ORDER_REF_RE,
 } from "./whatsapp-ai.server";
 import {
   HANDOVER_REPLY,
@@ -437,6 +438,9 @@ async function handleJob(job: {
   let system = buildSystemPrompt(settings, "whatsapp", job.message);
   let history = loadTurns(convo?.turns);
 
+  // Transcript hoisted so the post-generation output guard can check it.
+  let threadTranscript: string | null = null;
+
   // Give the LLM the REAL thread — human agent replies, the button-menu bot,
   // everything — not just its own memory. Without this it walked blind into
   // disputes a human was already handling and could contradict them. DoubleTick
@@ -454,6 +458,7 @@ async function handleJob(job: {
       maxTotalChars: settings.waThreadTotalChars,
     });
     const thread = threadRes?.transcript ?? null;
+    threadTranscript = thread;
 
     // A human working the thread means the bot is not needed. Two signals:
     //  - the human's message is the LAST one (humanRepliedLast), or
@@ -505,6 +510,22 @@ async function handleJob(job: {
     // the attempt counter for those so the job survives until the quota does.
     const permanent = ai.error === "bad-key" || ai.error === "bad-model";
     return { ok: false, error: `${settings.aiProvider}:${ai.error}`, permanent };
+  }
+
+  // Output guard, mechanical where the prompt is advisory: if the model asks
+  // the customer for an order number or link, the reply must not go out when
+  // the conversation already contains one. Verified live: a 12-message thread
+  // whose order-confirmation template ("Order Number: #…") sat ten minutes
+  // above the question, in full view — and the model asked anyway. Asking for
+  // what is visible reads as not listening, and asking at all implies a
+  // lookup capability that does not exist, so the failed reply becomes a
+  // handoff: the team genuinely can use that order number.
+  const asksForOrderRef =
+    /(?:share|provide|give|send|tell|confirm)[^.?!]{0,50}order\s*(?:number|id|no\b|link)|order\s*(?:number|id)\s*(?:please|\?)/i.test(
+      ai.text,
+    );
+  if (asksForOrderRef && threadTranscript && ORDER_REF_RE.test(threadTranscript)) {
+    ai.text = (isBusinessHoursIST() ? HANDOVER_REPLY : OFF_HOURS_REPLY) + " [HANDOFF]";
   }
 
   // The model ends its reply with [HANDOFF] when it decides a human must take

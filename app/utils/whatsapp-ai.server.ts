@@ -116,6 +116,16 @@ export function needsHumanNow(text: string): boolean {
   return MUST_ESCALATE.some((re) => re.test(t));
 }
 
+/**
+ * Matches an order number or AWB wherever it appears — confirmation templates
+ * ("Order Number: #205946", "#" optional but common), AWB references, bare
+ * long digit runs, and Shopify order URLs. Used both to keep order-bearing
+ * messages in the thread transcript and to catch the model asking for an
+ * order reference the transcript already contains.
+ */
+export const ORDER_REF_RE =
+  /(?:order\s*(?:number|no\.?|id)?\s*[:#\s]*#?\s*\d{5,}|awb\s*[:#]?\s*\d{8,}|\d{9,})/i;
+
 /** True when the bot must stay silent for this conversation right now. */
 export function isMuted(convo: { optedOut: boolean; mutedUntil?: Date | null } | null): boolean {
   if (!convo?.optedOut) return false;
@@ -462,12 +472,7 @@ export async function fetchDoubleTickThread(opts: {
     //
     // Pull any message carrying an order number or AWB back in, newest first,
     // and place them with the opening block so they read as background.
-    // A "#" often sits between the label and the digits ("Order
-    // Number: #205946"), so it must be optional rather than absent —
-    // without it the order-confirmation template, the most useful message
-    // in the thread, was the one thing this failed to match.
-    const ORDER_REF =
-      /(?:order\s*(?:number|no\.?|id)?\s*[:#\s]*#?\s*\d{5,}|awb\s*[:#]?\s*\d{8,}|\d{9,})/i;
+    const ORDER_REF = ORDER_REF_RE;
     const chosen = new Set(selected);
     const orderRefs: any[] = [];
     for (let i = msgs.length - 1; i >= 0 && orderRefs.length < 3; i--) {
