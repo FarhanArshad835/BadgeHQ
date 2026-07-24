@@ -22,6 +22,7 @@ import {
   Button,
   Badge,
   List,
+  Divider,
 } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
@@ -186,6 +187,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     waKeyPreview: s?.waApiKey ? s.waApiKey.slice(-4) : "",
     hasWaSecret: Boolean(s?.waWebhookSecret),
     waFromNumber: s?.waFromNumber ?? "",
+    // Live parcel tracking. The Shiprocket password is write-only like every
+    // other secret — the client only learns whether one is saved.
+    waTrackingEnabled: s?.waTrackingEnabled ?? false,
+    waShiprocketEmail: s?.waShiprocketEmail ?? "",
+    hasShiprocketPassword: Boolean(s?.waShiprocketPassword),
     // Whether the DoubleTick webhook has been registered for this shop.
     hasWaAuth: Boolean(s?.waWebhookAuth),
     // Built from the app's own URL, never the request host — inside the Shopify
@@ -280,6 +286,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const newKey = String(data.apiKey || "").trim();
   const newWaKey = String(data.waApiKey || "").trim();
   const newWaSecret = String(data.waWebhookSecret || "").trim();
+  const newShiprocketPassword = String(data.waShiprocketPassword || "").trim();
   const waProvider = data.waProvider === "doubletick" ? "doubletick" : "interakt";
   const waFromNumber = String(data.waFromNumber || "").trim().replace(/[^\d+]/g, "").slice(0, 20);
 
@@ -382,6 +389,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       waThreadOpening: intIn(data.waThreadOpening, 4, 0, 20),
       waThreadLineChars: intIn(data.waThreadLineChars, 400, 40, 2000),
       waThreadTotalChars: intIn(data.waThreadTotalChars, 4000, 200, 20000),
+      // Live parcel tracking. Email isn't a secret, so it's stored plainly; the
+      // password follows the write-only rule below (blank keeps the saved one).
+      waTrackingEnabled: Boolean(data.waTrackingEnabled),
+      waShiprocketEmail: text(data.waShiprocketEmail, "", 200),
       // Blank means "keep what's saved", the same rule the API keys follow.
       // Without this, one save submitted from a stale or not-yet-hydrated form
       // silently wiped the whole knowledge base, and the bot kept answering
@@ -403,11 +414,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     await prisma.aiReplySettings.upsert({
       where: { shop },
       // Empty key field means "keep the saved key".
-      create: { shop, apiKey: newKey, waApiKey: newWaKey, waWebhookSecret: newWaSecret, ...values },
+      create: {
+        shop,
+        apiKey: newKey,
+        waApiKey: newWaKey,
+        waWebhookSecret: newWaSecret,
+        waShiprocketPassword: newShiprocketPassword,
+        ...values,
+      },
       update: {
         ...(newKey ? { apiKey: newKey } : {}),
         ...(newWaKey ? { waApiKey: newWaKey } : {}),
         ...(newWaSecret ? { waWebhookSecret: newWaSecret } : {}),
+        ...(newShiprocketPassword ? { waShiprocketPassword: newShiprocketPassword } : {}),
         ...values,
       },
     });
@@ -460,6 +479,9 @@ export default function AiRepliesPage() {
     waApiKey: "",
     waWebhookSecret: "",
     waFromNumber: d.waFromNumber,
+    waTrackingEnabled: d.waTrackingEnabled,
+    waShiprocketEmail: d.waShiprocketEmail,
+    waShiprocketPassword: "",
   };
 
   const [enabled, setEnabled] = useState(initial.enabled);
@@ -475,6 +497,9 @@ export default function AiRepliesPage() {
   const [waApiKey, setWaApiKey] = useState(initial.waApiKey);
   const [waWebhookSecret, setWaWebhookSecret] = useState(initial.waWebhookSecret);
   const [waFromNumber, setWaFromNumber] = useState(initial.waFromNumber);
+  const [waTrackingEnabled, setWaTrackingEnabled] = useState(initial.waTrackingEnabled);
+  const [waShiprocketEmail, setWaShiprocketEmail] = useState(initial.waShiprocketEmail);
+  const [waShiprocketPassword, setWaShiprocketPassword] = useState(initial.waShiprocketPassword);
   const [apiKey, setApiKey] = useState(initial.apiKey);
   const [knowledge, setKnowledge] = useState(initial.knowledge);
   const [botName, setBotName] = useState(initial.botName);
@@ -509,7 +534,10 @@ export default function AiRepliesPage() {
     waThreadTotalChars !== initial.waThreadTotalChars ||
     waApiKey !== initial.waApiKey ||
     waWebhookSecret !== initial.waWebhookSecret ||
-    waFromNumber !== initial.waFromNumber;
+    waFromNumber !== initial.waFromNumber ||
+    waTrackingEnabled !== initial.waTrackingEnabled ||
+    waShiprocketEmail !== initial.waShiprocketEmail ||
+    waShiprocketPassword !== initial.waShiprocketPassword;
 
   useEffect(() => {
     if (actionData?.success) {
@@ -547,6 +575,9 @@ export default function AiRepliesPage() {
     setWaApiKey(initial.waApiKey);
     setWaWebhookSecret(initial.waWebhookSecret);
     setWaFromNumber(initial.waFromNumber);
+    setWaTrackingEnabled(initial.waTrackingEnabled);
+    setWaShiprocketEmail(initial.waShiprocketEmail);
+    setWaShiprocketPassword(initial.waShiprocketPassword);
   };
 
   const handleSave = () => {
@@ -574,6 +605,9 @@ export default function AiRepliesPage() {
           waApiKey,
           waWebhookSecret,
           waFromNumber,
+          waTrackingEnabled,
+          waShiprocketEmail,
+          waShiprocketPassword,
         }),
       },
       { method: "POST" },
@@ -954,6 +988,45 @@ export default function AiRepliesPage() {
                   does not pause it automatically. Photos and voice notes are ignored, and
                   only Indian (+91) numbers are supported.
                 </Text>
+
+                {isDoubleTick && (
+                  <>
+                    <Divider />
+                    <Text as="h3" variant="headingSm">Live order tracking</Text>
+                    <Checkbox
+                      label="Answer 'where's my order?' with live courier status"
+                      helpText="When a customer asks about their order, the bot reads the AWB from the conversation and checks Shiprocket or Delhivery for the live status, then answers in their own words. If no AWB is in the thread, it hands over as usual."
+                      checked={waTrackingEnabled}
+                      onChange={setWaTrackingEnabled}
+                    />
+                    <TextField
+                      label="Shiprocket email"
+                      value={waShiprocketEmail}
+                      onChange={setWaShiprocketEmail}
+                      autoComplete="off"
+                      placeholder="you@yourstore.com"
+                      helpText="The login email for your Shiprocket panel — used only to read tracking status."
+                    />
+                    <TextField
+                      label="Shiprocket password"
+                      value={waShiprocketPassword}
+                      onChange={setWaShiprocketPassword}
+                      autoComplete="off"
+                      type="password"
+                      placeholder={d.hasShiprocketPassword ? "••••••••" : "Your Shiprocket password"}
+                      helpText={
+                        d.hasShiprocketPassword
+                          ? "A password is saved — enter a new one to replace it. Stored securely, never sent to your storefront."
+                          : "Stored securely, server-side only. Needed to read Shiprocket tracking."
+                      }
+                    />
+                    <Text as="p" tone="subdued" variant="bodySm">
+                      Delhivery tracking reuses the API key from your{" "}
+                      <strong>Delivery Estimate</strong> settings — nothing to add here. Leave
+                      Shiprocket blank if you only ship Delhivery.
+                    </Text>
+                  </>
+                )}
               </BlockStack>
             </Card>
 

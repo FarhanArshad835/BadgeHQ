@@ -310,6 +310,16 @@ model AiReplySettings {
   waThreadLineChars  Int @default(400)
   waThreadTotalChars Int @default(4000)
 
+  // Live parcel tracking. When a shopper asks "where's my order?" the bot pulls
+  // the AWB out of the thread (the merchant's flow bot posts it) and asks the
+  // carrier for a live status, which it feeds to the LLM. Shiprocket needs the
+  // panel email + password; the Delhivery key is reused from DeliverySettings
+  // (the storefront delivery-estimate feature already stores it), so there's no
+  // Delhivery field here. Empty creds → that carrier is simply skipped.
+  waTrackingEnabled     Boolean @default(false)
+  waShiprocketEmail     String  @default("")
+  waShiprocketPassword  String  @default("") // Shiprocket panel password — server-side only
+
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 

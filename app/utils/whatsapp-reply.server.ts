@@ -37,8 +37,19 @@ import {
   isBusinessHoursIST,
   matchMenuIntent,
 } from "./whatsapp-menu.server";
+import { extractAwb, trackParcel, trackingContextForLlm } from "./tracking.server";
 
 export const MAX_ATTEMPTS = 3;
+
+/**
+ * Is the shopper chasing their order? Covers English + common Hinglish phrasings
+ * seen live ("where is my order", "track", "kitna time lagega", "kab tak
+ * aayega", "delivery status", "abhi kahan hai"). Deliberately broad: a false
+ * positive just does one carrier lookup that finds nothing and is ignored; a
+ * false negative means the shopper gets a handoff instead of a live status.
+ */
+const WANTS_TRACKING_RE =
+  /\b(track|tracking|where\s+is|delivery\s+status|shipment|out\s+for\s+delivery|dispatch|delivered)\b|kaha|kahan|kab\s*(tak|ayega|aayega|milega)|kitna\s*(time|din)|status/i;
 
 /**
  * Past this age a queued reply is dropped instead of sent.
@@ -488,6 +499,42 @@ async function handleJob(job: {
       // The thread supersedes the bot's own partial memory — sending both
       // would duplicate content and spend tokens twice.
       history = [];
+    }
+  }
+
+  // Live parcel tracking. If the shopper is chasing their order AND an AWB is
+  // somewhere in the thread (the merchant's flow bot posts "Order Number / AWB"
+  // on every order), ask the carrier for a live status and hand it to the LLM to
+  // phrase. We have NO Shopify PCD approval, so the AWB from the conversation is
+  // the only handle we have — and the only one we need. Any failure (no AWB, no
+  // creds, carrier down, unknown AWB) silently skips: the bot just answers
+  // without live data, exactly as before.
+  if (settings.waTrackingEnabled && WANTS_TRACKING_RE.test(job.message)) {
+    const awb =
+      extractAwb(job.message) || (threadTranscript ? extractAwb(threadTranscript) : null);
+    if (awb) {
+      // Delhivery key is reused from the storefront delivery-estimate feature —
+      // no separate field. Shiprocket creds live on the AI-replies settings.
+      const delivery = await prisma.deliverySettings.findUnique({
+        where: { shop: job.shop },
+        select: { apiToken: true },
+      });
+      const tracking = await trackParcel({
+        awb,
+        shiprocketEmail: settings.waShiprocketEmail || undefined,
+        shiprocketPassword: settings.waShiprocketPassword || undefined,
+        delhiveryApiKey: delivery?.apiToken || undefined,
+      });
+      if (tracking) {
+        system +=
+          "\n\n=== LIVE SHIPMENT STATUS (from the courier, just now) ===\n" +
+          trackingContextForLlm(tracking) +
+          "\n=== END LIVE STATUS ===\n" +
+          "Use this live status to answer the shopper's tracking question directly and " +
+          "specifically — in their language and tone. State where the parcel is and, if not " +
+          "yet delivered, that it's on the way. Do NOT claim you can't see tracking. Do NOT " +
+          "invent a delivery date the courier didn't give.";
+      }
     }
   }
 
