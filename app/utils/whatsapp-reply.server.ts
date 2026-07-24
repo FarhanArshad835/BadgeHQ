@@ -287,16 +287,19 @@ async function handleJob(job: {
   // URL; the flow looks up the chat and assigns it to the fixed agent configured
   // inside Bot Studio.
   //
-  // Fire-and-forget: don't await, swallow errors — a failed assign must never
-  // fail the customer's reply or add latency. The bot has already muted itself
-  // for 12h at every call site, so this fires at most once per handoff. Skips
+  // MUST be awaited by every caller. On Vercel an un-awaited fetch inside a
+  // request that has already sent its response gets frozen when the function
+  // suspends, so the POST silently never goes out — which is exactly what we
+  // saw live (reply sent, chat never assigned). handleJob runs inside
+  // waitUntil(), which keeps the invocation alive, so awaiting this is safe and
+  // adds no latency to the customer's reply (that was already sent above).
+  // Errors are swallowed: a failed assign must never fail the reply. Skips
   // silently when no flow URL is configured.
   //
   // The body sends the customer's number under several common key names so the
   // flow can read whichever it expects (phone/customerNumber/customerPhoneNumber),
-  // plus the WABA number and a reason for logging. `reason` is accepted for
-  // parity with the old signature and to give the flow context if it wants it.
-  const assignChatViaFlow = (reason: string) => {
+  // plus the WABA number and a reason for logging.
+  const assignChatViaFlow = async (reason: string): Promise<void> => {
     const url = settings.waHandoffFlowUrl?.trim() || "";
     if (!url) return;
     const body = {
@@ -306,14 +309,21 @@ async function handleJob(job: {
       wabaNumber: settings.waFromNumber.replace(/\D/g, ""),
       reason,
     };
-    fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(10000),
-    }).catch((e) =>
-      console.error("[wa-reply] handoff assign failed:", String(e?.message || e).slice(0, 160)),
-    );
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!res.ok) {
+        console.error("[wa-reply] handoff assign non-2xx:", res.status);
+      } else {
+        console.log("[wa-reply] handoff assign POSTed for", job.phone, "->", res.status);
+      }
+    } catch (e: any) {
+      console.error("[wa-reply] handoff assign failed:", String(e?.message || e).slice(0, 160));
+    }
   };
 
   // Look an AWB up on the courier and return an LLM system-prompt block phrasing
@@ -348,7 +358,7 @@ async function handleJob(job: {
   // The handoff acknowledgement is a fixed string — no AI, no quota spent.
   if (job.message === "__handoff__") {
     const wa = await send(HANDOFF_REPLY, "badgehq-ai-handoff");
-    assignChatViaFlow("Customer asked to talk to a human.");
+    await assignChatViaFlow("Customer asked to talk to a human.");
     return wa.ok ? { ok: true } : { ok: false, error: wa.error };
   }
 
@@ -432,7 +442,7 @@ async function handleJob(job: {
     // not get, so a person should pick this up.
     const wa = await send(HANDOFF_REPLY, "badgehq-ai-nudge");
     if (wa.ok) {
-      assignChatViaFlow("Customer is chasing an answer the bot didn't give.");
+      await assignChatViaFlow("Customer is chasing an answer the bot didn't give.");
       await prisma.whatsAppConversation.upsert({
         where: { shop_phone: { shop: job.shop, phone: job.phone } },
         create: {
@@ -501,7 +511,7 @@ async function handleJob(job: {
       "badgehq-menu-human",
     );
     if (wa.ok) {
-      assignChatViaFlow("Customer asked for a human after talking to the bot.");
+      await assignChatViaFlow("Customer asked for a human after talking to the bot.");
       await prisma.whatsAppConversation.upsert({
         where: { shop_phone: { shop: job.shop, phone: job.phone } },
         create: {
@@ -606,7 +616,7 @@ async function handleJob(job: {
       "badgehq-escalate",
     );
     if (wa.ok) {
-      assignChatViaFlow("Escalation: complaint, refund or delivery chase.");
+      await assignChatViaFlow("Escalation: complaint, refund or delivery chase.");
       await prisma.whatsAppConversation.upsert({
         where: { shop_phone: { shop: job.shop, phone: job.phone } },
         create: {
@@ -764,7 +774,7 @@ async function handleJob(job: {
   }
 
   if (handoff) {
-    assignChatViaFlow("The assistant decided this needs a human.");
+    await assignChatViaFlow("The assistant decided this needs a human.");
   }
 
   // Record the exchange only once it actually reached the shopper.
