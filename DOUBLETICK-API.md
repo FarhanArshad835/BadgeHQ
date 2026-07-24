@@ -261,12 +261,18 @@ only bot-adjacent API is "Initiate AI Bot Call", which *triggers* a voice bot.
 The bots' output is still observable: their messages appear in `/chat-messages`
 with sender `Bot(Public API)` or as templates.
 
-### Not found: mark-as-done
+### Not found: mark chat open / closed / done / resolve
 
-Probed repeatedly across two sessions (`/chats/done`, `/chat/done`, `/v2/chat/done`,
-`/chats/mark-done`, `/chat/resolve` — all `404`). Closing a chat still requires the web
-inbox. Also no working DELETE for webhooks: five plausible paths all 404'd, so removing
-one means using their dashboard.
+Probed thoroughly with a live key (2026-07-24; `/chats` returned `200` in the same run, so
+auth was proven). All 30+ variants `404`: `/chats/close`, `/chat/close`, `/chats/done`,
+`/chats/markDone`, `/chats/resolve`, `/chats/updateStatus`, `/chats/setStatus`,
+`/chats/open`, `/chat/reopen`, `/chats/status`, `PATCH /chats`, `/closeChat`,
+`/resolveChat`, and every kebab/camel/verb variant with `{isDone}` / `{status:"CLOSED"}`
+bodies. **A chat's open/closed state cannot be set through the API** — closing a chat
+requires the web inbox. Note the inbound webhook carries `isChatOpenAfterCustomerMessage`,
+so DoubleTick tracks and auto-reopens state internally; you just can't write it. Also no
+working DELETE for webhooks: five plausible paths all 404'd, so removing one means using
+their dashboard.
 
 ### Not found: assign-to-agent / tag a chat
 
