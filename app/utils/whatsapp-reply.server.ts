@@ -41,6 +41,10 @@ import { extractAwb, trackParcel, trackingContextForLlm } from "./tracking.serve
 
 export const MAX_ATTEMPTS = 3;
 
+/** A human who wrote in the thread within this window owns it — the bot stands
+ *  down rather than talking over them. */
+const HUMAN_ACTIVE_MS = 30 * 60 * 1000;
+
 /**
  * Is the shopper chasing their order? Covers English + common Hinglish phrasings
  * seen live ("where is my order", "track", "kitna time lagega", "kab tak
@@ -309,6 +313,35 @@ async function handleJob(job: {
     );
   };
 
+  // Look an AWB up on the courier and return an LLM system-prompt block phrasing
+  // the live status — or null if it can't be resolved (no creds, courier down,
+  // unknown AWB). Shared by the menu "track" tap and the main AI flow so both
+  // answer with real data. Delhivery key is reused from the storefront
+  // delivery-estimate feature; Shiprocket creds live on the AI-replies settings.
+  const resolveTrackingContext = async (awb: string): Promise<string | null> => {
+    if (!settings.waTrackingEnabled || !awb) return null;
+    const delivery = await prisma.deliverySettings.findUnique({
+      where: { shop: job.shop },
+      select: { apiToken: true },
+    });
+    const tracking = await trackParcel({
+      awb,
+      shiprocketEmail: settings.waShiprocketEmail || undefined,
+      shiprocketPassword: settings.waShiprocketPassword || undefined,
+      delhiveryApiKey: delivery?.apiToken || undefined,
+    });
+    if (!tracking) return null;
+    return (
+      "\n\n=== LIVE SHIPMENT STATUS (from the courier, just now) ===\n" +
+      trackingContextForLlm(tracking) +
+      "\n=== END LIVE STATUS ===\n" +
+      "Use this live status to answer the shopper's tracking question directly and " +
+      "specifically — in their language and tone. State where the parcel is and, if not " +
+      "yet delivered, that it's on the way. Do NOT claim you can't see tracking. Do NOT " +
+      "invent a delivery date the courier didn't give."
+    );
+  };
+
   // The handoff acknowledgement is a fixed string — no AI, no quota spent.
   if (job.message === "__handoff__") {
     const wa = await send(HANDOFF_REPLY, "badgehq-ai-handoff");
@@ -489,13 +522,65 @@ async function handleJob(job: {
   // reused by both guards.
   const messageAwb = settings.waTrackingEnabled ? extractAwb(job.message) : null;
 
-  if (intent) {
-    // Don't fob off a live tracking request with the generic tracking-link
-    // canned reply when the customer handed us an AWB and we can look it up.
-    if (!(intent === "track" && messageAwb)) {
-      const wa = await send(MENU_REPLIES[intent], `badgehq-menu-${intent}`);
+  // Hoisted: the thread transcript (fetched here for the track intent, or later
+  // for the AI), its human-active timestamp, and a resolved live-tracking block
+  // to hand the AI. Declared up front so the menu-track branch and the main flow
+  // share them and never fetch the thread twice.
+  let threadTranscript: string | null = null;
+  let threadHumanActiveAt: number | null = null;
+  let threadFetched = false;
+  let trackingHint: string | null = null;
+
+  // The tracking menu intent ("Order Tracking" tap, or "track my order"): try a
+  // LIVE status before the canned self-service link. Look for an AWB in the
+  // message, then in the thread (the merchant's flow bot posts it on every
+  // order), so a customer who taps the button doesn't have to re-type a number
+  // that's already in the chat. If one is found and the courier answers, let the
+  // message flow to the AI with the live status attached. Only when there's no
+  // AWB anywhere — nothing to look up — do we fall back to the canned reply that
+  // asks for it and links the self-service page.
+  if (intent === "track" && settings.waTrackingEnabled) {
+    let awb = messageAwb;
+    if (!awb && settings.waProvider === "doubletick") {
+      const tr = await fetchDoubleTickThread({
+        apiKey: settings.waApiKey,
+        wabaNumber: settings.waFromNumber,
+        customerNumber: "91" + job.phone,
+        excludeMessageId: job.providerMessageId,
+        recent: settings.waThreadRecent,
+        opening: settings.waThreadOpening,
+        maxLineChars: settings.waThreadLineChars,
+        maxTotalChars: settings.waThreadTotalChars,
+      });
+      threadTranscript = tr?.transcript ?? null;
+      threadHumanActiveAt = tr?.humanActiveAt ?? null;
+      threadFetched = true;
+      // A human already working this thread owns it — don't answer over them,
+      // even a tracking tap. Same stand-down as the main flow below.
+      if (
+        threadTranscript &&
+        ((threadHumanActiveAt != null &&
+          Date.now() - threadHumanActiveAt < HUMAN_ACTIVE_MS) ||
+          humanRepliedLast(threadTranscript))
+      ) {
+        return { ok: false, error: "human-replied", permanent: true };
+      }
+      if (threadTranscript) awb = extractAwb(threadTranscript);
+    }
+    const trackingCtx = awb ? await resolveTrackingContext(awb) : null;
+    if (trackingCtx) {
+      // Resolved — fall through to the AI with the live status attached, so it
+      // phrases the answer conversationally. Stash it for the shared block below.
+      trackingHint = trackingCtx;
+    } else {
+      // Nothing to look up (or lookup failed): the canned reply asks for the AWB
+      // and links the self-service page — the on-ramp to a live lookup next time.
+      const wa = await send(MENU_REPLIES.track, "badgehq-menu-track");
       return wa.ok ? { ok: true } : { ok: false, error: wa.error };
     }
+  } else if (intent) {
+    const wa = await send(MENU_REPLIES[intent], `badgehq-menu-${intent}`);
+    return wa.ok ? { ok: true } : { ok: false, error: wa.error };
   }
 
   // Deterministic escalation, decided in code where the model cannot talk its
@@ -541,27 +626,29 @@ async function handleJob(job: {
   let system = buildSystemPrompt(settings, "whatsapp", job.message);
   let history = loadTurns(convo?.turns);
 
-  // Transcript hoisted so the post-generation output guard can check it.
-  let threadTranscript: string | null = null;
-
   // Give the LLM the REAL thread — human agent replies, the button-menu bot,
   // everything — not just its own memory. Without this it walked blind into
   // disputes a human was already handling and could contradict them. DoubleTick
   // only (Interakt exposes no thread API); on fetch failure the bot's own
-  // stored turns remain as the fallback.
+  // stored turns remain as the fallback. Skipped when the menu-track branch
+  // already fetched it above — one fetch per reply, not two.
   if (settings.waProvider === "doubletick") {
-    const threadRes = await fetchDoubleTickThread({
-      apiKey: settings.waApiKey,
-      wabaNumber: settings.waFromNumber,
-      customerNumber: "91" + job.phone,
-      excludeMessageId: job.providerMessageId,
-      recent: settings.waThreadRecent,
-      opening: settings.waThreadOpening,
-      maxLineChars: settings.waThreadLineChars,
-      maxTotalChars: settings.waThreadTotalChars,
-    });
-    const thread = threadRes?.transcript ?? null;
-    threadTranscript = thread;
+    if (!threadFetched) {
+      const threadRes = await fetchDoubleTickThread({
+        apiKey: settings.waApiKey,
+        wabaNumber: settings.waFromNumber,
+        customerNumber: "91" + job.phone,
+        excludeMessageId: job.providerMessageId,
+        recent: settings.waThreadRecent,
+        opening: settings.waThreadOpening,
+        maxLineChars: settings.waThreadLineChars,
+        maxTotalChars: settings.waThreadTotalChars,
+      });
+      threadTranscript = threadRes?.transcript ?? null;
+      threadHumanActiveAt = threadRes?.humanActiveAt ?? null;
+      threadFetched = true;
+    }
+    const thread = threadTranscript;
 
     // A human working the thread means the bot is not needed. Two signals:
     //  - the human's message is the LAST one (humanRepliedLast), or
@@ -571,10 +658,9 @@ async function handleJob(job: {
     //    three minutes into the agent's conversation, because "last message"
     //    was the customer's again. Recency is the better definition of
     //    "the thread is owned".
-    const HUMAN_ACTIVE_MS = 30 * 60 * 1000;
     const humanActive =
-      threadRes?.humanActiveAt != null &&
-      Date.now() - threadRes.humanActiveAt < HUMAN_ACTIVE_MS;
+      threadHumanActiveAt != null &&
+      Date.now() - threadHumanActiveAt < HUMAN_ACTIVE_MS;
     if (thread && (humanActive || humanRepliedLast(thread))) {
       return { ok: false, error: "human-replied", permanent: true };
     }
@@ -594,42 +680,25 @@ async function handleJob(job: {
     }
   }
 
-  // Live parcel tracking. If the shopper is chasing their order AND an AWB is
-  // somewhere in the thread (the merchant's flow bot posts "Order Number / AWB"
-  // on every order), ask the carrier for a live status and hand it to the LLM to
-  // phrase. We have NO Shopify PCD approval, so the AWB from the conversation is
-  // the only handle we have — and the only one we need. Any failure (no AWB, no
-  // creds, carrier down, unknown AWB) silently skips: the bot just answers
-  // without live data, exactly as before.
-  // Trigger on a tracking phrase OR a bare AWB in the message: handing over an
+  // Live parcel tracking. If the shopper is chasing their order AND an AWB is in
+  // the message or the thread (the merchant's flow bot posts "Order Number / AWB"
+  // on every order), attach the courier's live status so the LLM phrases it. We
+  // have NO Shopify PCD approval, so the AWB from the conversation is the only
+  // handle — and the only one we need. Any failure (no AWB, no creds, carrier
+  // down, unknown AWB) silently skips: the bot just answers without live data.
+  // The menu-track branch above may have already resolved it (trackingHint), in
+  // which case we don't look up twice.
+  // Triggers on a tracking phrase OR a bare AWB in the message: handing over an
   // AWB is itself a tracking request, even without a "where"/"track" word.
-  if (settings.waTrackingEnabled && (messageAwb || WANTS_TRACKING_RE.test(job.message))) {
-    const awb =
-      messageAwb || (threadTranscript ? extractAwb(threadTranscript) : null);
-    if (awb) {
-      // Delhivery key is reused from the storefront delivery-estimate feature —
-      // no separate field. Shiprocket creds live on the AI-replies settings.
-      const delivery = await prisma.deliverySettings.findUnique({
-        where: { shop: job.shop },
-        select: { apiToken: true },
-      });
-      const tracking = await trackParcel({
-        awb,
-        shiprocketEmail: settings.waShiprocketEmail || undefined,
-        shiprocketPassword: settings.waShiprocketPassword || undefined,
-        delhiveryApiKey: delivery?.apiToken || undefined,
-      });
-      if (tracking) {
-        system +=
-          "\n\n=== LIVE SHIPMENT STATUS (from the courier, just now) ===\n" +
-          trackingContextForLlm(tracking) +
-          "\n=== END LIVE STATUS ===\n" +
-          "Use this live status to answer the shopper's tracking question directly and " +
-          "specifically — in their language and tone. State where the parcel is and, if not " +
-          "yet delivered, that it's on the way. Do NOT claim you can't see tracking. Do NOT " +
-          "invent a delivery date the courier didn't give.";
-      }
-    }
+  if (trackingHint) {
+    system += trackingHint;
+  } else if (
+    settings.waTrackingEnabled &&
+    (messageAwb || WANTS_TRACKING_RE.test(job.message))
+  ) {
+    const awb = messageAwb || (threadTranscript ? extractAwb(threadTranscript) : null);
+    const ctx = awb ? await resolveTrackingContext(awb) : null;
+    if (ctx) system += ctx;
   }
 
   const ai = await callAi({
