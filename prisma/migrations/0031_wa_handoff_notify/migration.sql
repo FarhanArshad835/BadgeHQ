@@ -1,0 +1,11 @@
+-- Handoff notification number for the WhatsApp support bot.
+--
+-- When the bot hands a chat to a human (complaint, "talk to agent", an
+-- unanswerable tracking question, or the LLM's own [HANDOFF] marker), it pings
+-- this number so the team knows a chat is waiting. DoubleTick's public API has
+-- no verified "assign to agent" endpoint, so a WhatsApp ping is the reliable
+-- path to alerting the team.
+--
+-- Empty default → no ping (today's silent behaviour), so existing shops are
+-- untouched. Idempotent, matching every migration since 0008.
+ALTER TABLE "AiReplySettings" ADD COLUMN IF NOT EXISTS "waHandoffNotifyNumber" TEXT NOT NULL DEFAULT '';

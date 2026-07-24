@@ -192,6 +192,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     waTrackingEnabled: s?.waTrackingEnabled ?? false,
     waShiprocketEmail: s?.waShiprocketEmail ?? "",
     hasShiprocketPassword: Boolean(s?.waShiprocketPassword),
+    waHandoffNotifyNumber: s?.waHandoffNotifyNumber ?? "",
     // Whether the DoubleTick webhook has been registered for this shop.
     hasWaAuth: Boolean(s?.waWebhookAuth),
     // Built from the app's own URL, never the request host — inside the Shopify
@@ -393,6 +394,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       // password follows the write-only rule below (blank keeps the saved one).
       waTrackingEnabled: Boolean(data.waTrackingEnabled),
       waShiprocketEmail: text(data.waShiprocketEmail, "", 200),
+      // Team number pinged on handoff. Digits/+ only, like the sender number.
+      waHandoffNotifyNumber: String(data.waHandoffNotifyNumber || "")
+        .trim()
+        .replace(/[^\d+]/g, "")
+        .slice(0, 20),
       // Blank means "keep what's saved", the same rule the API keys follow.
       // Without this, one save submitted from a stale or not-yet-hydrated form
       // silently wiped the whole knowledge base, and the bot kept answering
@@ -482,6 +488,7 @@ export default function AiRepliesPage() {
     waTrackingEnabled: d.waTrackingEnabled,
     waShiprocketEmail: d.waShiprocketEmail,
     waShiprocketPassword: "",
+    waHandoffNotifyNumber: d.waHandoffNotifyNumber,
   };
 
   const [enabled, setEnabled] = useState(initial.enabled);
@@ -500,6 +507,7 @@ export default function AiRepliesPage() {
   const [waTrackingEnabled, setWaTrackingEnabled] = useState(initial.waTrackingEnabled);
   const [waShiprocketEmail, setWaShiprocketEmail] = useState(initial.waShiprocketEmail);
   const [waShiprocketPassword, setWaShiprocketPassword] = useState(initial.waShiprocketPassword);
+  const [waHandoffNotifyNumber, setWaHandoffNotifyNumber] = useState(initial.waHandoffNotifyNumber);
   const [apiKey, setApiKey] = useState(initial.apiKey);
   const [knowledge, setKnowledge] = useState(initial.knowledge);
   const [botName, setBotName] = useState(initial.botName);
@@ -537,7 +545,8 @@ export default function AiRepliesPage() {
     waFromNumber !== initial.waFromNumber ||
     waTrackingEnabled !== initial.waTrackingEnabled ||
     waShiprocketEmail !== initial.waShiprocketEmail ||
-    waShiprocketPassword !== initial.waShiprocketPassword;
+    waShiprocketPassword !== initial.waShiprocketPassword ||
+    waHandoffNotifyNumber !== initial.waHandoffNotifyNumber;
 
   useEffect(() => {
     if (actionData?.success) {
@@ -578,6 +587,7 @@ export default function AiRepliesPage() {
     setWaTrackingEnabled(initial.waTrackingEnabled);
     setWaShiprocketEmail(initial.waShiprocketEmail);
     setWaShiprocketPassword(initial.waShiprocketPassword);
+    setWaHandoffNotifyNumber(initial.waHandoffNotifyNumber);
   };
 
   const handleSave = () => {
@@ -608,6 +618,7 @@ export default function AiRepliesPage() {
           waTrackingEnabled,
           waShiprocketEmail,
           waShiprocketPassword,
+          waHandoffNotifyNumber,
         }),
       },
       { method: "POST" },
@@ -988,6 +999,17 @@ export default function AiRepliesPage() {
                   does not pause it automatically. Photos and voice notes are ignored, and
                   only Indian (+91) numbers are supported.
                 </Text>
+
+                <Divider />
+                <Text as="h3" variant="headingSm">Handoff alert</Text>
+                <TextField
+                  label="Notify this number on handoff"
+                  value={waHandoffNotifyNumber}
+                  onChange={setWaHandoffNotifyNumber}
+                  autoComplete="off"
+                  placeholder="+919999999999"
+                  helpText="Whenever the bot hands a chat to a human — a complaint, a 'talk to agent' request, or a tracking question it couldn't answer — it sends a WhatsApp alert here with the customer's number and last message. Leave blank for no alert. Use a team member's or a WhatsApp group's number."
+                />
 
                 {isDoubleTick && (
                   <>

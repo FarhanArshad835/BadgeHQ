@@ -276,9 +276,43 @@ async function handleJob(job: {
       callbackData,
     });
 
+  // Ping the team when the bot hands a chat to a human. DoubleTick's public API
+  // has no verified assign-agent endpoint, so a WhatsApp message to the team
+  // number is the reliable alert. Best-effort and non-blocking: a failed ping
+  // must never fail the customer's reply, and it's fire-and-forget so it doesn't
+  // add latency. Deduped per thread via the conversation's own record isn't
+  // needed — handoff already mutes the bot for 12h, so it fires at most once per
+  // handoff. Skips silently when no number is configured or the customer IS the
+  // team number (avoids a self-notification loop).
+  const notifyTeamOnHandoff = (reason: string) => {
+    const team = settings.waHandoffNotifyNumber?.replace(/\D/g, "") || "";
+    // Compare on the last 10 digits so "+9198…" and a bare "98…" for the same
+    // number both count as self and don't trigger a notification loop.
+    if (!team || team.slice(-10) === job.phone.slice(-10)) return;
+    const last = String(job.message || "").slice(0, 200);
+    const msg =
+      "🔔 A customer needs a human — the assistant has stepped back.\n" +
+      `Customer: +91${job.phone}\n` +
+      (last && last !== "__handoff__" ? `Last message: "${last}"\n` : "") +
+      `Reason: ${reason}\n` +
+      "Open the chat in your DoubleTick inbox to reply.";
+    // Fire-and-forget: don't await, swallow errors — this is a side channel.
+    sendWhatsAppText({
+      provider: settings.waProvider,
+      apiKey: settings.waApiKey,
+      fromNumber: settings.waFromNumber,
+      phone: team,
+      message: msg,
+      callbackData: "badgehq-ai-handoff-notify",
+    }).catch((e) =>
+      console.error("[wa-reply] handoff notify failed:", String(e?.message || e).slice(0, 160)),
+    );
+  };
+
   // The handoff acknowledgement is a fixed string — no AI, no quota spent.
   if (job.message === "__handoff__") {
     const wa = await send(HANDOFF_REPLY, "badgehq-ai-handoff");
+    notifyTeamOnHandoff("Customer asked to talk to a human.");
     return wa.ok ? { ok: true } : { ok: false, error: wa.error };
   }
 
@@ -362,6 +396,7 @@ async function handleJob(job: {
     // not get, so a person should pick this up.
     const wa = await send(HANDOFF_REPLY, "badgehq-ai-nudge");
     if (wa.ok) {
+      notifyTeamOnHandoff("Customer is chasing an answer the bot didn't give.");
       await prisma.whatsAppConversation.upsert({
         where: { shop_phone: { shop: job.shop, phone: job.phone } },
         create: {
@@ -394,6 +429,7 @@ async function handleJob(job: {
       "badgehq-menu-human",
     );
     if (wa.ok) {
+      notifyTeamOnHandoff("Customer picked \"Talk to Us\" from the menu.");
       await prisma.whatsAppConversation.upsert({
         where: { shop_phone: { shop: job.shop, phone: job.phone } },
         create: {
@@ -427,6 +463,7 @@ async function handleJob(job: {
       "badgehq-escalate",
     );
     if (wa.ok) {
+      notifyTeamOnHandoff("Escalation: complaint, refund or delivery chase.");
       await prisma.whatsAppConversation.upsert({
         where: { shop_phone: { shop: job.shop, phone: job.phone } },
         create: {
@@ -595,6 +632,10 @@ async function handleJob(job: {
     // pre-approval.
     const permanent = wa.error.startsWith("outside-window") || wa.error === "invalid-phone";
     return { ok: false, error: `${settings.waProvider}:${wa.error}`, permanent };
+  }
+
+  if (handoff) {
+    notifyTeamOnHandoff("The assistant decided this needs a human.");
   }
 
   // Record the exchange only once it actually reached the shopper.

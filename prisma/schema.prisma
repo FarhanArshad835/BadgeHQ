@@ -320,6 +320,14 @@ model AiReplySettings {
   waShiprocketEmail     String  @default("")
   waShiprocketPassword  String  @default("") // Shiprocket panel password — server-side only
 
+  // Handoff notification. When the bot steps back for a human (complaint,
+  // "talk to agent", a tracking question it couldn't answer, or the LLM's own
+  // [HANDOFF] marker), it pings this number so the team knows a chat is waiting
+  // — DoubleTick's public API has no verified "assign to agent" endpoint, so a
+  // WhatsApp ping to the team is the reliable path. Empty → no ping (today's
+  // silent behaviour). Indian (+91) number, digits only.
+  waHandoffNotifyNumber String  @default("")
+
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
