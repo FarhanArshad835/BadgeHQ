@@ -280,36 +280,39 @@ async function handleJob(job: {
       callbackData,
     });
 
-  // Ping the team when the bot hands a chat to a human. DoubleTick's public API
-  // has no verified assign-agent endpoint, so a WhatsApp message to the team
-  // number is the reliable alert. Best-effort and non-blocking: a failed ping
-  // must never fail the customer's reply, and it's fire-and-forget so it doesn't
-  // add latency. Deduped per thread via the conversation's own record isn't
-  // needed — handoff already mutes the bot for 12h, so it fires at most once per
-  // handoff. Skips silently when no number is configured or the customer IS the
-  // team number (avoids a self-notification loop).
-  const notifyTeamOnHandoff = (reason: string) => {
-    const team = settings.waHandoffNotifyNumber?.replace(/\D/g, "") || "";
-    // Compare on the last 10 digits so "+9198…" and a bare "98…" for the same
-    // number both count as self and don't trigger a notification loop.
-    if (!team || team.slice(-10) === job.phone.slice(-10)) return;
-    const last = String(job.message || "").slice(0, 200);
-    const msg =
-      "🔔 A customer needs a human — the assistant has stepped back.\n" +
-      `Customer: +91${job.phone}\n` +
-      (last && last !== "__handoff__" ? `Last message: "${last}"\n` : "") +
-      `Reason: ${reason}\n` +
-      "Open the chat in your DoubleTick inbox to reply.";
-    // Fire-and-forget: don't await, swallow errors — this is a side channel.
-    sendWhatsAppText({
-      provider: settings.waProvider,
-      apiKey: settings.waApiKey,
-      fromNumber: settings.waFromNumber,
-      phone: team,
-      message: msg,
-      callbackData: "badgehq-ai-handoff-notify",
+  // Assign the chat to a human when the bot hands off, by firing a DoubleTick
+  // Bot Studio flow. DoubleTick's REST API can't assign a chat, but a flow's
+  // "Assign Agent" action can — and a flow can be started by an "On Webhook"
+  // trigger. So on handoff we POST the customer's number to that flow's webhook
+  // URL; the flow looks up the chat and assigns it to the fixed agent configured
+  // inside Bot Studio.
+  //
+  // Fire-and-forget: don't await, swallow errors — a failed assign must never
+  // fail the customer's reply or add latency. The bot has already muted itself
+  // for 12h at every call site, so this fires at most once per handoff. Skips
+  // silently when no flow URL is configured.
+  //
+  // The body sends the customer's number under several common key names so the
+  // flow can read whichever it expects (phone/customerNumber/customerPhoneNumber),
+  // plus the WABA number and a reason for logging. `reason` is accepted for
+  // parity with the old signature and to give the flow context if it wants it.
+  const assignChatViaFlow = (reason: string) => {
+    const url = settings.waHandoffFlowUrl?.trim() || "";
+    if (!url) return;
+    const body = {
+      phone: job.phone,
+      customerNumber: "91" + job.phone,
+      customerPhoneNumber: "91" + job.phone,
+      wabaNumber: settings.waFromNumber.replace(/\D/g, ""),
+      reason,
+    };
+    fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(10000),
     }).catch((e) =>
-      console.error("[wa-reply] handoff notify failed:", String(e?.message || e).slice(0, 160)),
+      console.error("[wa-reply] handoff assign failed:", String(e?.message || e).slice(0, 160)),
     );
   };
 
@@ -345,7 +348,7 @@ async function handleJob(job: {
   // The handoff acknowledgement is a fixed string — no AI, no quota spent.
   if (job.message === "__handoff__") {
     const wa = await send(HANDOFF_REPLY, "badgehq-ai-handoff");
-    notifyTeamOnHandoff("Customer asked to talk to a human.");
+    assignChatViaFlow("Customer asked to talk to a human.");
     return wa.ok ? { ok: true } : { ok: false, error: wa.error };
   }
 
@@ -429,7 +432,7 @@ async function handleJob(job: {
     // not get, so a person should pick this up.
     const wa = await send(HANDOFF_REPLY, "badgehq-ai-nudge");
     if (wa.ok) {
-      notifyTeamOnHandoff("Customer is chasing an answer the bot didn't give.");
+      assignChatViaFlow("Customer is chasing an answer the bot didn't give.");
       await prisma.whatsAppConversation.upsert({
         where: { shop_phone: { shop: job.shop, phone: job.phone } },
         create: {
@@ -498,7 +501,7 @@ async function handleJob(job: {
       "badgehq-menu-human",
     );
     if (wa.ok) {
-      notifyTeamOnHandoff("Customer asked for a human after talking to the bot.");
+      assignChatViaFlow("Customer asked for a human after talking to the bot.");
       await prisma.whatsAppConversation.upsert({
         where: { shop_phone: { shop: job.shop, phone: job.phone } },
         create: {
@@ -603,7 +606,7 @@ async function handleJob(job: {
       "badgehq-escalate",
     );
     if (wa.ok) {
-      notifyTeamOnHandoff("Escalation: complaint, refund or delivery chase.");
+      assignChatViaFlow("Escalation: complaint, refund or delivery chase.");
       await prisma.whatsAppConversation.upsert({
         where: { shop_phone: { shop: job.shop, phone: job.phone } },
         create: {
@@ -761,7 +764,7 @@ async function handleJob(job: {
   }
 
   if (handoff) {
-    notifyTeamOnHandoff("The assistant decided this needs a human.");
+    assignChatViaFlow("The assistant decided this needs a human.");
   }
 
   // Record the exchange only once it actually reached the shopper.

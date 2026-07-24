@@ -320,13 +320,13 @@ model AiReplySettings {
   waShiprocketEmail     String  @default("")
   waShiprocketPassword  String  @default("") // Shiprocket panel password — server-side only
 
-  // Handoff notification. When the bot steps back for a human (complaint,
-  // "talk to agent", a tracking question it couldn't answer, or the LLM's own
-  // [HANDOFF] marker), it pings this number so the team knows a chat is waiting
-  // — DoubleTick's public API has no verified "assign to agent" endpoint, so a
-  // WhatsApp ping to the team is the reliable path. Empty → no ping (today's
-  // silent behaviour). Indian (+91) number, digits only.
-  waHandoffNotifyNumber String  @default("")
+  // Handoff assignment. When the bot steps back for a human, it POSTs the
+  // customer's number to a DoubleTick Bot Studio flow's "On Webhook" trigger;
+  // the flow's "Assign Agent" action then assigns the chat to a fixed agent.
+  // This is how a chat gets assigned via automation — DoubleTick's REST API
+  // can't do it, but a flow can. Empty → no assignment (silent handoff, the bot
+  // just mutes itself). Paste the webhook URL from the flow's On Webhook node.
+  waHandoffFlowUrl String  @default("")
 
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt

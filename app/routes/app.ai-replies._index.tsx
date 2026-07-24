@@ -30,11 +30,7 @@ import prisma from "../db.server";
 import { bumpConfigVersion } from "../utils/config-version.server";
 import { buildSystemPrompt, callAi } from "../utils/ai-replies.server";
 import { CLAUDE_MODELS } from "../utils/ai-models";
-import {
-  generateWebhookToken,
-  registerDoubleTickWebhook,
-  fetchDoubleTickTeam,
-} from "../utils/whatsapp-ai.server";
+import { generateWebhookToken, registerDoubleTickWebhook } from "../utils/whatsapp-ai.server";
 
 const POSITIONS = ["bottom-right", "bottom-left"];
 
@@ -101,15 +97,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       select: { phone: true, reason: true, preview: true, createdAt: true },
     }),
   ]);
-
-  // DoubleTick team roster, for the handoff-alert agent picker. Only fetched
-  // when it's usable (DoubleTick + a saved key); a failure returns [] and the
-  // admin falls back to typing a number. Not in the Promise.all above because it
-  // needs the key from `s`.
-  const dtTeam =
-    s?.waProvider === "doubletick" && s?.waApiKey
-      ? await fetchDoubleTickTeam(s.waApiKey)
-      : [];
 
   // Stored as bare 10 digits (see toIndianTenDigit); shown with +91 so the
   // number can be copied straight into a provider search or a dialler.
@@ -205,8 +192,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     waTrackingEnabled: s?.waTrackingEnabled ?? false,
     waShiprocketEmail: s?.waShiprocketEmail ?? "",
     hasShiprocketPassword: Boolean(s?.waShiprocketPassword),
-    waHandoffNotifyNumber: s?.waHandoffNotifyNumber ?? "",
-    dtTeam,
+    waHandoffFlowUrl: s?.waHandoffFlowUrl ?? "",
     // Whether the DoubleTick webhook has been registered for this shop.
     hasWaAuth: Boolean(s?.waWebhookAuth),
     // Built from the app's own URL, never the request host — inside the Shopify
@@ -408,11 +394,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       // password follows the write-only rule below (blank keeps the saved one).
       waTrackingEnabled: Boolean(data.waTrackingEnabled),
       waShiprocketEmail: text(data.waShiprocketEmail, "", 200),
-      // Team number pinged on handoff. Digits/+ only, like the sender number.
-      waHandoffNotifyNumber: String(data.waHandoffNotifyNumber || "")
-        .trim()
-        .replace(/[^\d+]/g, "")
-        .slice(0, 20),
+      // Bot Studio flow webhook fired on handoff to assign the chat. Only stored
+      // if it looks like an https URL; anything else is treated as "not set".
+      waHandoffFlowUrl: /^https:\/\/\S+$/.test(String(data.waHandoffFlowUrl || "").trim())
+        ? String(data.waHandoffFlowUrl).trim().slice(0, 500)
+        : "",
       // Blank means "keep what's saved", the same rule the API keys follow.
       // Without this, one save submitted from a stale or not-yet-hydrated form
       // silently wiped the whole knowledge base, and the bot kept answering
@@ -502,7 +488,7 @@ export default function AiRepliesPage() {
     waTrackingEnabled: d.waTrackingEnabled,
     waShiprocketEmail: d.waShiprocketEmail,
     waShiprocketPassword: "",
-    waHandoffNotifyNumber: d.waHandoffNotifyNumber,
+    waHandoffFlowUrl: d.waHandoffFlowUrl,
   };
 
   const [enabled, setEnabled] = useState(initial.enabled);
@@ -521,7 +507,7 @@ export default function AiRepliesPage() {
   const [waTrackingEnabled, setWaTrackingEnabled] = useState(initial.waTrackingEnabled);
   const [waShiprocketEmail, setWaShiprocketEmail] = useState(initial.waShiprocketEmail);
   const [waShiprocketPassword, setWaShiprocketPassword] = useState(initial.waShiprocketPassword);
-  const [waHandoffNotifyNumber, setWaHandoffNotifyNumber] = useState(initial.waHandoffNotifyNumber);
+  const [waHandoffFlowUrl, setWaHandoffFlowUrl] = useState(initial.waHandoffFlowUrl);
   const [apiKey, setApiKey] = useState(initial.apiKey);
   const [knowledge, setKnowledge] = useState(initial.knowledge);
   const [botName, setBotName] = useState(initial.botName);
@@ -560,7 +546,7 @@ export default function AiRepliesPage() {
     waTrackingEnabled !== initial.waTrackingEnabled ||
     waShiprocketEmail !== initial.waShiprocketEmail ||
     waShiprocketPassword !== initial.waShiprocketPassword ||
-    waHandoffNotifyNumber !== initial.waHandoffNotifyNumber;
+    waHandoffFlowUrl !== initial.waHandoffFlowUrl;
 
   useEffect(() => {
     if (actionData?.success) {
@@ -601,7 +587,7 @@ export default function AiRepliesPage() {
     setWaTrackingEnabled(initial.waTrackingEnabled);
     setWaShiprocketEmail(initial.waShiprocketEmail);
     setWaShiprocketPassword(initial.waShiprocketPassword);
-    setWaHandoffNotifyNumber(initial.waHandoffNotifyNumber);
+    setWaHandoffFlowUrl(initial.waHandoffFlowUrl);
   };
 
   const handleSave = () => {
@@ -632,7 +618,7 @@ export default function AiRepliesPage() {
           waTrackingEnabled,
           waShiprocketEmail,
           waShiprocketPassword,
-          waHandoffNotifyNumber,
+          waHandoffFlowUrl,
         }),
       },
       { method: "POST" },
@@ -1014,59 +1000,28 @@ export default function AiRepliesPage() {
                   only Indian (+91) numbers are supported.
                 </Text>
 
-                <Divider />
-                <Text as="h3" variant="headingSm">Handoff alert</Text>
-                <Text as="p" tone="subdued" variant="bodySm">
-                  DoubleTick has no way to assign a chat to an agent through their API — the
-                  chat stays in your shared inbox. Instead, whenever the bot hands a chat to a
-                  human (a complaint, a &quot;talk to agent&quot; request, or a tracking
-                  question it couldn&apos;t answer), it sends a WhatsApp alert with the
-                  customer&apos;s number and last message so someone picks it up.
-                </Text>
-                {d.dtTeam.length > 0 ? (
+                {isDoubleTick && (
                   <>
-                    <Select
-                      label="Alert this agent on handoff"
-                      options={[
-                        { label: "No alert", value: "" },
-                        ...d.dtTeam.map((a) => ({
-                          label: `${a.name || a.phone} (+${a.phone})${a.status === "ONLINE" ? " · online" : ""}`,
-                          value: a.phone,
-                        })),
-                        { label: "Another number…", value: "__custom__" },
-                      ]}
-                      // Show "custom" when the saved number isn't one of the agents.
-                      value={
-                        waHandoffNotifyNumber === ""
-                          ? ""
-                          : d.dtTeam.some((a) => a.phone === waHandoffNotifyNumber.replace(/\D/g, ""))
-                          ? waHandoffNotifyNumber.replace(/\D/g, "")
-                          : "__custom__"
-                      }
-                      onChange={(v) => setWaHandoffNotifyNumber(v === "__custom__" ? " " : v)}
-                      helpText="Your DoubleTick team, pulled live. Pick who gets the alert, or choose 'Another number' for a group or a number not listed."
+                    <Divider />
+                    <Text as="h3" variant="headingSm">Assign to an agent on handoff</Text>
+                    <Text as="p" tone="subdued" variant="bodySm">
+                      When the bot hands a chat to a human, it can assign the chat to an agent
+                      automatically through a DoubleTick <strong>Bot Studio</strong> flow. Build
+                      a flow with an <strong>On Webhook</strong> trigger and an{" "}
+                      <strong>Assign Agent</strong> action, then paste the flow&apos;s webhook URL
+                      here. On every handoff the bot POSTs the customer&apos;s number to it, and
+                      the flow assigns the chat. Leave blank and handoff just mutes the bot (no
+                      assignment).
+                    </Text>
+                    <TextField
+                      label="Bot Studio flow webhook URL"
+                      value={waHandoffFlowUrl}
+                      onChange={setWaHandoffFlowUrl}
+                      autoComplete="off"
+                      placeholder="https://…doubletick…/flow/…"
+                      helpText="From your flow's 'On Webhook' trigger. The flow's 'Assign Agent' node decides which agent gets the chat. The POST body includes the customer's number as phone, customerNumber, and customerPhoneNumber — read whichever your flow expects."
                     />
-                    {waHandoffNotifyNumber !== "" &&
-                      !d.dtTeam.some((a) => a.phone === waHandoffNotifyNumber.replace(/\D/g, "")) && (
-                        <TextField
-                          label="Alert number"
-                          value={waHandoffNotifyNumber}
-                          onChange={setWaHandoffNotifyNumber}
-                          autoComplete="off"
-                          placeholder="+919999999999"
-                          helpText="Any WhatsApp number — a team member's or a group's."
-                        />
-                      )}
                   </>
-                ) : (
-                  <TextField
-                    label="Notify this number on handoff"
-                    value={waHandoffNotifyNumber}
-                    onChange={setWaHandoffNotifyNumber}
-                    autoComplete="off"
-                    placeholder="+919999999999"
-                    helpText="Leave blank for no alert. Save your DoubleTick key first to pick an agent from your team instead."
-                  />
                 )}
 
                 {isDoubleTick && (

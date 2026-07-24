@@ -1,0 +1,15 @@
+-- Handoff via DoubleTick Bot Studio flow.
+--
+-- DoubleTick's REST API can't assign a chat to an agent (confirmed by probing
+-- ~50 endpoints — all 404), but a Bot Studio flow's "Assign Agent" action can,
+-- and a flow can be started by an "On Webhook" trigger. So on handoff the bot
+-- POSTs the customer's number to that flow's webhook URL, and the flow assigns
+-- the chat to a fixed agent.
+--
+-- This replaces the WhatsApp-ping approach (waHandoffNotifyNumber, migration
+-- 0031). That column is left in place unused rather than dropped — dropping it
+-- would be a destructive change for no benefit.
+--
+-- Empty default → no assignment (the bot just mutes itself, as before).
+-- Idempotent, matching every migration since 0008.
+ALTER TABLE "AiReplySettings" ADD COLUMN IF NOT EXISTS "waHandoffFlowUrl" TEXT NOT NULL DEFAULT '';
