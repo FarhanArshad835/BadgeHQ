@@ -422,14 +422,50 @@ async function handleJob(job: {
   // whole thread.
   const intent = matchMenuIntent(job.message);
   if (intent === "human") {
-    // The flow's "Talk to Us" branch: hours-aware, then the team owns the
-    // thread — mute the bot exactly as a handoff does.
+    // "Talk to Us" is two-stage: the AI bot triages first, a human takes over
+    // only when it's actually needed.
+    //
+    //  - First touch (the customer hasn't talked to the bot yet): DON'T mute.
+    //    Ask what they need and let their NEXT message flow through the normal
+    //    AI path, which already has the knowledge base, live tracking, and its
+    //    own [HANDOFF] escalation — so a question the bot can answer never
+    //    reaches a human, and one it can't escalates itself.
+    //  - Already engaged (they've exchanged messages with the bot): they tapped
+    //    "Talk to Us" BECAUSE the bot wasn't enough. Re-triaging would be
+    //    insulting — go straight to a human, exactly as before.
+    //
+    // The written triage turn is what makes a SECOND tap count as "engaged", so
+    // tapping twice escalates instead of looping the same prompt.
+    const alreadyEngaged = loadTurns(convo?.turns).length > 0;
+
+    if (!alreadyEngaged) {
+      const triage =
+        "Sure — I can help right here. Please tell me what you need " +
+        "(for example your order number and what's wrong), and I'll sort it out. " +
+        "If it needs a teammate, I'll bring one in.";
+      const wa = await send(triage, "badgehq-menu-human-triage");
+      if (!wa.ok) return { ok: false, error: wa.error };
+      // Record the triage so a repeat tap escalates, and so the bot stays LIVE
+      // (no mutedUntil / optedOut) for the customer's next message.
+      await prisma.whatsAppConversation.upsert({
+        where: { shop_phone: { shop: job.shop, phone: job.phone } },
+        create: {
+          shop: job.shop,
+          phone: job.phone,
+          turns: appendTurns([], job.message, triage),
+        },
+        update: { turns: appendTurns([], job.message, triage) },
+      });
+      return { ok: true };
+    }
+
+    // Engaged already — hand to a human, hours-aware, and mute the bot.
     const wa = await send(
       isBusinessHoursIST() ? HANDOVER_REPLY : OFF_HOURS_REPLY,
       "badgehq-menu-human",
     );
     if (wa.ok) {
-      notifyTeamOnHandoff("Customer picked \"Talk to Us\" from the menu.");
+      notifyTeamOnHandoff("Customer asked for a human after talking to the bot.");
       await prisma.whatsAppConversation.upsert({
         where: { shop_phone: { shop: job.shop, phone: job.phone } },
         create: {
