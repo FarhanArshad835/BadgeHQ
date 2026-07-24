@@ -61,6 +61,20 @@ export function normalizeDashes(text: string): string {
  *  down rather than talking over them. */
 const HUMAN_ACTIVE_MS = 30 * 60 * 1000;
 
+/** Current date + time in IST, as a label for the system prompt so the model
+ *  has a real "now" to reason about message timestamps against. */
+function nowIstLabel(): string {
+  return new Date().toLocaleString("en-IN", {
+    timeZone: "Asia/Kolkata",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+}
+
 /** The distinctive core of the "Talk to Us" triage reply. Reads naturally in the
  *  message, and its presence in a stored model turn is how we count how many
  *  times the bot has asked the customer to describe their issue — so a customer
@@ -665,10 +679,12 @@ async function handleJob(job: {
         "\n\n=== RECENT WHATSAPP CONVERSATION (oldest first) ===\n" +
         thread +
         "\n=== END OF CONVERSATION ===\n" +
+        `Today's date and time is ${nowIstLabel()} IST.\n` +
         "Rules for using the conversation above:\n" +
         "1. Continue this conversation naturally — do not repeat information already given.\n" +
-        "2. Messages from \"Store team (human)\" are a human colleague. NEVER contradict or overrule what they said. If the customer asks for something the human already declined or is handling, refer back to that and suggest they continue with the team.\n" +
-        "3. If the thread shows an ongoing dispute or order-specific problem, keep your reply brief and defer to the store team.";
+        "2. Each line is prefixed with the time it was sent, in [DD Mon, H:MM AM/PM] IST. Use these to judge how long ago something happened (e.g. an order confirmed days ago vs a question just now). Do NOT say \"today\" or \"just now\" about a message unless its timestamp matches today's date above.\n" +
+        "3. Messages from \"Store team (human)\" are a human colleague. NEVER contradict or overrule what they said. If the customer asks for something the human already declined or is handling, refer back to that and suggest they continue with the team.\n" +
+        "4. If the thread shows an ongoing dispute or order-specific problem, keep your reply brief and defer to the store team.";
       // The thread supersedes the bot's own partial memory — sending both
       // would duplicate content and spend tokens twice.
       history = [];

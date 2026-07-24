@@ -417,6 +417,27 @@ const THREAD_DEFAULT_LINE_CHARS = 400;
 const THREAD_DEFAULT_TOTAL_CHARS = 4000;
 
 /**
+ * Format a DoubleTick messageTime (epoch ms) as a compact IST stamp for the
+ * transcript, e.g. "23 Jul, 5:04 PM". Gives the model an absolute time to reason
+ * about — pairs with the "today's date is X" anchor so it can judge how old a
+ * message is. Returns "" on a missing/unparseable value rather than a wrong one.
+ */
+function formatThreadTime(messageTime: unknown): string {
+  const ms = Number(messageTime);
+  if (!Number.isFinite(ms) || ms <= 0) return "";
+  const d = new Date(ms);
+  if (isNaN(d.getTime())) return "";
+  return d.toLocaleString("en-IN", {
+    timeZone: "Asia/Kolkata",
+    day: "numeric",
+    month: "short",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+}
+
+/**
  * Fetch the customer's REAL WhatsApp thread from DoubleTick and format it as a
  * labelled transcript for the LLM — including human agent replies, the
  * button-menu bot, templates, everything. The bot's own stored turns miss all
@@ -568,7 +589,12 @@ export async function fetchDoubleTickThread(opts: {
           ? "Store team (human)"
           : "Store assistant";
 
-      lines.push(`${label}: ${text.slice(0, lineChars)}`);
+      // Prefix each line with its IST timestamp so the model can reason about
+      // WHEN things happened — "the order was confirmed 10 days ago", "the
+      // customer asked this two minutes ago". messageTime is epoch ms.
+      const when = formatThreadTime(m?.messageTime);
+      const prefix = when ? `[${when}] ` : "";
+      lines.push(`${prefix}${label}: ${text.slice(0, lineChars)}`);
       if (idx === gapAfter) lines.push("[... earlier messages omitted ...]");
     }
     if (!lines.length) return null;
