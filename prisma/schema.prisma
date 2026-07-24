@@ -328,10 +328,79 @@ model AiReplySettings {
   // just mutes itself). Paste the webhook URL from the flow's On Webhook node.
   waHandoffFlowUrl String  @default("")
 
+  // Instagram DM replies (Meta Graph API, direct — no middleman like DoubleTick).
+  // Same AI brain and knowledge base as WhatsApp; only the transport differs.
+  // Instagram has no thread-scraped AWB (that comes from the merchant's WhatsApp
+  // flow bot), so tracking questions are redirected to WhatsApp rather than
+  // answered live. Independent of the WhatsApp settings above.
+  igEnabled      Boolean @default(false)
+  igPageId       String  @default("") // the Facebook Page id linked to the IG account
+  igAccessToken  String  @default("") // long-lived Page access token — server-side only
+  igAppSecret    String  @default("") // Meta app secret, for X-Hub-Signature-256 verification
+  igWebhookToken String  @default("") // unguessable segment in our webhook URL, identifies the shop
+  igVerifyToken  String  @default("") // the token Meta echoes on the GET verification challenge
+
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
   @@index([waWebhookToken])
+  @@index([igWebhookToken])
+}
+
+/// One rolling DM thread per customer on a social channel (Instagram today).
+/// The channel-agnostic twin of WhatsAppConversation — customers here are keyed
+/// by an opaque platform id (an Instagram-scoped user id, IGSID), not a phone,
+/// so identity is (shop, channel, customerId) rather than (shop, phone). Kept
+/// only long enough for the bot to follow the conversation, then purged.
+model SocialConversation {
+  id            String   @id @default(cuid())
+  shop          String
+  channel       String // "instagram" (room for "messenger" etc. later)
+  customerId    String // platform user id (IGSID) — the conversation key
+  turns         String   @default("[]") // JSON ChatTurn[]; capped via trimHistory()
+  optedOut      Boolean  @default(false)
+  mutedUntil    DateTime?
+  windowCount   Int      @default(0)
+  windowStart   DateTime @default(now())
+  lastInboundAt DateTime @default(now())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([shop, channel, customerId])
+  @@index([updatedAt])
+}
+
+/// Inbound social DM awaiting an AI reply. The channel-agnostic twin of
+/// WhatsAppReplyJob — Meta wants a fast webhook ack while the LLM can take 15s.
+model SocialReplyJob {
+  id                String   @id @default(cuid())
+  shop              String
+  channel           String
+  customerId        String
+  message           String
+  providerMessageId String // Meta's message id — the idempotency key
+  status            String   @default("pending") // pending | claimed | done | failed
+  attempts          Int      @default(0)
+  error             String   @default("")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([shop, channel, providerMessageId])
+  @@index([status, createdAt])
+}
+
+/// One inbound social DM the bot deliberately did NOT answer, for the same
+/// "why didn't it reply" visibility as WhatsAppSkip.
+model SocialSkip {
+  id         String   @id @default(cuid())
+  shop       String
+  channel    String
+  customerId String
+  reason     String // muted | rate-limited | not-text | feature-off
+  preview    String   @default("")
+  createdAt  DateTime @default(now())
+
+  @@index([shop, createdAt])
 }
 
 /// One rolling WhatsApp thread per shopper. Kept only long enough for the bot to

@@ -203,6 +203,18 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           s.waProvider === "doubletick" ? "doubletick" : "interakt"
         }/${s.waWebhookToken}`
       : "",
+    // Instagram — the token/values needed to wire the Meta webhook. Secrets
+    // (access token, app secret) are write-only: the client only learns whether
+    // one is saved. The verify token IS shown, because the merchant must paste
+    // it into Meta's dashboard.
+    igEnabled: s?.igEnabled ?? false,
+    igPageId: s?.igPageId ?? "",
+    hasIgAccessToken: Boolean(s?.igAccessToken),
+    hasIgAppSecret: Boolean(s?.igAppSecret),
+    igVerifyToken: s?.igVerifyToken ?? "",
+    igWebhookUrl: s?.igWebhookToken
+      ? `${(process.env.SHOPIFY_APP_URL || "").replace(/\/$/, "")}/webhooks/instagram/${s.igWebhookToken}`
+      : "",
   });
 };
 
@@ -273,6 +285,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return json({ success: true, tokenRotated: true });
   }
 
+  // Mint the Instagram webhook URL token + the verify token Meta echoes on its
+  // GET challenge. Rotating breaks the old URL, so the UI warns first.
+  if (formData.get("intent") === "rotate-ig-token") {
+    const token = generateWebhookToken();
+    const verify = generateWebhookToken();
+    await prisma.aiReplySettings.upsert({
+      where: { shop },
+      create: { shop, igWebhookToken: token, igVerifyToken: verify },
+      update: { igWebhookToken: token, igVerifyToken: verify },
+    });
+    return json({ success: true, tokenRotated: true });
+  }
+
   const data = JSON.parse(formData.get("data") as string);
   const text = (v: unknown, fallback: string, max = 300) => {
     const str = String(v ?? "").trim();
@@ -288,6 +313,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const newWaKey = String(data.waApiKey || "").trim();
   const newWaSecret = String(data.waWebhookSecret || "").trim();
   const newShiprocketPassword = String(data.waShiprocketPassword || "").trim();
+  const newIgAccessToken = String(data.igAccessToken || "").trim();
+  const newIgAppSecret = String(data.igAppSecret || "").trim();
   const waProvider = data.waProvider === "doubletick" ? "doubletick" : "interakt";
   const waFromNumber = String(data.waFromNumber || "").trim().replace(/[^\d+]/g, "").slice(0, 20);
 
@@ -399,6 +426,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       waHandoffFlowUrl: /^https:\/\/\S+$/.test(String(data.waHandoffFlowUrl || "").trim())
         ? String(data.waHandoffFlowUrl).trim().slice(0, 500)
         : "",
+      // Instagram. Enabled + Page id stored plainly; the access token and app
+      // secret follow the write-only rule below (blank keeps the saved value).
+      igEnabled: Boolean(data.igEnabled),
+      igPageId: String(data.igPageId || "").trim().replace(/[^\d]/g, "").slice(0, 40),
       // Blank means "keep what's saved", the same rule the API keys follow.
       // Without this, one save submitted from a stale or not-yet-hydrated form
       // silently wiped the whole knowledge base, and the bot kept answering
@@ -426,6 +457,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         waApiKey: newWaKey,
         waWebhookSecret: newWaSecret,
         waShiprocketPassword: newShiprocketPassword,
+        igAccessToken: newIgAccessToken,
+        igAppSecret: newIgAppSecret,
         ...values,
       },
       update: {
@@ -433,6 +466,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         ...(newWaKey ? { waApiKey: newWaKey } : {}),
         ...(newWaSecret ? { waWebhookSecret: newWaSecret } : {}),
         ...(newShiprocketPassword ? { waShiprocketPassword: newShiprocketPassword } : {}),
+        ...(newIgAccessToken ? { igAccessToken: newIgAccessToken } : {}),
+        ...(newIgAppSecret ? { igAppSecret: newIgAppSecret } : {}),
         ...values,
       },
     });
@@ -489,6 +524,10 @@ export default function AiRepliesPage() {
     waShiprocketEmail: d.waShiprocketEmail,
     waShiprocketPassword: "",
     waHandoffFlowUrl: d.waHandoffFlowUrl,
+    igEnabled: d.igEnabled,
+    igPageId: d.igPageId,
+    igAccessToken: "",
+    igAppSecret: "",
   };
 
   const [enabled, setEnabled] = useState(initial.enabled);
@@ -508,6 +547,10 @@ export default function AiRepliesPage() {
   const [waShiprocketEmail, setWaShiprocketEmail] = useState(initial.waShiprocketEmail);
   const [waShiprocketPassword, setWaShiprocketPassword] = useState(initial.waShiprocketPassword);
   const [waHandoffFlowUrl, setWaHandoffFlowUrl] = useState(initial.waHandoffFlowUrl);
+  const [igEnabled, setIgEnabled] = useState(initial.igEnabled);
+  const [igPageId, setIgPageId] = useState(initial.igPageId);
+  const [igAccessToken, setIgAccessToken] = useState(initial.igAccessToken);
+  const [igAppSecret, setIgAppSecret] = useState(initial.igAppSecret);
   const [apiKey, setApiKey] = useState(initial.apiKey);
   const [knowledge, setKnowledge] = useState(initial.knowledge);
   const [botName, setBotName] = useState(initial.botName);
@@ -546,7 +589,11 @@ export default function AiRepliesPage() {
     waTrackingEnabled !== initial.waTrackingEnabled ||
     waShiprocketEmail !== initial.waShiprocketEmail ||
     waShiprocketPassword !== initial.waShiprocketPassword ||
-    waHandoffFlowUrl !== initial.waHandoffFlowUrl;
+    waHandoffFlowUrl !== initial.waHandoffFlowUrl ||
+    igEnabled !== initial.igEnabled ||
+    igPageId !== initial.igPageId ||
+    igAccessToken !== initial.igAccessToken ||
+    igAppSecret !== initial.igAppSecret;
 
   useEffect(() => {
     if (actionData?.success) {
@@ -588,6 +635,10 @@ export default function AiRepliesPage() {
     setWaShiprocketEmail(initial.waShiprocketEmail);
     setWaShiprocketPassword(initial.waShiprocketPassword);
     setWaHandoffFlowUrl(initial.waHandoffFlowUrl);
+    setIgEnabled(initial.igEnabled);
+    setIgPageId(initial.igPageId);
+    setIgAccessToken(initial.igAccessToken);
+    setIgAppSecret(initial.igAppSecret);
   };
 
   const handleSave = () => {
@@ -619,6 +670,10 @@ export default function AiRepliesPage() {
           waShiprocketEmail,
           waShiprocketPassword,
           waHandoffFlowUrl,
+          igEnabled,
+          igPageId,
+          igAccessToken,
+          igAppSecret,
         }),
       },
       { method: "POST" },
@@ -629,6 +684,7 @@ export default function AiRepliesPage() {
 
   const handleTest = () => submit({ intent: "test", testQuestion }, { method: "POST" });
   const handleRotateToken = () => submit({ intent: "rotate-token" }, { method: "POST" });
+  const handleRotateIgToken = () => submit({ intent: "rotate-ig-token" }, { method: "POST" });
 
   return (
     <Page>
@@ -1062,6 +1118,110 @@ export default function AiRepliesPage() {
                     </Text>
                   </>
                 )}
+              </BlockStack>
+            </Card>
+
+            <Card>
+              <BlockStack gap="400">
+                <Text as="h2" variant="headingMd">Instagram DMs</Text>
+                <Text as="p" tone="subdued">
+                  Answer Instagram direct messages with the same assistant and knowledge base.
+                  Connects straight to Meta&apos;s API. Live order tracking isn&apos;t available on
+                  Instagram, so the bot points those customers to WhatsApp.
+                </Text>
+
+                <Banner tone="info">
+                  <BlockStack gap="200">
+                    <Text as="p">
+                      This needs a one-time setup in Meta&apos;s developer dashboard (an app with the{" "}
+                      <strong>Instagram</strong> product, the{" "}
+                      <strong>instagram_manage_messages</strong> permission, and a long-lived Page
+                      access token). Meta&apos;s app review can take several days, so start it early.
+                    </Text>
+                  </BlockStack>
+                </Banner>
+
+                <TextField
+                  label="Facebook Page ID"
+                  value={igPageId}
+                  onChange={setIgPageId}
+                  autoComplete="off"
+                  placeholder="123456789012345"
+                  helpText="The Facebook Page linked to your Instagram account (Meta → your Page → About → Page ID)."
+                />
+                <TextField
+                  label="Instagram access token"
+                  value={igAccessToken}
+                  onChange={setIgAccessToken}
+                  autoComplete="off"
+                  type="password"
+                  placeholder={d.hasIgAccessToken ? "••••••••" : "Paste the long-lived Page access token"}
+                  helpText={
+                    d.hasIgAccessToken
+                      ? "A token is saved — enter a new one to replace it. Stored securely, server-side only."
+                      : "A long-lived Page access token with instagram_manage_messages. Stored securely, never sent to your storefront."
+                  }
+                />
+                <TextField
+                  label="Meta app secret"
+                  value={igAppSecret}
+                  onChange={setIgAppSecret}
+                  autoComplete="off"
+                  type="password"
+                  placeholder={d.hasIgAppSecret ? "••••••••" : "Paste your Meta app secret"}
+                  helpText={
+                    d.hasIgAppSecret
+                      ? "A secret is saved — enter a new one to replace it. Used to verify messages really came from Meta."
+                      : "Meta → App Settings → Basic → App Secret. Without it, incoming messages are rejected."
+                  }
+                />
+
+                {d.igWebhookUrl ? (
+                  <BlockStack gap="200">
+                    <TextField
+                      label="Callback URL (paste into Meta)"
+                      value={d.igWebhookUrl}
+                      onChange={() => {}}
+                      autoComplete="off"
+                      readOnly
+                      selectTextOnFocus
+                      helpText="Meta → your app → Instagram → Webhooks → Callback URL."
+                    />
+                    <TextField
+                      label="Verify token (paste into Meta)"
+                      value={d.igVerifyToken}
+                      onChange={() => {}}
+                      autoComplete="off"
+                      readOnly
+                      selectTextOnFocus
+                      helpText="Meta → Webhooks → Verify Token. Meta sends this back once to confirm the URL; we check it matches."
+                    />
+                    <InlineStack gap="200">
+                      <Button onClick={handleRotateIgToken} loading={busy}>
+                        Generate a new URL
+                      </Button>
+                      <Text as="span" tone="subdued" variant="bodySm">
+                        The old URL and token stop working immediately.
+                      </Text>
+                    </InlineStack>
+                  </BlockStack>
+                ) : (
+                  <InlineStack gap="200" blockAlign="center">
+                    <Button onClick={handleRotateIgToken} loading={busy}>
+                      Generate callback URL
+                    </Button>
+                    <Text as="span" tone="subdued" variant="bodySm">
+                      Create the URL + verify token to paste into Meta&apos;s webhook settings.
+                    </Text>
+                  </InlineStack>
+                )}
+
+                <Checkbox
+                  label="Reply to Instagram DMs"
+                  helpText="Needs the access token, app secret, and the callback URL subscribed in Meta above. Only turn on once Meta has approved instagram_manage_messages."
+                  checked={igEnabled}
+                  onChange={setIgEnabled}
+                />
               </BlockStack>
             </Card>
 
