@@ -176,25 +176,23 @@ async function handleSocialJob(job: {
     return wa.ok ? { ok: true } : { ok: false, error: wa.error };
   }
   if (cheap === "nudge") {
-    // The bot already failed to answer — hand to a human (mute), no menu.
-    const wa = await send("Thanks for your patience - a member of our team will reply here shortly.");
-    if (wa.ok) {
-      await muteSocial(job.shop, job.customerId);
-      return { ok: true };
-    }
-    return { ok: false, error: wa.error };
+    // A nudge carries no issue to identify — ask what they need, stay live so
+    // their reply reaches the AI. Don't hand off blind.
+    const wa = await send("I'm here! Tell me what you need and I'll help you right away.");
+    return wa.ok ? { ok: true } : { ok: false, error: wa.error };
   }
 
   // Canned menu answers the merchant already wrote (return policy, sizing, etc.)
   // — zero LLM tokens. "human" and "track" are handled specially below.
   const intent = matchMenuIntent(job.message);
   if (intent === "human") {
-    const wa = await send("Sure - I'm connecting you with our team, they'll reply here shortly.");
-    if (wa.ok) {
-      await muteSocial(job.shop, job.customerId);
-      return { ok: true };
-    }
-    return { ok: false, error: wa.error };
+    // Identify the issue before escalating: ask what they need and let the AI
+    // attempt it, rather than handing off the moment they tap "Talk to Us".
+    const wa = await send(
+      "I can help right here - tell me what you need (your order number and " +
+        "what's wrong), and I'll sort it out. If you need a teammate, I'll bring one in.",
+    );
+    return wa.ok ? { ok: true } : { ok: false, error: wa.error };
   }
   if (intent === "track") {
     // No live tracking on Instagram — redirect to WhatsApp.
@@ -206,21 +204,24 @@ async function handleSocialJob(job: {
     return wa.ok ? { ok: true } : { ok: false, error: wa.error };
   }
 
-  // Delivery / refund chasing the bot can't answer here → redirect to WhatsApp
-  // rather than promise something it can't deliver.
-  if (needsHumanNow(job.message, false)) {
-    const wa = await send(IG_TRACK_REDIRECT);
-    if (wa.ok) {
-      await muteSocial(job.shop, job.customerId);
-      return { ok: true };
-    }
-    return { ok: false, error: wa.error };
-  }
+  // Delivery / refund chasing. Instagram has no live tracking, but we still let
+  // the AI attempt it (explain the process/timelines from the knowledge base)
+  // rather than escalate blind — and tell it to point the customer to WhatsApp
+  // for a specific live status it can't provide here.
+  const looksLikeStatusChase = needsHumanNow(job.message, false);
 
   // Everything else: the AI, with the merchant's knowledge base. "whatsapp"
   // formatting (bare URLs, no markdown) suits Instagram DMs too.
   const history = loadTurns(convo?.turns);
-  const system = buildSystemPrompt(settings, "whatsapp", job.message);
+  let system = buildSystemPrompt(settings, "whatsapp", job.message);
+  if (looksLikeStatusChase) {
+    system +=
+      "\n\nNOTE: the customer is asking about a specific order/refund/pickup " +
+      "status, and you have NO live tracking here. Do NOT pretend to check it. " +
+      "Help from the knowledge base (explain the process and timelines) and, for " +
+      "a specific live status, tell them to message on WhatsApp with their order " +
+      "number. Only end with [HANDOFF] if they clearly need a human.";
+  }
   const ai = await callAi({
     provider: settings.aiProvider,
     apiKey: settings.apiKey,
@@ -266,16 +267,6 @@ async function handleSocialJob(job: {
     },
   });
   return { ok: true };
-}
-
-/** Mute the bot for this customer after a handoff — 12h, expiring, like WhatsApp. */
-async function muteSocial(shop: string, customerId: string): Promise<void> {
-  const mutedUntil = new Date(Date.now() + IG_HANDOFF_MUTE_HOURS * 3600_000);
-  await prisma.socialConversation.upsert({
-    where: { shop_channel_customerId: { shop, channel: IG_CHANNEL, customerId } },
-    create: { shop, channel: IG_CHANNEL, customerId, optedOut: true, mutedUntil },
-    update: { optedOut: true, mutedUntil },
-  });
 }
 
 /** True when the bot must stay silent for this customer right now. Mirrors isMuted. */

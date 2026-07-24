@@ -61,6 +61,13 @@ export function normalizeDashes(text: string): string {
  *  down rather than talking over them. */
 const HUMAN_ACTIVE_MS = 30 * 60 * 1000;
 
+/** The distinctive core of the "Talk to Us" triage reply. Reads naturally in the
+ *  message, and its presence in a stored model turn is how we count how many
+ *  times the bot has asked the customer to describe their issue — so a customer
+ *  who keeps tapping "Talk to Us" without saying what they need is escalated
+ *  after the second ask, rather than looping forever. */
+const TRIAGE_PHRASE = "Please tell me what you need";
+
 /**
  * Is the shopper chasing their order? Covers English + common Hinglish phrasings
  * seen live ("where is my order", "track", "kitna time lagega", "kab tak
@@ -454,27 +461,14 @@ async function handleJob(job: {
     return wa.ok ? { ok: true } : { ok: false, error: wa.error };
   }
   if (cheap === "nudge") {
-    // Hand off rather than reply: the customer is chasing an answer they did
-    // not get, so a person should pick this up.
-    const wa = await send(HANDOFF_REPLY, "badgehq-ai-nudge");
-    if (wa.ok) {
-      await assignChatViaFlow("Customer is chasing an answer the bot didn't give.");
-      await prisma.whatsAppConversation.upsert({
-        where: { shop_phone: { shop: job.shop, phone: job.phone } },
-        create: {
-          shop: job.shop,
-          phone: job.phone,
-          optedOut: true,
-          mutedUntil: new Date(Date.now() + HANDOFF_MUTE_HOURS * 3600_000),
-        },
-        update: {
-          optedOut: true,
-          mutedUntil: new Date(Date.now() + HANDOFF_MUTE_HOURS * 3600_000),
-        },
-      });
-      return { ok: true };
-    }
-    return { ok: false, error: wa.error };
+    // A nudge ("are you there?", "hello??") carries no issue to identify, so per
+    // "don't escalate without identifying the issue" we don't hand off — we ask
+    // what they need and stay live so their answer reaches the AI.
+    const wa = await send(
+      "I'm here! " + TRIAGE_PHRASE + " and I'll help you right away.",
+      "badgehq-ai-nudge",
+    );
+    return wa.ok ? { ok: true } : { ok: false, error: wa.error };
   }
 
   // The deterministic menu: button taps and short typed questions that the
@@ -484,66 +478,63 @@ async function handleJob(job: {
   // whole thread.
   const intent = matchMenuIntent(job.message);
   if (intent === "human") {
-    // "Talk to Us" is two-stage: the AI bot triages first, a human takes over
-    // only when it's actually needed.
+    // Rule: identify the issue BEFORE escalating; never hand off blind. Tapping
+    // "Talk to Us" is a request for help, not proof the bot can't help — so we
+    // ask what they need and let the AI attempt it. The bot stays LIVE (no mute)
+    // for their next message, which flows through the normal AI path with the
+    // knowledge base and the LLM's own [HANDOFF] — so the AI escalates ONLY if
+    // it genuinely can't resolve the issue.
     //
-    //  - First touch (the customer hasn't talked to the bot yet): DON'T mute.
-    //    Ask what they need and let their NEXT message flow through the normal
-    //    AI path, which already has the knowledge base, live tracking, and its
-    //    own [HANDOFF] escalation — so a question the bot can answer never
-    //    reaches a human, and one it can't escalates itself.
-    //  - Already engaged (they've exchanged messages with the bot): they tapped
-    //    "Talk to Us" BECAUSE the bot wasn't enough. Re-triaging would be
-    //    insulting — go straight to a human, exactly as before.
-    //
-    // The written triage turn is what makes a SECOND tap count as "engaged", so
-    // tapping twice escalates instead of looping the same prompt.
-    const alreadyEngaged = loadTurns(convo?.turns).length > 0;
+    // If the customer never says what they need (just keeps tapping the button),
+    // that's when a human is warranted: after asking twice with no substance, we
+    // escalate so a person can reach out.
+    const priorTurns = loadTurns(convo?.turns);
+    const timesAskedWhatYouNeed = priorTurns.filter(
+      (t) => t.role === "model" && t.text.includes(TRIAGE_PHRASE),
+    ).length;
 
-    if (!alreadyEngaged) {
-      const triage =
-        "Sure — I can help right here. Please tell me what you need " +
-        "(for example your order number and what's wrong), and I'll sort it out. " +
-        "If it needs a teammate, I'll bring one in.";
-      const wa = await send(triage, "badgehq-menu-human-triage");
-      if (!wa.ok) return { ok: false, error: wa.error };
-      // Record the triage so a repeat tap escalates, and so the bot stays LIVE
-      // (no mutedUntil / optedOut) for the customer's next message.
-      await prisma.whatsAppConversation.upsert({
-        where: { shop_phone: { shop: job.shop, phone: job.phone } },
-        create: {
-          shop: job.shop,
-          phone: job.phone,
-          turns: appendTurns([], job.message, triage),
-        },
-        update: { turns: appendTurns([], job.message, triage) },
-      });
-      return { ok: true };
+    if (timesAskedWhatYouNeed >= 2) {
+      // Asked twice, still no describable issue — escalate so a human reaches out.
+      const wa = await send(
+        isBusinessHoursIST() ? HANDOVER_REPLY : OFF_HOURS_REPLY,
+        "badgehq-menu-human",
+      );
+      if (wa.ok) {
+        await assignChatViaFlow("Customer asked for a human but never described an issue.");
+        await prisma.whatsAppConversation.upsert({
+          where: { shop_phone: { shop: job.shop, phone: job.phone } },
+          create: {
+            shop: job.shop,
+            phone: job.phone,
+            optedOut: true,
+            mutedUntil: new Date(Date.now() + HANDOFF_MUTE_HOURS * 3600_000),
+          },
+          update: {
+            optedOut: true,
+            mutedUntil: new Date(Date.now() + HANDOFF_MUTE_HOURS * 3600_000),
+          },
+        });
+        return { ok: true };
+      }
+      return { ok: false, error: wa.error };
     }
 
-    // Engaged already — hand to a human, hours-aware, and mute the bot.
-    const wa = await send(
-      isBusinessHoursIST() ? HANDOVER_REPLY : OFF_HOURS_REPLY,
-      "badgehq-menu-human",
-    );
-    if (wa.ok) {
-      await assignChatViaFlow("Customer asked for a human after talking to the bot.");
-      await prisma.whatsAppConversation.upsert({
-        where: { shop_phone: { shop: job.shop, phone: job.phone } },
-        create: {
-          shop: job.shop,
-          phone: job.phone,
-          optedOut: true,
-          mutedUntil: new Date(Date.now() + HANDOFF_MUTE_HOURS * 3600_000),
-        },
-        update: {
-          optedOut: true,
-          mutedUntil: new Date(Date.now() + HANDOFF_MUTE_HOURS * 3600_000),
-        },
-      });
-      return { ok: true };
-    }
-    return { ok: false, error: wa.error };
+    // Ask what they need. The stored reply contains TRIAGE_PHRASE, so a repeat
+    // "Talk to Us" tap is counted above. Bot stays live — no mute — so their
+    // reply reaches the AI.
+    const triage =
+      "I can help right here. " +
+      TRIAGE_PHRASE +
+      " (for example your order number and what's wrong), and I'll sort it out. " +
+      "If it turns out you need a teammate, I'll bring one in.";
+    const wa = await send(triage, "badgehq-menu-human-triage");
+    if (!wa.ok) return { ok: false, error: wa.error };
+    await prisma.whatsAppConversation.upsert({
+      where: { shop_phone: { shop: job.shop, phone: job.phone } },
+      create: { shop: job.shop, phone: job.phone, turns: appendTurns([], job.message, triage) },
+      update: { turns: appendTurns(priorTurns, job.message, triage) },
+    });
+    return { ok: true };
   }
   // A message-borne AWB means the customer wants a LIVE status, so it must beat
   // both the canned "track here" menu link below and the human escalation
@@ -612,44 +603,16 @@ async function handleJob(job: {
     return wa.ok ? { ok: true } : { ok: false, error: wa.error };
   }
 
-  // Deterministic escalation, decided in code where the model cannot talk its
-  // way past it. The prompt already orders the LLM to hand off on delivery and
-  // refund chasing; it does not reliably obey — observed live promising to
-  // "check the status" of an order it has no way to look up. These patterns
-  // need live order data nobody here has, so a fast handoff IS the answer.
-  //
-  // EXCEPTION: if tracking is on and the customer HANDED US an AWB in the
-  // message ("AWB 152980560267062, where is it?"), we CAN look up live order
-  // data — that's exactly what tracking does. Escalating those would waste a
-  // human on a question the bot now answers. So skip escalation when a
-  // message-borne AWB is present; the tracking block below handles it. (An AWB
-  // only in the thread still escalates here, since resolving it needs the
-  // thread fetch that happens later — a fair trade for keeping this gate cheap
-  // and token-free.)
-  if (!messageAwb && needsHumanNow(job.message, settings.waTrackingEnabled)) {
-    const wa = await send(
-      isBusinessHoursIST() ? HANDOVER_REPLY : OFF_HOURS_REPLY,
-      "badgehq-escalate",
-    );
-    if (wa.ok) {
-      await assignChatViaFlow("Escalation: complaint, refund or delivery chase.");
-      await prisma.whatsAppConversation.upsert({
-        where: { shop_phone: { shop: job.shop, phone: job.phone } },
-        create: {
-          shop: job.shop,
-          phone: job.phone,
-          optedOut: true,
-          mutedUntil: new Date(Date.now() + HANDOFF_MUTE_HOURS * 3600_000),
-        },
-        update: {
-          optedOut: true,
-          mutedUntil: new Date(Date.now() + HANDOFF_MUTE_HOURS * 3600_000),
-        },
-      });
-      return { ok: true };
-    }
-    return { ok: false, error: wa.error };
-  }
+  // Rule: identify the issue before escalating. A refund/status chase used to
+  // hard-escalate here without the AI ever seeing it. Instead, we let the AI
+  // attempt it — it can explain the refund/return process and timelines from the
+  // knowledge base, which resolves most of these — and only hand off (via its
+  // own [HANDOFF]) if the customer needs a specific status the bot can't verify.
+  // We still DETECT the chase and tell the AI so, so it never fakes a lookup it
+  // can't do ("let me check your order status") — it either helps from the
+  // knowledge base or hands off honestly.
+  const looksLikeStatusChase =
+    !messageAwb && needsHumanNow(job.message, settings.waTrackingEnabled);
 
   // "whatsapp" swaps markdown links for bare URLs — WhatsApp renders no markdown.
   let system = buildSystemPrompt(settings, "whatsapp", job.message);
@@ -728,6 +691,22 @@ async function handleJob(job: {
     const awb = messageAwb || (threadTranscript ? extractAwb(threadTranscript) : null);
     const ctx = awb ? await resolveTrackingContext(awb) : null;
     if (ctx) system += ctx;
+  }
+
+  // The message looks like a status chase (refund/delivery) and we have no live
+  // data to answer it. Tell the AI so it helps honestly instead of pretending to
+  // look something up — and hands off only if it truly can't resolve it. This is
+  // how we "identify the issue before escalating": the AI attempts it, and its
+  // own [HANDOFF] is the escalation, not a blind code-level one.
+  if (looksLikeStatusChase && !trackingHint) {
+    system +=
+      "\n\nNOTE: the customer is asking about the status of a specific order, " +
+      "refund, or pickup, and you have NO live tracking or refund data for it. " +
+      "Do NOT pretend to check a status or promise to look it up. Instead: if you " +
+      "can genuinely help from the knowledge base (explain the refund/return " +
+      "process, timelines, or what to do next), do that clearly. If the customer " +
+      "needs a specific live status you cannot provide, end your reply with " +
+      "[HANDOFF] so a teammate takes over.";
   }
 
   const ai = await callAi({
