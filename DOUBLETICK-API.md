@@ -268,6 +268,26 @@ Probed repeatedly across two sessions (`/chats/done`, `/chat/done`, `/v2/chat/do
 inbox. Also no working DELETE for webhooks: five plausible paths all 404'd, so removing
 one means using their dashboard.
 
+### Not found: assign-to-agent / tag a chat
+
+Probed ~50 path/verb/body variants across four rounds with a live key (2026-07-24;
+`/chats` and `/team` returned `200` in the same run, so auth and base URL were proven
+correct). Every assignment and tagging path `404`s: `/chats/assign`, `/chat/assign`,
+`/chat/assign-agent`, `/agent/assign`, `/team/assign`, `/chats/reassign`, `/chat/transfer`,
+`PATCH`/`PUT /chats`, `/chats/addTag`, `/tag`, `/chats/label`, and every camelCase /
+kebab-case / field-name variant tried. **There is no public API to assign a chat to an
+agent, transfer it, tag it, or otherwise mutate the inbox** — assignment exists only as a
+webhook EVENT (`CHAT_ASSIGNED_TO_AGENT`) and as read-only fields (`assignedUserName`,
+`assignedUserNumber`, `tagNames`) on `GET /chats`. All inbox mutation is dashboard-only,
+consistent with mark-as-done above. To alert a human, the only lever is a WhatsApp message
+(`POST /whatsapp/message/text`).
+
+### Works: list team members — `GET /team`
+
+Returns the org's agents: `{ data: [{ id: "user_...", name, phone, email, joinDate, ... }] }`.
+Read-only (no write counterpart), but useful for a "pick the on-call agent" dropdown so a
+handoff alert can be sent to a specific agent's `phone`.
+
 ---
 
 ## The 24-hour window

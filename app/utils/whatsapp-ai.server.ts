@@ -300,6 +300,39 @@ export function verifyDoubleTickAuth(header: string | null | undefined, expected
  * route queues and returns immediately, so a timeout means something is broken
  * badly enough that a retry would duplicate the reply rather than fix it.
  */
+/** One agent from the DoubleTick team roster (GET /team). */
+export type DoubleTickAgent = { name: string; phone: string; status: string };
+
+/**
+ * List the merchant's DoubleTick team members so the admin can pick which agent
+ * receives handoff alerts. GET /team is the only agent endpoint that works —
+ * DoubleTick has no API to assign a chat to an agent (probed ~50 paths, all
+ * 404), so "pick an agent to ping" is the closest thing to routing it allows.
+ * Read-only, best-effort: on any failure returns [] and the admin falls back to
+ * typing a number by hand.
+ */
+export async function fetchDoubleTickTeam(apiKey: string): Promise<DoubleTickAgent[]> {
+  if (!apiKey) return [];
+  try {
+    const res = await fetch("https://public.doubletick.io/team", {
+      headers: { Authorization: apiKey, Accept: "application/json" },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!res.ok) return [];
+    const body = await res.json().catch(() => null);
+    const rows: any[] = Array.isArray(body?.data) ? body.data : [];
+    return rows
+      .map((r) => ({
+        name: String(r?.name || "").trim().replace(/\s+/g, " "),
+        phone: String(r?.phone || "").replace(/\D/g, ""),
+        status: String(r?.status || ""),
+      }))
+      .filter((a) => a.phone);
+  } catch {
+    return [];
+  }
+}
+
 export async function registerDoubleTickWebhook(opts: {
   apiKey: string;
   url: string;

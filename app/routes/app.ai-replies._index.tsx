@@ -30,7 +30,11 @@ import prisma from "../db.server";
 import { bumpConfigVersion } from "../utils/config-version.server";
 import { buildSystemPrompt, callAi } from "../utils/ai-replies.server";
 import { CLAUDE_MODELS } from "../utils/ai-models";
-import { generateWebhookToken, registerDoubleTickWebhook } from "../utils/whatsapp-ai.server";
+import {
+  generateWebhookToken,
+  registerDoubleTickWebhook,
+  fetchDoubleTickTeam,
+} from "../utils/whatsapp-ai.server";
 
 const POSITIONS = ["bottom-right", "bottom-left"];
 
@@ -97,6 +101,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       select: { phone: true, reason: true, preview: true, createdAt: true },
     }),
   ]);
+
+  // DoubleTick team roster, for the handoff-alert agent picker. Only fetched
+  // when it's usable (DoubleTick + a saved key); a failure returns [] and the
+  // admin falls back to typing a number. Not in the Promise.all above because it
+  // needs the key from `s`.
+  const dtTeam =
+    s?.waProvider === "doubletick" && s?.waApiKey
+      ? await fetchDoubleTickTeam(s.waApiKey)
+      : [];
 
   // Stored as bare 10 digits (see toIndianTenDigit); shown with +91 so the
   // number can be copied straight into a provider search or a dialler.
@@ -193,6 +206,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     waShiprocketEmail: s?.waShiprocketEmail ?? "",
     hasShiprocketPassword: Boolean(s?.waShiprocketPassword),
     waHandoffNotifyNumber: s?.waHandoffNotifyNumber ?? "",
+    dtTeam,
     // Whether the DoubleTick webhook has been registered for this shop.
     hasWaAuth: Boolean(s?.waWebhookAuth),
     // Built from the app's own URL, never the request host — inside the Shopify
@@ -1002,14 +1016,58 @@ export default function AiRepliesPage() {
 
                 <Divider />
                 <Text as="h3" variant="headingSm">Handoff alert</Text>
-                <TextField
-                  label="Notify this number on handoff"
-                  value={waHandoffNotifyNumber}
-                  onChange={setWaHandoffNotifyNumber}
-                  autoComplete="off"
-                  placeholder="+919999999999"
-                  helpText="Whenever the bot hands a chat to a human — a complaint, a 'talk to agent' request, or a tracking question it couldn't answer — it sends a WhatsApp alert here with the customer's number and last message. Leave blank for no alert. Use a team member's or a WhatsApp group's number."
-                />
+                <Text as="p" tone="subdued" variant="bodySm">
+                  DoubleTick has no way to assign a chat to an agent through their API — the
+                  chat stays in your shared inbox. Instead, whenever the bot hands a chat to a
+                  human (a complaint, a &quot;talk to agent&quot; request, or a tracking
+                  question it couldn&apos;t answer), it sends a WhatsApp alert with the
+                  customer&apos;s number and last message so someone picks it up.
+                </Text>
+                {d.dtTeam.length > 0 ? (
+                  <>
+                    <Select
+                      label="Alert this agent on handoff"
+                      options={[
+                        { label: "No alert", value: "" },
+                        ...d.dtTeam.map((a) => ({
+                          label: `${a.name || a.phone} (+${a.phone})${a.status === "ONLINE" ? " · online" : ""}`,
+                          value: a.phone,
+                        })),
+                        { label: "Another number…", value: "__custom__" },
+                      ]}
+                      // Show "custom" when the saved number isn't one of the agents.
+                      value={
+                        waHandoffNotifyNumber === ""
+                          ? ""
+                          : d.dtTeam.some((a) => a.phone === waHandoffNotifyNumber.replace(/\D/g, ""))
+                          ? waHandoffNotifyNumber.replace(/\D/g, "")
+                          : "__custom__"
+                      }
+                      onChange={(v) => setWaHandoffNotifyNumber(v === "__custom__" ? " " : v)}
+                      helpText="Your DoubleTick team, pulled live. Pick who gets the alert, or choose 'Another number' for a group or a number not listed."
+                    />
+                    {waHandoffNotifyNumber !== "" &&
+                      !d.dtTeam.some((a) => a.phone === waHandoffNotifyNumber.replace(/\D/g, "")) && (
+                        <TextField
+                          label="Alert number"
+                          value={waHandoffNotifyNumber}
+                          onChange={setWaHandoffNotifyNumber}
+                          autoComplete="off"
+                          placeholder="+919999999999"
+                          helpText="Any WhatsApp number — a team member's or a group's."
+                        />
+                      )}
+                  </>
+                ) : (
+                  <TextField
+                    label="Notify this number on handoff"
+                    value={waHandoffNotifyNumber}
+                    onChange={setWaHandoffNotifyNumber}
+                    autoComplete="off"
+                    placeholder="+919999999999"
+                    helpText="Leave blank for no alert. Save your DoubleTick key first to pick an agent from your team instead."
+                  />
+                )}
 
                 {isDoubleTick && (
                   <>
