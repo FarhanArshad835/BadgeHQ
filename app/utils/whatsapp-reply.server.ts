@@ -483,9 +483,19 @@ async function handleJob(job: {
     }
     return { ok: false, error: wa.error };
   }
+  // A message-borne AWB means the customer wants a LIVE status, so it must beat
+  // both the canned "track here" menu link below and the human escalation
+  // further down — the live tracking block at the end handles it. Computed once,
+  // reused by both guards.
+  const messageAwb = settings.waTrackingEnabled ? extractAwb(job.message) : null;
+
   if (intent) {
-    const wa = await send(MENU_REPLIES[intent], `badgehq-menu-${intent}`);
-    return wa.ok ? { ok: true } : { ok: false, error: wa.error };
+    // Don't fob off a live tracking request with the generic tracking-link
+    // canned reply when the customer handed us an AWB and we can look it up.
+    if (!(intent === "track" && messageAwb)) {
+      const wa = await send(MENU_REPLIES[intent], `badgehq-menu-${intent}`);
+      return wa.ok ? { ok: true } : { ok: false, error: wa.error };
+    }
   }
 
   // Deterministic escalation, decided in code where the model cannot talk its
@@ -493,7 +503,16 @@ async function handleJob(job: {
   // refund chasing; it does not reliably obey — observed live promising to
   // "check the status" of an order it has no way to look up. These patterns
   // need live order data nobody here has, so a fast handoff IS the answer.
-  if (needsHumanNow(job.message)) {
+  //
+  // EXCEPTION: if tracking is on and the customer HANDED US an AWB in the
+  // message ("AWB 152980560267062, where is it?"), we CAN look up live order
+  // data — that's exactly what tracking does. Escalating those would waste a
+  // human on a question the bot now answers. So skip escalation when a
+  // message-borne AWB is present; the tracking block below handles it. (An AWB
+  // only in the thread still escalates here, since resolving it needs the
+  // thread fetch that happens later — a fair trade for keeping this gate cheap
+  // and token-free.)
+  if (!messageAwb && needsHumanNow(job.message)) {
     const wa = await send(
       isBusinessHoursIST() ? HANDOVER_REPLY : OFF_HOURS_REPLY,
       "badgehq-escalate",
@@ -582,9 +601,11 @@ async function handleJob(job: {
   // the only handle we have — and the only one we need. Any failure (no AWB, no
   // creds, carrier down, unknown AWB) silently skips: the bot just answers
   // without live data, exactly as before.
-  if (settings.waTrackingEnabled && WANTS_TRACKING_RE.test(job.message)) {
+  // Trigger on a tracking phrase OR a bare AWB in the message: handing over an
+  // AWB is itself a tracking request, even without a "where"/"track" word.
+  if (settings.waTrackingEnabled && (messageAwb || WANTS_TRACKING_RE.test(job.message))) {
     const awb =
-      extractAwb(job.message) || (threadTranscript ? extractAwb(threadTranscript) : null);
+      messageAwb || (threadTranscript ? extractAwb(threadTranscript) : null);
     if (awb) {
       // Delhivery key is reused from the storefront delivery-estimate feature —
       // no separate field. Shiprocket creds live on the AI-replies settings.
