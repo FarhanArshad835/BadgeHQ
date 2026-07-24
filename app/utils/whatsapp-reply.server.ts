@@ -626,7 +626,7 @@ async function handleJob(job: {
   // only in the thread still escalates here, since resolving it needs the
   // thread fetch that happens later — a fair trade for keeping this gate cheap
   // and token-free.)
-  if (!messageAwb && needsHumanNow(job.message)) {
+  if (!messageAwb && needsHumanNow(job.message, settings.waTrackingEnabled)) {
     const wa = await send(
       isBusinessHoursIST() ? HANDOVER_REPLY : OFF_HOURS_REPLY,
       "badgehq-escalate",

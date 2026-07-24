@@ -96,24 +96,34 @@ export function cheapReplyKind(text: string): CheapReply {
  * things it answers well. Only where/when-is-my-order phrasings and explicit
  * refund chasing.
  */
-const MUST_ESCALATE = [
-  /where\s+(is|are)\s+(my|the)\s+(order|parcel|package|shipment|delivery|item)/i,
-  /when\s+(will|is|it)\s*(it|my|the)?\s*(be\s+)?(deliver|arriv|com|reach|ship)/i,
-  /(order|parcel|package|delivery)\s+(not|hasn'?t|haven'?t|didn'?t)\s+(received|arrived|delivered|come)/i,
-  /not\s+(yet\s+)?(received|delivered|arrived)/i,
-  /(kab|kaha)\s+(tak|hai|aayega|milega)/i,
-  /refund\s+(status|kab|not|hasn'?t|pending)/i,
-  /where.{0,12}refund/i,
+const ESCALATE_DELIVERY = [
+  /\bwhere\s+(is|are)\s+(my|the)\s+(order|parcel|package|shipment|delivery|item)/i,
+  /\bwhen\s+(will|is|it)\s*(it|my|the)?\s*(be\s+)?(deliver|arriv|com|reach|ship)/i,
+  /\b(order|parcel|package|delivery)\s+(not|hasn'?t|haven'?t|didn'?t)\s+(received|arrived|delivered|come)/i,
+  /\bnot\s+(yet\s+)?(received|delivered|arrived)\b/i,
+  /\b(kab|kaha)\s+(tak|hai|aayega|milega)/i,
+];
+
+// Refund chases - the bot has no way to see refund status (no API for it), so
+// these ALWAYS need a human, whether tracking is on or not.
+const ESCALATE_REFUND = [
+  /\brefund\s+(status|kab|not|hasn'?t|pending)/i,
+  /\bwhere.{0,12}\brefund\b/i,
 ];
 
 /**
  * True when a message needs a human because live order data is required.
  * Checked BEFORE the LLM call, so it costs no tokens and cannot be ignored.
  */
-export function needsHumanNow(text: string): boolean {
+export function needsHumanNow(text: string, trackingEnabled = false): boolean {
   const t = String(text || "").trim();
   if (t.length > 300) return false; // long messages are usually narrative, not a status chase
-  return MUST_ESCALATE.some((re) => re.test(t));
+  // Refund chases always need a human - there is no refund lookup.
+  if (ESCALATE_REFUND.some((re) => re.test(t))) return true;
+  // Delivery chases go to the AI + tracking path when tracking is on (the bot
+  // can look the parcel up); only escalate them here when tracking is off.
+  if (!trackingEnabled && ESCALATE_DELIVERY.some((re) => re.test(t))) return true;
+  return false;
 }
 
 /**
