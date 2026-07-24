@@ -41,6 +41,22 @@ import { extractAwb, trackParcel, trackingContextForLlm } from "./tracking.serve
 
 export const MAX_ATTEMPTS = 3;
 
+/**
+ * Swap em/en dashes for a plain hyphen before sending. LLMs love the em dash
+ * ("—"), which reads as an obvious AI tell in a WhatsApp chat; merchants want a
+ * plain "-". Applied to EVERY outgoing message (AI replies and our own canned
+ * strings alike) at the single send choke point, so it's deterministic rather
+ * than relying on the model to obey a prompt instruction it usually ignores.
+ *
+ * A dash used as punctuation ("your order — the blue one — ships today") becomes
+ * a spaced hyphen ("your order - the blue one - ships today"); we collapse any
+ * surrounding spaces first so we never leave a double space. A hyphen already in
+ * the text (e.g. "co-ordinate", a URL) is untouched.
+ */
+export function normalizeDashes(text: string): string {
+  return String(text ?? "").replace(/\s*[—–]\s*/g, " - ");
+}
+
 /** A human who wrote in the thread within this window owns it — the bot stands
  *  down rather than talking over them. */
 const HUMAN_ACTIVE_MS = 30 * 60 * 1000;
@@ -276,7 +292,7 @@ async function handleJob(job: {
       apiKey: settings.waApiKey,
       fromNumber: settings.waFromNumber,
       phone: job.phone,
-      message,
+      message: normalizeDashes(message),
       callbackData,
     });
 
