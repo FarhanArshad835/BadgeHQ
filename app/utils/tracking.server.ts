@@ -28,12 +28,21 @@ export type TrackingResult = {
   carrier: "shiprocket" | "delhivery";
   /** Clean current status, e.g. "In Transit", "Delivered", "Out for Delivery". */
   status: string;
+  /** The latest scan's activity text, verbatim from the courier. Matters because
+   *  the shipment-level `status` lags: it can read "In Transit" while the most
+   *  recent event is a failed delivery ("customer not available", "no such
+   *  address"). The AI needs the real latest event, not just the rolled-up
+   *  status, or it tells a customer whose delivery FAILED that it's on its way. */
+  lastActivity: string;
   /** Where it was last scanned, if the carrier gave a location. */
   location: string;
   /** Carrier's last-update timestamp, human phrasing (IST), if available. */
   lastUpdate: string;
   /** True once the carrier reports the parcel delivered. */
   delivered: boolean;
+  /** True when the latest scan looks like a failed/undelivered attempt (NDR),
+   *  so the AI can flag it instead of saying "on its way". */
+  failedAttempt: boolean;
 };
 
 /**
@@ -97,6 +106,20 @@ function isDelivered(status: string): boolean {
   return DELIVERED_RE.test(status) && !NOT_DELIVERED_RE.test(status);
 }
 
+// A failed delivery attempt / NDR (non-delivery report). Couriers phrase these
+// many ways — "undelivered", "customer not available", "no such address",
+// "consignee not available", "CNEE", "attempt failed", "refused". When the
+// latest scan is one of these, the parcel is NOT simply "on its way" — the
+// customer needs to know the attempt failed and what to do.
+const FAILED_ATTEMPT_RE =
+  /undelivered|not\s+available|no\s+such|cnee|consignee|address\s+(issue|incomplete|wrong)|attempt\s+fail|delivery\s+fail|refused|rto|return\s+to\s+origin|ndr/i;
+
+function isFailedAttempt(text: string): boolean {
+  const t = String(text || "");
+  if (isDelivered(t)) return false; // a delivered scan is never a failed attempt
+  return FAILED_ATTEMPT_RE.test(t);
+}
+
 /** Shiprocket: authenticate, then GET /courier/track/awb/{awb}. Mirrors
  *  ReturnHQ's getShiprocketTrackingStatus but returns a compact summary. */
 async function trackShiprocket(
@@ -133,13 +156,17 @@ async function trackShiprocket(
   ).trim();
   if (!shipmentStatus) return null;
 
+  const lastActivity = String(latest.activity || "").trim();
   return {
     awb,
     carrier: "shiprocket",
     status: shipmentStatus,
+    lastActivity,
     location: String(latest.location || "").trim(),
     lastUpdate: phraseIstTimestamp(String(latest.date || "")),
-    delivered: isDelivered(shipmentStatus) || isDelivered(String(latest.activity || "")),
+    delivered: isDelivered(shipmentStatus) || isDelivered(lastActivity),
+    // The latest activity is the freshest truth — the rolled-up status lags.
+    failedAttempt: isFailedAttempt(lastActivity) || isFailedAttempt(shipmentStatus),
   };
 }
 
@@ -156,13 +183,19 @@ async function trackDelhivery(apiKey: string, awb: string): Promise<TrackingResu
   const status = String(shipment?.Status?.Status || "").trim();
   if (!shipment || !status) return null;
 
+  // Delhivery puts the reason for a failed attempt in Status.Instructions
+  // (e.g. "Consignee not available"); fall back to the status text itself.
+  const instructions = String(shipment.Status?.Instructions || "").trim();
+  const lastActivity = instructions || status;
   return {
     awb,
     carrier: "delhivery",
     status,
+    lastActivity,
     location: String(shipment.Status?.StatusLocation || "").trim(),
     lastUpdate: phraseIstTimestamp(String(shipment.Status?.StatusDateTime || "")),
     delivered: isDelivered(status),
+    failedAttempt: isFailedAttempt(status) || isFailedAttempt(instructions),
   };
 }
 
@@ -204,10 +237,41 @@ export async function trackParcel(opts: {
 }
 
 /** Fixed-format context line handed to the LLM. Not sent to the shopper — the
- *  model rewrites it conversationally, in the shopper's language. */
+ *  model rewrites it conversationally, in the shopper's language.
+ *
+ *  Includes today's IST date explicitly, because the LLM has no reliable notion
+ *  of the current date and was compressing "as of 23 Jul" into "today" (wrong on
+ *  the 24th). Giving it both the scan date AND today's date lets it say
+ *  "yesterday"/"2 days ago" correctly, or just quote the date. */
 export function trackingContextForLlm(r: TrackingResult): string {
-  const parts = [`AWB ${r.awb} (${r.carrier}) current status: ${r.status}`];
+  const today = new Date().toLocaleDateString("en-IN", {
+    timeZone: "Asia/Kolkata",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+  const parts = [`AWB ${r.awb} (${r.carrier}) overall status: ${r.status}`];
+  // The latest scan is the freshest truth and can differ from the rolled-up
+  // status — surface it so the AI reflects reality, not a lagging summary.
+  if (r.lastActivity && r.lastActivity.toLowerCase() !== r.status.toLowerCase()) {
+    parts.push(`latest scan event: "${r.lastActivity}"`);
+  }
   if (r.location) parts.push(`last scanned at ${r.location}`);
-  if (r.lastUpdate) parts.push(`as of ${r.lastUpdate} IST`);
-  return parts.join(", ") + ".";
+  if (r.lastUpdate) parts.push(`last courier scan was on ${r.lastUpdate} IST`);
+  let out =
+    parts.join(", ") +
+    `. (Today's date is ${today}. Use the scan date exactly as given above — do ` +
+    `NOT say "today" unless the scan date is actually today, and do not invent a ` +
+    `newer time.)`;
+  if (r.failedAttempt) {
+    out +=
+      " IMPORTANT: the latest scan is a FAILED delivery attempt (the courier " +
+      "couldn't deliver — e.g. customer not available or address issue). Do NOT " +
+      'say the parcel is "on its way" or "out for delivery soon". Tell the ' +
+      "customer the delivery attempt failed and why, and that the courier will " +
+      "usually reattempt - ask them to confirm their address/availability or " +
+      "keep their phone reachable. Offer to connect them to the team if they need " +
+      "to arrange redelivery.";
+  }
+  return out;
 }

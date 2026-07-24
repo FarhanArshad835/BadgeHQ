@@ -374,7 +374,10 @@ async function handleJob(job: {
       "Use this live status to answer the shopper's tracking question directly and " +
       "specifically — in their language and tone. State where the parcel is and, if not " +
       "yet delivered, that it's on the way. Do NOT claim you can't see tracking. Do NOT " +
-      "invent a delivery date the courier didn't give."
+      "invent a delivery date the courier didn't give. CRITICAL about dates: state the " +
+      "courier scan date EXACTLY as given (e.g. \"as of 23 Jul, 5:04 PM\"). Never say " +
+      "\"today\" unless the scan date matches today's date shown above, and never claim a " +
+      "newer or made-up time. If the last scan is a day or more old, it's fine to say so."
     );
   };
 
