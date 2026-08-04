@@ -285,6 +285,80 @@ function humanRepliedLast(thread: string): boolean {
   return false;
 }
 
+/** How long to wait for a burst to finish before replying. A shopper firing
+ *  several messages in a row pauses within a few seconds; this is the quiet gap
+ *  that means "they're done typing". Long enough to coalesce a burst, short
+ *  enough that a lone message still feels instant. */
+const DEBOUNCE_MS = 6000;
+
+/**
+ * Coalesce a rapid burst of messages into one reply.
+ *
+ * Waits DEBOUNCE_MS, then looks at all of this customer's still-unanswered
+ * (pending/claimed) messages:
+ *   - If a NEWER one exists than this job, this job stands down — the newest
+ *     message's own invocation will answer the whole burst.
+ *   - If this IS the newest, it collects the burst's messages oldest-first into
+ *     one combined text and marks the older sibling jobs done (so they don't
+ *     fire their own reply), returning the combined text to answer once.
+ *
+ * A lone message (no siblings) just returns its own text after the short wait.
+ */
+async function settleBurstAndCombine(job: {
+  id: string;
+  shop: string;
+  phone: string;
+  message: string;
+  createdAt: Date;
+}): Promise<{ standDown: true } | { standDown: false; message: string }> {
+  // Control messages are never part of a burst — answer immediately.
+  if (job.message === "__handoff__") return { standDown: false, message: job.message };
+
+  await sleep(DEBOUNCE_MS);
+
+  // All of this customer's messages still awaiting a reply (this job is
+  // "claimed"; its siblings are "pending" until their own invocation claims
+  // them). Oldest first so the combined text reads in order.
+  const siblings = await prisma.whatsAppReplyJob.findMany({
+    where: {
+      shop: job.shop,
+      phone: job.phone,
+      status: { in: ["pending", "claimed"] },
+      message: { not: "__handoff__" },
+    },
+    orderBy: { createdAt: "asc" },
+    select: { id: true, message: true, createdAt: true },
+  });
+
+  // Is there a message newer than this one still waiting? Then it owns the reply.
+  const newest = siblings[siblings.length - 1];
+  if (newest && newest.createdAt.getTime() > job.createdAt.getTime()) {
+    return { standDown: true };
+  }
+
+  // This job is the newest. Combine every unanswered message (this one + any
+  // older siblings that haven't replied yet) into one prompt, and retire the
+  // older ones so they don't send their own reply.
+  const olderIds = siblings.filter((s) => s.id !== job.id).map((s) => s.id);
+  if (olderIds.length) {
+    await prisma.whatsAppReplyJob.updateMany({
+      where: { id: { in: olderIds }, status: "pending" },
+      data: { status: "done", error: "coalesced" },
+    });
+  }
+  const combined = siblings
+    .map((s) => s.message.trim())
+    .filter(Boolean)
+    .join("\n");
+  return { standDown: false, message: combined || job.message };
+}
+
+/** Promise-based sleep. Runs inside waitUntil, which keeps the invocation alive,
+ *  so the debounce wait is billed as idle time (near-free on Fluid compute). */
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 async function handleJob(job: {
   id: string;
   shop: string;
@@ -407,6 +481,23 @@ async function handleJob(job: {
   });
   // Muted after the job was queued — a human has the thread now.
   if (isMuted(convo)) return { ok: false, error: "opted-out", permanent: true };
+
+  // Debounce a burst of rapid messages. Shoppers often fire "Hi" / "where is
+  // my order" / "201294" as three messages in a few seconds; without this the
+  // bot answers each one separately — spammy, and it wastes tokens replying to
+  // "Hi" before the real question arrives. So: wait a short quiet period, then
+  // only the LATEST unanswered message replies, and it answers the WHOLE burst
+  // at once. An earlier message whose job finds a newer one waiting stands down.
+  //
+  // Serverless-safe: no in-memory timer (they don't survive across invocations)
+  // — each burst message's own waitUntil invocation sleeps DEBOUNCE_MS, then the
+  // DB tells it whether a newer message exists. Combined text is built from the
+  // sibling pending jobs, and they're marked done so they don't re-fire.
+  const burst = await settleBurstAndCombine(job);
+  if (burst.standDown) return { ok: true }; // a later message will answer the burst
+  // Everything downstream (menu match, tracking, AI) now works on the combined
+  // burst text transparently.
+  job = { ...job, message: burst.message };
 
   // Too old to be worth sending. A message throttled all afternoon would
   // otherwise go out when the quota resets at midnight, answering a question

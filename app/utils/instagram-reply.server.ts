@@ -115,6 +115,48 @@ export function drainSocialJobSoon(id: string): void {
   }
 }
 
+/** Quiet gap that means "the customer is done typing" — see the WhatsApp worker. */
+const IG_DEBOUNCE_MS = 6000;
+
+/** Coalesce a rapid burst of DMs into one reply. Mirrors the WhatsApp
+ *  settleBurstAndCombine, keyed by (shop, channel, customerId). */
+async function settleSocialBurst(job: {
+  id: string;
+  shop: string;
+  channel: string;
+  customerId: string;
+  message: string;
+  createdAt: Date;
+}): Promise<{ standDown: true } | { standDown: false; message: string }> {
+  await new Promise((r) => setTimeout(r, IG_DEBOUNCE_MS));
+
+  const siblings = await prisma.socialReplyJob.findMany({
+    where: {
+      shop: job.shop,
+      channel: job.channel,
+      customerId: job.customerId,
+      status: { in: ["pending", "claimed"] },
+    },
+    orderBy: { createdAt: "asc" },
+    select: { id: true, message: true, createdAt: true },
+  });
+
+  const newest = siblings[siblings.length - 1];
+  if (newest && newest.createdAt.getTime() > job.createdAt.getTime()) {
+    return { standDown: true };
+  }
+
+  const olderIds = siblings.filter((s) => s.id !== job.id).map((s) => s.id);
+  if (olderIds.length) {
+    await prisma.socialReplyJob.updateMany({
+      where: { id: { in: olderIds }, status: "pending" },
+      data: { status: "done", error: "coalesced" },
+    });
+  }
+  const combined = siblings.map((s) => s.message.trim()).filter(Boolean).join("\n");
+  return { standDown: false, message: combined || job.message };
+}
+
 /**
  * The Instagram decision flow. Ordering mirrors the WhatsApp worker's cheap
  * checks, minus everything Instagram can't do.
@@ -152,6 +194,13 @@ async function handleSocialJob(job: {
   if (Date.now() - job.createdAt.getTime() > IG_STALE_REPLY_MS) {
     return { ok: false, error: "too-old", permanent: true };
   }
+
+  // Debounce a rapid burst — reply once to the whole burst, not to each message.
+  // Same design as WhatsApp: wait a quiet period, then only the newest message
+  // answers (combining the burst), older ones stand down. See settleSocialBurst.
+  const burst = await settleSocialBurst(job);
+  if (burst.standDown) return { ok: true };
+  job = { ...job, message: burst.message };
 
   // Daily ceiling (reuses the WhatsApp per-shop cap; 0 = unlimited). Counts
   // today's done Instagram jobs, IST day boundary like WhatsApp.
