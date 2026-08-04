@@ -285,17 +285,15 @@ function humanRepliedLast(thread: string): boolean {
   return false;
 }
 
-/** How long to wait for a burst to finish before replying. A shopper firing
- *  several messages in a row pauses within a few seconds; this is the quiet gap
- *  that means "they're done typing". Long enough to coalesce a burst, short
- *  enough that a lone message still feels instant. */
-const DEBOUNCE_MS = 6000;
+/** Upper bound on the configurable debounce, so a bad value can't hold an
+ *  invocation open near the maxDuration ceiling. */
+const DEBOUNCE_MAX_SECONDS = 30;
 
 /**
  * Coalesce a rapid burst of messages into one reply.
  *
- * Waits DEBOUNCE_MS, then looks at all of this customer's still-unanswered
- * (pending/claimed) messages:
+ * Waits `debounceSeconds` (0 disables), then looks at all of this customer's
+ * still-unanswered (pending/claimed) messages:
  *   - If a NEWER one exists than this job, this job stands down — the newest
  *     message's own invocation will answer the whole burst.
  *   - If this IS the newest, it collects the burst's messages oldest-first into
@@ -304,17 +302,18 @@ const DEBOUNCE_MS = 6000;
  *
  * A lone message (no siblings) just returns its own text after the short wait.
  */
-async function settleBurstAndCombine(job: {
-  id: string;
-  shop: string;
-  phone: string;
-  message: string;
-  createdAt: Date;
-}): Promise<{ standDown: true } | { standDown: false; message: string }> {
+async function settleBurstAndCombine(
+  job: { id: string; shop: string; phone: string; message: string; createdAt: Date },
+  debounceSeconds: number,
+): Promise<{ standDown: true } | { standDown: false; message: string }> {
   // Control messages are never part of a burst — answer immediately.
   if (job.message === "__handoff__") return { standDown: false, message: job.message };
 
-  await sleep(DEBOUNCE_MS);
+  // 0 disables debouncing; clamp to a safe ceiling so a bad value can't hold the
+  // invocation open too long. Skip the whole burst dance when disabled.
+  const secs = Math.min(DEBOUNCE_MAX_SECONDS, Math.max(0, debounceSeconds || 0));
+  if (secs === 0) return { standDown: false, message: job.message };
+  await sleep(secs * 1000);
 
   // All of this customer's messages still awaiting a reply (this job is
   // "claimed"; its siblings are "pending" until their own invocation claims
@@ -493,7 +492,7 @@ async function handleJob(job: {
   // — each burst message's own waitUntil invocation sleeps DEBOUNCE_MS, then the
   // DB tells it whether a newer message exists. Combined text is built from the
   // sibling pending jobs, and they're marked done so they don't re-fire.
-  const burst = await settleBurstAndCombine(job);
+  const burst = await settleBurstAndCombine(job, settings.waDebounceSeconds);
   if (burst.standDown) return { ok: true }; // a later message will answer the burst
   // Everything downstream (menu match, tracking, AI) now works on the combined
   // burst text transparently.

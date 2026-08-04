@@ -310,6 +310,13 @@ model AiReplySettings {
   waThreadLineChars  Int @default(400)
   waThreadTotalChars Int @default(4000)
 
+  // Debounce: how long to wait for a customer to finish a burst of messages
+  // before replying once to all of them. A shopper often fires "Hi" / "where is
+  // my order" / "201294" in a few seconds; this quiet gap coalesces them into a
+  // single reply. Shared by WhatsApp and Instagram. 0 disables debouncing
+  // (reply to each message immediately).
+  waDebounceSeconds  Int @default(6)
+
   // Live parcel tracking. When a shopper asks "where's my order?" the bot pulls
   // the AWB out of the thread (the merchant's flow bot posts it) and asks the
   // carrier for a live status, which it feeds to the LLM. Shiprocket needs the

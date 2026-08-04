@@ -179,6 +179,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     // Cost controls. Sent as strings so the number fields stay editable while
     // the merchant is mid-typing (a bare number would coerce "" back to 0).
     waDailyLimit: String(s?.waDailyLimit ?? 2000),
+    waDebounceSeconds: String(s?.waDebounceSeconds ?? 6),
     waThreadRecent: String(s?.waThreadRecent ?? 20),
     waThreadOpening: String(s?.waThreadOpening ?? 4),
     waThreadLineChars: String(s?.waThreadLineChars ?? 400),
@@ -413,6 +414,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       // merchant's LLM quota, and 0 in a thread field would send no context at
       // all, which reads to a shopper as a bot that ignores them.
       waDailyLimit: intIn(data.waDailyLimit, 2000, 0, 100000),
+      waDebounceSeconds: intIn(data.waDebounceSeconds, 6, 0, 30),
       waThreadRecent: intIn(data.waThreadRecent, 20, 1, 100),
       waThreadOpening: intIn(data.waThreadOpening, 4, 0, 20),
       waThreadLineChars: intIn(data.waThreadLineChars, 400, 40, 2000),
@@ -513,6 +515,7 @@ export default function AiRepliesPage() {
     waReplyEnabled: d.waReplyEnabled,
     waProvider: d.waProvider,
     waDailyLimit: d.waDailyLimit,
+    waDebounceSeconds: d.waDebounceSeconds,
     waThreadRecent: d.waThreadRecent,
     waThreadOpening: d.waThreadOpening,
     waThreadLineChars: d.waThreadLineChars,
@@ -536,6 +539,7 @@ export default function AiRepliesPage() {
   const [waReplyEnabled, setWaReplyEnabled] = useState(initial.waReplyEnabled);
   const [waProvider, setWaProvider] = useState(initial.waProvider);
   const [waDailyLimit, setWaDailyLimit] = useState(initial.waDailyLimit);
+  const [waDebounceSeconds, setWaDebounceSeconds] = useState(initial.waDebounceSeconds);
   const [waThreadRecent, setWaThreadRecent] = useState(initial.waThreadRecent);
   const [waThreadOpening, setWaThreadOpening] = useState(initial.waThreadOpening);
   const [waThreadLineChars, setWaThreadLineChars] = useState(initial.waThreadLineChars);
@@ -579,6 +583,7 @@ export default function AiRepliesPage() {
     waReplyEnabled !== initial.waReplyEnabled ||
     waProvider !== initial.waProvider ||
     waDailyLimit !== initial.waDailyLimit ||
+    waDebounceSeconds !== initial.waDebounceSeconds ||
     waThreadRecent !== initial.waThreadRecent ||
     waThreadOpening !== initial.waThreadOpening ||
     waThreadLineChars !== initial.waThreadLineChars ||
@@ -624,6 +629,7 @@ export default function AiRepliesPage() {
     setWaReplyEnabled(initial.waReplyEnabled);
     setWaProvider(initial.waProvider);
     setWaDailyLimit(initial.waDailyLimit);
+    setWaDebounceSeconds(initial.waDebounceSeconds);
     setWaThreadRecent(initial.waThreadRecent);
     setWaThreadOpening(initial.waThreadOpening);
     setWaThreadLineChars(initial.waThreadLineChars);
@@ -659,6 +665,7 @@ export default function AiRepliesPage() {
           waReplyEnabled,
           waProvider,
           waDailyLimit,
+          waDebounceSeconds,
           waThreadRecent,
           waThreadOpening,
           waThreadLineChars,
@@ -1374,6 +1381,17 @@ export default function AiRepliesPage() {
                   onChange={setWaDailyLimit}
                   autoComplete="off"
                   helpText="Counts replies, not conversations — one thread often runs 8 to 20 replies. 2000 covers roughly 250 conversations a day. Set 0 for no limit."
+                />
+
+                <TextField
+                  label="Wait before replying (seconds)"
+                  type="number"
+                  value={waDebounceSeconds}
+                  onChange={setWaDebounceSeconds}
+                  autoComplete="off"
+                  min={0}
+                  max={30}
+                  helpText="When a customer sends several messages in a row, the bot waits this long for them to finish, then replies once to all of them — instead of answering each message separately. 6 is a good default. Set 0 to reply to every message immediately. Applies to WhatsApp and Instagram."
                 />
 
                 <InlineStack gap="400" wrap={false}>

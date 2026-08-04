@@ -115,20 +115,18 @@ export function drainSocialJobSoon(id: string): void {
   }
 }
 
-/** Quiet gap that means "the customer is done typing" — see the WhatsApp worker. */
-const IG_DEBOUNCE_MS = 6000;
+/** Upper bound on the configurable debounce (seconds). */
+const IG_DEBOUNCE_MAX_SECONDS = 30;
 
 /** Coalesce a rapid burst of DMs into one reply. Mirrors the WhatsApp
  *  settleBurstAndCombine, keyed by (shop, channel, customerId). */
-async function settleSocialBurst(job: {
-  id: string;
-  shop: string;
-  channel: string;
-  customerId: string;
-  message: string;
-  createdAt: Date;
-}): Promise<{ standDown: true } | { standDown: false; message: string }> {
-  await new Promise((r) => setTimeout(r, IG_DEBOUNCE_MS));
+async function settleSocialBurst(
+  job: { id: string; shop: string; channel: string; customerId: string; message: string; createdAt: Date },
+  debounceSeconds: number,
+): Promise<{ standDown: true } | { standDown: false; message: string }> {
+  const secs = Math.min(IG_DEBOUNCE_MAX_SECONDS, Math.max(0, debounceSeconds || 0));
+  if (secs === 0) return { standDown: false, message: job.message };
+  await new Promise((r) => setTimeout(r, secs * 1000));
 
   const siblings = await prisma.socialReplyJob.findMany({
     where: {
@@ -198,7 +196,7 @@ async function handleSocialJob(job: {
   // Debounce a rapid burst — reply once to the whole burst, not to each message.
   // Same design as WhatsApp: wait a quiet period, then only the newest message
   // answers (combining the burst), older ones stand down. See settleSocialBurst.
-  const burst = await settleSocialBurst(job);
+  const burst = await settleSocialBurst(job, settings.waDebounceSeconds);
   if (burst.standDown) return { ok: true };
   job = { ...job, message: burst.message };
 
