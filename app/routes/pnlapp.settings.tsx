@@ -63,7 +63,7 @@ export default function PnlSettings() {
         <div className="pnl-head">
           <h1 className="pnl-h1">Settings</h1>
           <div className="pnl-headlinks">
-            <a className="pnl-link" href="/pnl-app">Dashboard</a>
+            <a className="pnl-link" href="/pnl-app/home">Dashboard</a>
             <a className="pnl-link" href="/pnl-app/logout">Log out</a>
           </div>
         </div>

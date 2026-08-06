@@ -410,7 +410,7 @@ export function ErrorBoundary() {
           <h1 className="pnl-h1" style={{ fontSize: 20 }}>Something went wrong</h1>
           <p className="pnl-sub" style={{ marginTop: 8 }}>{detail}</p>
           <div style={{ marginTop: 16, display: "flex", gap: 10 }}>
-            <a className="pnl-btn pnl-btn-primary" href="/pnl-app">Reload</a>
+            <a className="pnl-btn pnl-btn-primary" href="/pnl-app/home">Reload</a>
             <a className="pnl-link" href="/pnl-app/login">Log in again</a>
           </div>
         </div>

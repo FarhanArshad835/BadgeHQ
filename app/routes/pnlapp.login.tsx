@@ -11,7 +11,7 @@ import {
 import { PnlStyles } from "../utils/pnl-styles";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  if (isAuthed(request)) return redirect("/pnl-app");
+  if (isAuthed(request)) return redirect("/pnl-app/home");
   const app = await getPnlApp();
   return json({ needsSetup: !app.passwordHash });
 };
@@ -28,13 +28,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     await import("../db.server").then((m) =>
       m.default.pnlApp.update({ where: { id: "default" }, data: { passwordHash: hashPassword(password) } }),
     );
-    return redirect("/pnl-app", { headers: { "Set-Cookie": makeSessionCookie() } });
+    return redirect("/pnl-app/home", { headers: { "Set-Cookie": makeSessionCookie() } });
   }
 
   if (!verifyPassword(password, app.passwordHash)) {
     return json({ error: "Wrong password." }, { status: 401 });
   }
-  return redirect("/pnl-app", { headers: { "Set-Cookie": makeSessionCookie() } });
+  return redirect("/pnl-app/home", { headers: { "Set-Cookie": makeSessionCookie() } });
 };
 
 export default function PnlLogin() {
