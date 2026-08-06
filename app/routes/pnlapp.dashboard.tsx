@@ -3,25 +3,33 @@ import { json, redirect } from "@remix-run/node";
 import { Form, useActionData, useLoaderData, useNavigation, useSearchParams, useRouteError, isRouteErrorResponse } from "@remix-run/react";
 import { useEffect, useRef, useState } from "react";
 import prisma from "../db.server";
-import { rollup, completeness, type OrderRow } from "../utils/pnl.server";
 import { formatMinor } from "../utils/money";
 import { getPnlApp, isAuthed, runStandaloneSync } from "../utils/pnl-app.server";
+import { computeMonth, monthWindowIst } from "../utils/monthly-pnl.server";
 import { PnlStyles } from "../utils/pnl-styles";
 
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
-function istDayStart(daysAgo: number): Date {
-  const ist = new Date(Date.now() + IST_OFFSET_MS);
-  ist.setUTCHours(0, 0, 0, 0);
-  ist.setUTCDate(ist.getUTCDate() - daysAgo);
-  return new Date(ist.getTime() - IST_OFFSET_MS);
-}
-const WINDOWS: Record<string, { label: string; since: () => Date }> = {
-  today: { label: "Today", since: () => istDayStart(0) },
-  "7d": { label: "Last 7 days", since: () => istDayStart(6) },
-  "30d": { label: "Last 30 days", since: () => istDayStart(29) },
-  "90d": { label: "Last 90 days", since: () => istDayStart(89) },
-};
 
+/** Current IST month as "YYYY-MM". */
+function currentIstMonth(): string {
+  const ist = new Date(Date.now() + IST_OFFSET_MS);
+  return `${ist.getUTCFullYear()}-${String(ist.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+/** Months (newest first) that actually have order data, plus the current month. */
+async function availableMonths(shop: string): Promise<string[]> {
+  const rows = await prisma.orderFinancials.findMany({
+    where: { shop },
+    select: { orderCreatedAt: true },
+    orderBy: { orderCreatedAt: "desc" },
+  });
+  const set = new Set<string>([currentIstMonth()]);
+  for (const r of rows) {
+    const ist = new Date(r.orderCreatedAt.getTime() + IST_OFFSET_MS);
+    set.add(`${ist.getUTCFullYear()}-${String(ist.getUTCMonth() + 1).padStart(2, "0")}`);
+  }
+  return Array.from(set).sort().reverse();
+}
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (!isAuthed(request)) return redirect("/pnl-app/login");
@@ -29,88 +37,69 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const shop = app.shopDomain;
   const configured = Boolean(app.shopDomain && app.adminToken);
 
+  const months = shop ? await availableMonths(shop) : [currentIstMonth()];
   const url = new URL(request.url);
-  const requested = url.searchParams.get("window") || "";
-  const windowKey = WINDOWS[requested] ? requested : "7d";
-  const since = WINDOWS[windowKey].since();
+  const requested = url.searchParams.get("month") || "";
+  const month = months.includes(requested) ? requested : months[0];
 
-  const orders = shop
-    ? await prisma.orderFinancials.findMany({
-        where: { shop, orderCreatedAt: { gte: since } },
-        orderBy: { orderCreatedAt: "desc" },
-      })
-    : [];
+  const report = shop ? await computeMonth(shop, month) : null;
 
-  const rows: OrderRow[] = orders.map((o) => ({
-    orderCreatedAt: o.orderCreatedAt,
-    grossRevenueMinor: o.grossRevenueMinor,
-    refundsMinor: o.refundsMinor,
-    cogsMinor: o.cogsMinor,
-    cogsComplete: o.cogsComplete,
-    shippingCostMinor: o.shippingCostMinor,
-    shippingStatus: o.shippingStatus,
-    dataComplete: o.dataComplete,
-  }));
-  const agg = rollup(rows);
-  const comp = completeness(rows);
-  const currency = orders[0]?.currency || "INR";
+  // BigInt → string at the JSON boundary. `s` maps a bigint|null to string|null.
+  const s = (v: bigint | null | undefined) => (v == null ? null : v.toString());
+  const r = report;
 
-  const lines = shop
-    ? await prisma.orderLineFinancials.findMany({ where: { shop, orderCreatedAt: { gte: since } } })
-    : [];
-  const productMap = new Map<string, { title: string; units: number; revenue: bigint; cogs: bigint; cogsComplete: boolean }>();
-  for (const l of lines) {
-    const key = l.productId || l.productTitle || "unknown";
-    const p = productMap.get(key) || { title: l.productTitle || "(untitled)", units: 0, revenue: 0n, cogs: 0n, cogsComplete: true };
-    p.units += l.quantity;
-    p.revenue += l.lineRevenueMinor;
-    if (l.lineCogsMinor != null) p.cogs += l.lineCogsMinor;
-    if (!l.lineCogsComplete) p.cogsComplete = false;
-    productMap.set(key, p);
-  }
-  const products = Array.from(productMap.values())
-    .map((p) => ({
-      title: p.title,
-      units: p.units,
-      revenue: p.revenue.toString(),
-      cogs: p.cogsComplete ? p.cogs.toString() : null,
-      margin: p.cogsComplete ? (p.revenue - p.cogs).toString() : null,
-    }))
-    .sort((a, b) => Number(BigInt(b.margin ?? "0") - BigInt(a.margin ?? "0")));
-
-  // Anchor for the live progress counter: how many orders the last sync touched.
-  // Parsed from the "synced N orders" status string; 0 on a first-ever run.
   const lastSyncCount = Number((app.lastSyncStatus.match(/synced (\d+)/i) || [])[1] || 0);
 
   return json({
     configured,
-    windowKey,
-    currency,
+    months,
+    month,
+    currency: "INR",
     lastSyncAt: app.lastSyncAt,
     lastSyncCount,
-    kpis: {
-      orders: agg.orders,
-      revenue: agg.revenueMinor.toString(),
-      refunds: agg.refundsMinor.toString(),
-      cogs: agg.cogsMinor.toString(),
-      shipping: agg.shippingMinor.toString(),
-      confirmed: agg.confirmedMarginMinor.toString(),
-      provisional: agg.provisionalMarginMinor.toString(),
+    metaConnected: Boolean(app.metaAccessToken && app.metaAdAccountId),
+    report: r && {
+      publishStatus: r.publishStatus,
+      pendingReasons: r.pendingReasons,
+      matured: r.matured,
+      daysToMaturity: r.daysToMaturity,
+      // Revenue block.
+      grossSale: s(r.grossSaleMinor),
+      discounts: s(r.discountsMinor),
+      netPlaced: s(r.netPlacedRevenueMinor),
+      cancelledRto: s(r.cancelledRtoRevenueMinor),
+      refunds: s(r.refundsMinor),
+      netSale: s(r.netSaleMinor),
+      // Costs.
+      cogs: s(r.cogsMinor),
+      freight: s(r.freightMinor),
+      adSpend: s(r.adSpendMinor),
+      adSpendSource: r.adSpendSource,
+      ops: s(r.opsMinor),
+      overhead: s(r.overheadMinor),
+      overheadProvisional: r.overheadProvisional,
+      gstOutput: s(r.gstOutputMinor),
+      gstInput: s(r.gstInputMinor),
+      netGst: s(r.netGstMinor),
+      returnExchangeFees: s(r.returnExchangeFeesMinor),
+      netPnl: s(r.netPnlMinor),
+      // Counts + basis.
+      placedOrders: r.placedOrders,
+      deliveredOrders: r.deliveredOrders,
+      rtoOrders: r.rtoOrders,
+      inTransitOrders: r.inTransitOrders,
+      deliveredPairs: r.deliveredPairs,
+      // Per-delivered metrics.
+      netPnlPerDeliveredOrder: s(r.netPnlPerDeliveredOrderMinor),
+      netPnlPerDeliveredPair: s(r.netPnlPerDeliveredPairMinor),
+      adPerDeliveredOrder: s(r.adPerDeliveredOrderMinor),
+      freightPerDeliveredOrder: s(r.freightPerDeliveredOrderMinor),
+      cogsPerPair: s(r.cogsPerPairMinor),
+      // Health.
+      resolutionRate: r.resolutionRate,
+      deliveredShareOfPlaced: r.deliveredShareOfPlaced,
+      cogsMatchRate: r.cogsMatchRate,
     },
-    completeness: comp,
-    perOrder: orders.slice(0, 200).map((o) => ({
-      name: o.orderName,
-      at: o.orderCreatedAt,
-      revenue: o.grossRevenueMinor.toString(),
-      cogs: o.cogsMinor != null ? o.cogsMinor.toString() : null,
-      shipping: o.shippingCostMinor != null ? o.shippingCostMinor.toString() : null,
-      shippingStatus: o.shippingStatus,
-      margin:
-        o.dataComplete && o.cogsMinor != null && o.shippingCostMinor != null
-          ? (o.grossRevenueMinor - o.refundsMinor - o.cogsMinor - o.shippingCostMinor).toString()
-          : null,
-    })),
-    perProduct: products.slice(0, 200),
   });
 };
 
@@ -120,25 +109,23 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (!app.shopDomain || !app.adminToken) {
     return json({ ok: false, message: "Add your Shopify store domain and token in Settings first." }, { status: 400 });
   }
-
   try {
-    // Bounded on-click chunk that RESUMES from the saved cursor, so a second
-    // click continues where the last click (or the nightly cron) stopped — it
-    // does NOT re-sync the same first orders. Small bounds keep it under the
-    // function timeout and off Neon; the nightly cron finishes any remainder.
     const result = await runStandaloneSync({
       maxPages: 6,
       timeBudgetMs: 7_000,
-      deliveryLimit: 8, // keep carrier calls tiny on a click; the cron does the bulk
+      deliveryLimit: 8,
       shippingLimit: 20,
     });
     if ("error" in result) {
       return json({ ok: false, message: "Add your Shopify store domain and token in Settings first." }, { status: 400 });
     }
     const tail = result.done
-      ? ` All caught up. Shipping billed for ${result.billed}, ${result.pending} pending.`
+      ? " All caught up."
       : " More orders remain; press Sync again to continue, or let the nightly sync finish.";
-    return json({ ok: true, message: `Synced ${result.orders} more orders.${tail}` });
+    return json({
+      ok: true,
+      message: `Synced ${result.orders} more orders (${result.delivered} delivered, ${result.rto} RTO this pass).${tail}`,
+    });
   } catch (e: any) {
     const raw = String(e?.message || e);
     const isPcd = /not approved to access the Order|protected-customer-data/i.test(raw);
@@ -159,27 +146,20 @@ export default function PnlDashboard() {
   const actionData = useActionData<typeof action>();
   const nav = useNavigation();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [tab, setTab] = useState<"glance" | "orders" | "products">("glance");
-  const busy = nav.state !== "idle";
-  // A sync is the only POST on this page; a window switch is a GET navigation.
   const syncing = nav.state === "submitting" && nav.formMethod === "POST";
+  const busy = nav.state !== "idle";
 
-  // Live progress while a sync runs. There's no server round-trip to poll (that
-  // would bill an invocation per tick), so we count up smoothly toward last
-  // run's order count as a target, then snap to the true figure when the action
-  // returns. The number is labelled "about" so it never reads as exact mid-run.
+  // Live progress while a sync runs (client-side, no polling). Eases toward last
+  // run's order count, snaps to the real figure when the action returns.
   const [progress, setProgress] = useState(0);
   const targetRef = useRef(0);
   useEffect(() => {
     if (!syncing) return;
     setProgress(0);
-    // Aim at last run's count; if unknown, a gentle default so the bar still moves.
     targetRef.current = Math.max(d?.lastSyncCount ?? 0, 25);
     const id = setInterval(() => {
       setProgress((p) => {
         const target = targetRef.current;
-        // Ease toward the target and hold just short of it until the real result
-        // lands, so we never claim "done" before the server actually is.
         const next = p + Math.max(1, Math.round((target - p) * 0.18));
         return Math.min(next, Math.max(target - 1, p));
       });
@@ -187,19 +167,20 @@ export default function PnlDashboard() {
     return () => clearInterval(id);
   }, [syncing, d?.lastSyncCount]);
 
-  // Loader data can momentarily be null (e.g. the loader redirected to /login
-  // after the session expired, while this component is mid-transition). Every
-  // line below dereferences `d`, so bail out rather than crash — the redirect
-  // navigation is already in flight.
   if (!d) return null;
 
-  // Null-value marker for empty cells. A plain hyphen, not an em dash.
   const NIL = "-";
-  const fmt = (m: string | null, p = NIL) => (m == null ? p : formatMinor(BigInt(m), d.currency));
-  const fmtDate = (iso: string) => new Date(iso).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short" });
-  const k = d.kpis;
-  const c = d.completeness;
-  const bannerTone = c.pct >= 90 ? "ok" : c.pct >= 60 ? "info" : "warn";
+  const fmt = (m: string | null | undefined, p = NIL) => (m == null ? p : formatMinor(BigInt(m), d.currency));
+  const monthLabel = (m: string) => {
+    const { start } = monthWindowIst(m);
+    return new Date(start.getTime() + IST_OFFSET_MS).toLocaleDateString("en-IN", {
+      timeZone: "UTC",
+      month: "long",
+      year: "numeric",
+    });
+  };
+  const r = d.report;
+  const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
 
   return (
     <div className="pnl">
@@ -223,10 +204,10 @@ export default function PnlDashboard() {
         <div className="pnl-controls">
           <select
             className="pnl-select"
-            value={d.windowKey}
-            onChange={(e) => { const p = new URLSearchParams(searchParams); p.set("window", e.target.value); setSearchParams(p); }}
+            value={d.month}
+            onChange={(e) => { const p = new URLSearchParams(searchParams); p.set("month", e.target.value); setSearchParams(p); }}
           >
-            {Object.entries(WINDOWS).map(([v, w]) => <option key={v} value={v}>{w.label}</option>)}
+            {d.months.map((m) => <option key={m} value={m}>{monthLabel(m)}</option>)}
           </select>
           <div className="pnl-controls-right">
             {d.lastSyncAt && (
@@ -234,19 +215,11 @@ export default function PnlDashboard() {
                 Synced {new Date(d.lastSyncAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })}
               </span>
             )}
-            {/* /pnl-app is now a flat leaf route (no layout/index split), so a
-                plain POST hits this route's own action directly. */}
             <Form method="post">
-              <input type="hidden" name="window" value={d.windowKey} />
               <button type="submit" className="pnl-btn pnl-btn-primary" disabled={busy}>
                 {syncing ? (
-                  <span className="pnl-btn-busy">
-                    <span className="pnl-spinner" aria-hidden="true" />
-                    Syncing {progress} orders
-                  </span>
-                ) : (
-                  "Sync now"
-                )}
+                  <span className="pnl-btn-busy"><span className="pnl-spinner" aria-hidden="true" />Syncing {progress} orders</span>
+                ) : "Sync now"}
               </button>
             </Form>
           </div>
@@ -256,126 +229,129 @@ export default function PnlDashboard() {
           <div className={`pnl-banner ${actionData.ok ? "ok" : "bad"}`} style={{ marginBottom: 14 }}>{actionData.message}</div>
         )}
 
-        <div className={`pnl-banner ${bannerTone}`} style={{ marginBottom: 22 }}>
-          Cost data complete for <strong>{c.pct}%</strong> of orders ({c.fullyComplete}/{c.total}).
-          {c.total - c.shippingBilled > 0 && ` Shipping pending on ${c.total - c.shippingBilled}.`}
-          {c.total - c.cogsComplete > 0 && ` Cost per item missing on ${c.total - c.cogsComplete}.`}
-          {" "}Costs are never estimated; anything not yet known is left blank.
-        </div>
+        {r && <StatusBanner report={r} monthLabel={monthLabel(d.month)} />}
 
-        <div className="pnl-tabs">
-          {(["glance", "orders", "products"] as const).map((t) => (
-            <button key={t} className="pnl-tab" data-active={tab === t} onClick={() => setTab(t)}>
-              {t === "glance" ? "At a glance" : t === "orders" ? "Per order" : "Per product"}
-            </button>
-          ))}
-        </div>
-
-        {tab === "glance" && (
-          <div>
-            <div className="pnl-kpis">
-              <Kpi label="Revenue" value={fmt(k.revenue)} />
-              <Kpi label="Refunds" value={"-" + fmt(k.refunds)} neg />
-              <Kpi label="COGS" value={"-" + fmt(k.cogs)} neg />
-              <Kpi label="Shipping (actual)" value={"-" + fmt(k.shipping)} neg />
-              <Kpi label="Confirmed margin" value={fmt(k.confirmed)} headline />
-              <Kpi label="Provisional margin" value={fmt(k.provisional)} />
+        {r && (
+          <>
+            {/* Headline: net P&L (suppressed if any cost is pending) + per-delivered. */}
+            <div className="pnl-kpis" style={{ marginBottom: 20 }}>
+              <Kpi label="Net P&L" value={fmt(r.netPnl, "Pending")} accent big
+                sub={r.netPnl == null ? "Suppressed until all costs are known" : `${pct(contributionPct(r))} contribution margin`} />
+              <Kpi label="Net sale (collected)" value={fmt(r.netSale)} sub={`${r.deliveredOrders} delivered orders`} />
+              <Kpi label="Profit / delivered order" value={fmt(r.netPnlPerDeliveredOrder, "Pending")} />
+              <Kpi label="Profit / delivered pair" value={fmt(r.netPnlPerDeliveredPair, "Pending")} />
             </div>
-            <p className="pnl-note">
-              <strong>Confirmed margin</strong> counts only orders whose COGS and shipping are both known.
-              {" "}<strong>Provisional</strong> uses all orders with the costs known so far (pending costs are absent, never
-              estimated), so it reads high until shipping bills. Ad spend is excluded in Phase&nbsp;1.
-            </p>
-          </div>
+
+            {/* The waterfall. */}
+            <div className="pnl-panel" style={{ marginBottom: 20 }}>
+              <div className="pnl-section-label">The waterfall</div>
+              <table className="pnl-table pnl-waterfall">
+                <tbody>
+                  <Row label="Gross sale (pre-discount)" value={fmt(r.grossSale)} />
+                  <Row label="less Discounts" value={fmt(r.discounts)} neg />
+                  <Row label="Net placed revenue" value={fmt(r.netPlaced)} strong />
+                  <Row label="less Cancelled + RTO" value={fmt(r.cancelledRto)} neg />
+                  <Row label="less Refunds" value={fmt(r.refunds)} neg />
+                  <Row label="Net sale (collected)" value={fmt(r.netSale)} strong hl />
+                  <Row label="less COGS (delivered units)" value={fmt(r.cogs, "Pending")} neg pending={r.cogs == null} />
+                  <Row label="less Freight (deduped)" value={fmt(r.freight, "Pending")} neg pending={r.freight == null} />
+                  <Row label={`less Ad spend${r.adSpendSource === "meta" ? " (Meta)" : ""}`} value={fmt(r.adSpend, "Pending")} neg pending={r.adSpend == null} />
+                  <Row label="less Operations (₹/pair)" value={fmt(r.ops)} neg />
+                  <Row label={`less Overhead${r.overheadProvisional ? " (provisional)" : ""}`} value={fmt(r.overhead)} neg />
+                  <Row label="plus Net GST (ITC − output)" value={fmt(r.netGst, "Pending")} pending={r.netGst == null} />
+                  <Row label="plus Return/exchange fees" value={fmt(r.returnExchangeFees)} />
+                  <Row label="NET P&L" value={fmt(r.netPnl, "Pending")} strong hl big />
+                </tbody>
+              </table>
+            </div>
+
+            {/* Delivery funnel + per-unit economics. */}
+            <div className="pnl-grid2">
+              <div className="pnl-panel">
+                <div className="pnl-section-label">Delivery funnel</div>
+                <table className="pnl-table">
+                  <tbody>
+                    <Row label="Placed orders" value={String(r.placedOrders)} />
+                    <Row label="Delivered" value={String(r.deliveredOrders)} />
+                    <Row label="RTO" value={String(r.rtoOrders)} />
+                    <Row label="In transit / unknown" value={String(r.inTransitOrders)} />
+                    <Row label="Delivered pairs" value={String(r.deliveredPairs)} />
+                    <Row label="Resolution rate" value={pct(r.resolutionRate)} />
+                    <Row label="Delivered share of placed" value={pct(r.deliveredShareOfPlaced)} />
+                  </tbody>
+                </table>
+              </div>
+              <div className="pnl-panel">
+                <div className="pnl-section-label">Per delivered order / pair</div>
+                <table className="pnl-table">
+                  <tbody>
+                    <Row label="Ad / delivered order" value={fmt(r.adPerDeliveredOrder, "Pending")} />
+                    <Row label="Freight / delivered order" value={fmt(r.freightPerDeliveredOrder, "Pending")} />
+                    <Row label="COGS / pair" value={fmt(r.cogsPerPair, "Pending")} />
+                    <Row label="COGS cost-match rate" value={pct(r.cogsMatchRate)} />
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
         )}
 
-        {tab === "orders" && (
-          <Table
-            headers={["Order", "Date", "Revenue", "COGS", "Shipping", "Margin"]}
-            numeric={[false, false, true, true, true, true]}
-            rows={d.perOrder.map((o) => [
-              o.name || NIL,
-              fmtDate(o.at as unknown as string),
-              fmt(o.revenue),
-              o.cogs == null ? pill("attn", "Set cost") : fmt(o.cogs),
-              o.shipping != null
-                ? fmt(o.shipping)
-                : o.shippingStatus === "no-awb"
-                ? pill("none", "No AWB")
-                : o.shippingStatus === "unmatched"
-                ? pill("attn", "Unmatched")
-                : pill("pending", "Pending"),
-              o.margin == null ? <span className="pnl-muted">{NIL}</span> : marginCell(o.margin, fmt),
-            ])}
-          />
-        )}
-
-        {tab === "products" && (
-          <div>
-            <p className="pnl-note" style={{ marginBottom: 12 }}>
-              Margin per product, <strong>before shipping and ad spend</strong> (shipping is charged per order, not per
-              item). Sorted by total margin.
-            </p>
-            <Table
-              headers={["Product", "Units", "Revenue", "COGS", "Margin (ex-shipping)"]}
-              numeric={[false, true, true, true, true]}
-              rows={d.perProduct.map((p) => [
-                p.title,
-                String(p.units),
-                fmt(p.revenue),
-                p.cogs == null ? pill("attn", "Set cost") : fmt(p.cogs),
-                p.margin == null ? <span className="pnl-muted">{NIL}</span> : marginCell(p.margin, fmt),
-              ])}
-            />
-          </div>
-        )}
-
-        {c.total === 0 && d.configured && (
-          <div className="pnl-empty">No orders synced for this period yet. Press <strong>Sync now</strong>.</div>
+        {r && r.placedOrders === 0 && (
+          <div className="pnl-empty">No orders synced for {monthLabel(d.month)} yet. Press <strong>Sync now</strong>.</div>
         )}
       </div>
     </div>
   );
 }
 
-function pill(kind: "pending" | "none" | "attn", text: string) {
-  return <span className={`pnl-pill ${kind}`}>{text}</span>;
-}
-function marginCell(minor: string, fmt: (m: string | null) => string) {
-  const positive = BigInt(minor) >= 0n;
-  return <span className={positive ? "pnl-pos" : "pnl-negv"}>{fmt(minor)}</span>;
+function contributionPct(r: any): number {
+  if (r.netPnl == null || !r.netSale || BigInt(r.netSale) === 0n) return 0;
+  return Number(BigInt(r.netPnl)) / Number(BigInt(r.netSale));
 }
 
-function Kpi({ label, value, neg, headline }: { label: string; value: string; neg?: boolean; headline?: boolean }) {
+function StatusBanner({ report, monthLabel }: { report: any; monthLabel: string }) {
+  const tone = report.publishStatus === "final" ? "ok" : report.publishStatus === "provisional" ? "info" : "warn";
+  const label = report.publishStatus.toUpperCase();
   return (
-    <div className={`pnl-kpi${headline ? " headline" : ""}`}>
+    <div className={`pnl-banner ${tone}`} style={{ marginBottom: 18 }}>
+      <strong>{monthLabel}: {label}.</strong>{" "}
+      {report.publishStatus === "final" && "All costs resolved and the month is matured."}
+      {report.publishStatus === "provisional" && (
+        report.daysToMaturity > 0
+          ? `Not yet matured (${report.daysToMaturity} days to go); numbers may still move as late orders resolve.`
+          : "Costs resolved but some inputs are provisional (e.g. overhead not entered)."
+      )}
+      {report.publishStatus === "pending" && report.pendingReasons.length > 0 && (
+        <> Net P&L is suppressed until these are known: {report.pendingReasons.join("; ")}.</>
+      )}
+    </div>
+  );
+}
+
+function Kpi({ label, value, sub, accent, big }: { label: string; value: string; sub?: string; accent?: boolean; big?: boolean }) {
+  return (
+    <div className={`pnl-kpi${accent ? " accent" : ""}`}>
       <div className="pnl-kpi-label">{label}</div>
-      <div className={`pnl-kpi-value${neg ? " neg" : ""}`}>{value}</div>
+      <div className="pnl-kpi-value" style={big ? { fontSize: 26 } : undefined}>{value}</div>
+      {sub && <div className="pnl-kpi-sub">{sub}</div>}
     </div>
   );
 }
 
-function Table({ headers, rows, numeric }: { headers: string[]; rows: React.ReactNode[][]; numeric: boolean[] }) {
+function Row({ label, value, neg, strong, hl, big, pending }: {
+  label: string; value: string; neg?: boolean; strong?: boolean; hl?: boolean; big?: boolean; pending?: boolean;
+}) {
   return (
-    <div className="pnl-table-wrap">
-      <table className="pnl-table">
-        <thead>
-          <tr>{headers.map((h, i) => <th key={h} className={numeric[i] ? "pnl-num" : ""}>{h}</th>)}</tr>
-        </thead>
-        <tbody>
-          {rows.length === 0 ? (
-            <tr><td colSpan={headers.length} className="pnl-muted">Nothing yet.</td></tr>
-          ) : rows.map((r, i) => (
-            <tr key={i}>{r.map((cell, j) => <td key={j} className={numeric[j] ? "pnl-num" : ""}>{cell}</td>)}</tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <tr className={hl ? "pnl-row-hl" : ""}>
+      <td className={strong ? "pnl-strong" : ""}>{label}</td>
+      <td className={`pnl-num ${strong ? "pnl-strong" : ""} ${neg ? "pnl-neg" : ""} ${pending ? "pnl-pending" : ""}`}
+        style={big ? { fontSize: 18, fontWeight: 700 } : undefined}>
+        {value}
+      </td>
+    </tr>
   );
 }
 
-// Show a readable message (and the real error) instead of the bare root error
-// page if the loader/action ever throws, so a hiccup doesn't look like a 404.
 export function ErrorBoundary() {
   const error = useRouteError();
   const detail = isRouteErrorResponse(error)

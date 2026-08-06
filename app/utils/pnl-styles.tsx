@@ -142,8 +142,20 @@ export const CSS = `
 .pnl-kpi-label { font-size: 12.5px; color: var(--ink-faint); margin-bottom: 6px; letter-spacing: 0.01em; }
 .pnl-kpi-value { font-size: 19px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
 .pnl-kpi-value.neg { color: var(--neg); }
-.pnl-kpi.headline { background: var(--accent-wash); border-color: oklch(0.88 0.04 275); }
-.pnl-kpi.headline .pnl-kpi-value { font-size: 25px; font-weight: 720; color: var(--accent-ink); }
+.pnl-kpi.headline, .pnl-kpi.accent { background: var(--accent-wash); border-color: oklch(0.88 0.04 275); }
+.pnl-kpi.headline .pnl-kpi-value, .pnl-kpi.accent .pnl-kpi-value { color: var(--accent-ink); }
+.pnl-kpi-sub { font-size: 12px; color: var(--ink-faint); margin-top: 5px; }
+
+/* Monthly-P&L waterfall + two-up panels */
+.pnl-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 720px) { .pnl-grid2 { grid-template-columns: 1fr; } }
+.pnl-waterfall td:first-child { color: var(--ink-soft); }
+.pnl-waterfall .pnl-strong td, .pnl-waterfall td.pnl-strong { color: var(--ink); }
+.pnl-row-hl td { background: var(--surface); border-top: 1px solid var(--line); }
+.pnl-neg { color: var(--neg); }
+.pnl-pending { color: var(--warn-line); font-style: italic; }
+/* tables sit directly inside .pnl-panel here, so soften the last border */
+.pnl-panel > .pnl-table { margin-top: 4px; }
 
 /* table */
 .pnl-table-wrap { background: var(--panel); border: 1px solid var(--line-soft); border-radius: var(--radius); overflow: auto; box-shadow: var(--shadow); }
