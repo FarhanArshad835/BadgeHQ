@@ -23,9 +23,6 @@ const WINDOWS: Record<string, { label: string; since: () => Date }> = {
   "90d": { label: "Last 90 days", since: () => istDayStart(89) },
 };
 
-// Headroom for the bounded on-click sync (a ~7s sync budget + backfill pacing).
-// It only bills for time actually used; the budget keeps that to ~10s.
-export const config = { maxDuration: 60 };
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (!isAuthed(request)) return redirect("/pnl-app/login");
