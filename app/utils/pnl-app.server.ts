@@ -142,13 +142,13 @@ export async function validateShopifyToken(
         };
       }
       if (/access token|invalid|401|unauthor/i.test(s)) {
-        return { ok: false, reason: "Invalid token — copy the Admin API access token again (starts with shpat_)." };
+        return { ok: false, reason: "Invalid token. Copy the Admin API access token again (it starts with shpat_)." };
       }
       return { ok: false, reason: s.slice(0, 160) };
     }
     if (!res.ok) return { ok: false, reason: `Shopify returned HTTP ${res.status}. Check the store domain.` };
     return { ok: true };
   } catch (e: any) {
-    return { ok: false, reason: "Couldn't reach Shopify — check the store domain (e.g. yourstore.myshopify.com)." };
+    return { ok: false, reason: "Couldn't reach Shopify. Check the store domain (e.g. yourstore.myshopify.com)." };
   }
 }

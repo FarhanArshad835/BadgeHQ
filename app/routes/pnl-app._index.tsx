@@ -1,12 +1,13 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Form, Link, useActionData, useLoaderData, useNavigation, useSearchParams } from "@remix-run/react";
+import { Form, useActionData, useLoaderData, useNavigation, useSearchParams } from "@remix-run/react";
 import { useState } from "react";
 import prisma from "../db.server";
 import { rollup, completeness, type OrderRow } from "../utils/pnl.server";
 import { syncRevenueAndCogs, backfillShipping } from "../utils/pnl-sync.server";
 import { formatMinor } from "../utils/money";
 import { getPnlApp, isAuthed, tokenAdmin } from "../utils/pnl-app.server";
+import { PnlStyles } from "../utils/pnl-styles";
 
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 function istDayStart(daysAgo: number): Date {
@@ -82,7 +83,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     windowKey,
     currency,
     lastSyncAt: app.lastSyncAt,
-    lastSyncStatus: app.lastSyncStatus,
     kpis: {
       orders: agg.orders,
       revenue: agg.revenueMinor.toString(),
@@ -143,7 +143,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       {
         ok: false,
         message: isPcd
-          ? "The token can't read orders — enable read_orders on the custom app, reinstall, and paste the new token in Settings."
+          ? "The token can't read orders. Enable read_orders on the custom app, reinstall, and paste the new token in Settings."
           : "Sync failed: " + raw.slice(0, 200),
       },
       { status: 500 },
@@ -158,60 +158,70 @@ export default function PnlDashboard() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [tab, setTab] = useState<"glance" | "orders" | "products">("glance");
   const busy = nav.state !== "idle";
-  const fmt = (m: string | null, p = "—") => (m == null ? p : formatMinor(BigInt(m), d.currency));
+  // Null-value marker for empty cells. A plain hyphen, not an em dash.
+  const NIL = "-";
+  const fmt = (m: string | null, p = NIL) => (m == null ? p : formatMinor(BigInt(m), d.currency));
   const fmtDate = (iso: string) => new Date(iso).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short" });
   const k = d.kpis;
   const c = d.completeness;
+  const bannerTone = c.pct >= 90 ? "ok" : c.pct >= 60 ? "info" : "warn";
 
   return (
-    <div style={st.page}>
-      <div style={st.wrap}>
-        <div style={st.topbar}>
-          <h1 style={st.h1}>Profit &amp; Loss</h1>
-          <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-            <Link to="/pnl-app/settings" style={st.link}>Settings</Link>
-            <Link to="/pnl-app/logout" style={st.link}>Log out</Link>
+    <div className="pnl">
+      <PnlStyles />
+      <div className="pnl-wrap">
+        <div className="pnl-head">
+          <h1 className="pnl-h1">Profit &amp; Loss</h1>
+          <div className="pnl-headlinks">
+            <a className="pnl-link" href="/pnl-app/settings">Settings</a>
+            <a className="pnl-link" href="/pnl-app/logout">Log out</a>
           </div>
         </div>
 
         {!d.configured && (
-          <div style={st.warn}>
-            Connect your store first — go to <Link to="/pnl-app/settings" style={st.linkB}>Settings</Link> and paste
-            your Shopify custom-app token. No Shopify approval needed.
+          <div className="pnl-banner warn" style={{ marginBottom: 14 }}>
+            Connect your store first. Open <a className="pnl-link" href="/pnl-app/settings">Settings</a> and paste your
+            Shopify custom-app token. No Shopify approval needed.
           </div>
         )}
 
-        <div style={st.controls}>
+        <div className="pnl-controls">
           <select
+            className="pnl-select"
             value={d.windowKey}
             onChange={(e) => { const p = new URLSearchParams(searchParams); p.set("window", e.target.value); setSearchParams(p); }}
-            style={st.select}
           >
             {Object.entries(WINDOWS).map(([v, w]) => <option key={v} value={v}>{w.label}</option>)}
           </select>
-          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-            {d.lastSyncAt && <span style={st.subtle}>Last synced {new Date(d.lastSyncAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}</span>}
+          <div className="pnl-controls-right">
+            {d.lastSyncAt && (
+              <span className="pnl-sub" style={{ fontSize: 13 }}>
+                Synced {new Date(d.lastSyncAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })}
+              </span>
+            )}
             <Form method="post">
               <input type="hidden" name="window" value={d.windowKey} />
-              <button type="submit" style={st.primary} disabled={busy}>{busy ? "Syncing…" : "Sync now"}</button>
+              <button type="submit" className="pnl-btn pnl-btn-primary" disabled={busy}>
+                {busy ? "Syncing…" : "Sync now"}
+              </button>
             </Form>
           </div>
         </div>
 
         {actionData?.message && (
-          <div style={{ ...st.banner, background: actionData.ok ? "#e3f1df" : "#fbeae5" }}>{actionData.message}</div>
+          <div className={`pnl-banner ${actionData.ok ? "ok" : "bad"}`} style={{ marginBottom: 14 }}>{actionData.message}</div>
         )}
 
-        <div style={{ ...st.banner, background: c.pct >= 90 ? "#e3f1df" : c.pct >= 60 ? "#f1f8ff" : "#fff5ea" }}>
+        <div className={`pnl-banner ${bannerTone}`} style={{ marginBottom: 22 }}>
           Cost data complete for <strong>{c.pct}%</strong> of orders ({c.fullyComplete}/{c.total}).
           {c.total - c.shippingBilled > 0 && ` Shipping pending on ${c.total - c.shippingBilled}.`}
-          {c.total - c.cogsComplete > 0 && ` Cost-per-item missing on ${c.total - c.cogsComplete}.`}
-          {" "}Costs are never estimated — pending shows as “—”.
+          {c.total - c.cogsComplete > 0 && ` Cost per item missing on ${c.total - c.cogsComplete}.`}
+          {" "}Costs are never estimated; anything not yet known is left blank.
         </div>
 
-        <div style={st.tabs}>
+        <div className="pnl-tabs">
           {(["glance", "orders", "products"] as const).map((t) => (
-            <button key={t} onClick={() => setTab(t)} style={{ ...st.tab, ...(tab === t ? st.tabActive : {}) }}>
+            <button key={t} className="pnl-tab" data-active={tab === t} onClick={() => setTab(t)}>
               {t === "glance" ? "At a glance" : t === "orders" ? "Per order" : "Per product"}
             </button>
           ))}
@@ -219,104 +229,103 @@ export default function PnlDashboard() {
 
         {tab === "glance" && (
           <div>
-            <div style={st.kpiGrid}>
+            <div className="pnl-kpis">
               <Kpi label="Revenue" value={fmt(k.revenue)} />
-              <Kpi label="Refunds" value={"-" + fmt(k.refunds)} />
-              <Kpi label="COGS" value={"-" + fmt(k.cogs)} />
-              <Kpi label="Shipping (actual)" value={"-" + fmt(k.shipping)} />
-              <Kpi label="Confirmed margin" value={fmt(k.confirmed)} strong />
+              <Kpi label="Refunds" value={"-" + fmt(k.refunds)} neg />
+              <Kpi label="COGS" value={"-" + fmt(k.cogs)} neg />
+              <Kpi label="Shipping (actual)" value={"-" + fmt(k.shipping)} neg />
+              <Kpi label="Confirmed margin" value={fmt(k.confirmed)} headline />
               <Kpi label="Provisional margin" value={fmt(k.provisional)} />
             </div>
-            <p style={st.note}>
+            <p className="pnl-note">
               <strong>Confirmed margin</strong> counts only orders whose COGS and shipping are both known.
-              <strong> Provisional</strong> uses all orders with known costs so far (pending costs are absent, never
-              estimated), so it reads high until shipping bills. Ad spend excluded in Phase 1.
+              {" "}<strong>Provisional</strong> uses all orders with the costs known so far (pending costs are absent, never
+              estimated), so it reads high until shipping bills. Ad spend is excluded in Phase&nbsp;1.
             </p>
           </div>
         )}
 
         {tab === "orders" && (
-          <Table headers={["Order", "Date", "Revenue", "COGS", "Shipping", "Margin"]}
+          <Table
+            headers={["Order", "Date", "Revenue", "COGS", "Shipping", "Margin"]}
+            numeric={[false, false, true, true, true, true]}
             rows={d.perOrder.map((o) => [
-              o.name || "—",
+              o.name || NIL,
               fmtDate(o.at as unknown as string),
               fmt(o.revenue),
-              o.cogs == null ? "Set cost" : fmt(o.cogs),
-              o.shipping != null ? fmt(o.shipping) : o.shippingStatus === "no-awb" ? "No AWB" : o.shippingStatus === "unmatched" ? "Unmatched" : "Pending",
-              o.margin == null ? "—" : fmt(o.margin),
+              o.cogs == null ? pill("attn", "Set cost") : fmt(o.cogs),
+              o.shipping != null
+                ? fmt(o.shipping)
+                : o.shippingStatus === "no-awb"
+                ? pill("none", "No AWB")
+                : o.shippingStatus === "unmatched"
+                ? pill("attn", "Unmatched")
+                : pill("pending", "Pending"),
+              o.margin == null ? <span className="pnl-muted">{NIL}</span> : marginCell(o.margin, fmt),
             ])}
           />
         )}
 
         {tab === "products" && (
           <div>
-            <p style={st.note}>Margin per product, <strong>before shipping and ad spend</strong> (shipping is per-order, not per-item). Sorted by total margin.</p>
-            <Table headers={["Product", "Units", "Revenue", "COGS", "Margin (ex-shipping)"]}
-              rows={d.perProduct.map((p) => [p.title, String(p.units), fmt(p.revenue), p.cogs == null ? "Set cost" : fmt(p.cogs), p.margin == null ? "—" : fmt(p.margin)])}
+            <p className="pnl-note" style={{ marginBottom: 12 }}>
+              Margin per product, <strong>before shipping and ad spend</strong> (shipping is charged per order, not per
+              item). Sorted by total margin.
+            </p>
+            <Table
+              headers={["Product", "Units", "Revenue", "COGS", "Margin (ex-shipping)"]}
+              numeric={[false, true, true, true, true]}
+              rows={d.perProduct.map((p) => [
+                p.title,
+                String(p.units),
+                fmt(p.revenue),
+                p.cogs == null ? pill("attn", "Set cost") : fmt(p.cogs),
+                p.margin == null ? <span className="pnl-muted">{NIL}</span> : marginCell(p.margin, fmt),
+              ])}
             />
           </div>
         )}
 
         {c.total === 0 && d.configured && (
-          <div style={st.empty}>No orders synced for this period yet. Press <strong>Sync now</strong>.</div>
+          <div className="pnl-empty">No orders synced for this period yet. Press <strong>Sync now</strong>.</div>
         )}
       </div>
     </div>
   );
 }
 
-function Kpi({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
+function pill(kind: "pending" | "none" | "attn", text: string) {
+  return <span className={`pnl-pill ${kind}`}>{text}</span>;
+}
+function marginCell(minor: string, fmt: (m: string | null) => string) {
+  const positive = BigInt(minor) >= 0n;
+  return <span className={positive ? "pnl-pos" : "pnl-negv"}>{fmt(minor)}</span>;
+}
+
+function Kpi({ label, value, neg, headline }: { label: string; value: string; neg?: boolean; headline?: boolean }) {
   return (
-    <div style={st.kpi}>
-      <div style={st.kpiLabel}>{label}</div>
-      <div style={{ ...st.kpiValue, ...(strong ? { fontSize: 24, fontWeight: 700 } : {}) }}>{value}</div>
+    <div className={`pnl-kpi${headline ? " headline" : ""}`}>
+      <div className="pnl-kpi-label">{label}</div>
+      <div className={`pnl-kpi-value${neg ? " neg" : ""}`}>{value}</div>
     </div>
   );
 }
 
-function Table({ headers, rows }: { headers: string[]; rows: string[][] }) {
+function Table({ headers, rows, numeric }: { headers: string[]; rows: React.ReactNode[][]; numeric: boolean[] }) {
   return (
-    <div style={st.tableWrap}>
-      <table style={st.table}>
+    <div className="pnl-table-wrap">
+      <table className="pnl-table">
         <thead>
-          <tr>{headers.map((h) => <th key={h} style={st.th}>{h}</th>)}</tr>
+          <tr>{headers.map((h, i) => <th key={h} className={numeric[i] ? "pnl-num" : ""}>{h}</th>)}</tr>
         </thead>
         <tbody>
           {rows.length === 0 ? (
-            <tr><td colSpan={headers.length} style={{ ...st.td, color: "#8c9196" }}>Nothing yet.</td></tr>
+            <tr><td colSpan={headers.length} className="pnl-muted">Nothing yet.</td></tr>
           ) : rows.map((r, i) => (
-            <tr key={i}>{r.map((cell, j) => <td key={j} style={st.td}>{cell}</td>)}</tr>
+            <tr key={i}>{r.map((cell, j) => <td key={j} className={numeric[j] ? "pnl-num" : ""}>{cell}</td>)}</tr>
           ))}
         </tbody>
       </table>
     </div>
   );
 }
-
-const st: Record<string, React.CSSProperties> = {
-  page: { minHeight: "100vh", background: "#f6f6f7", padding: "24px 16px", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif", color: "#202223" },
-  wrap: { maxWidth: 900, margin: "0 auto" },
-  topbar: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 },
-  h1: { margin: 0, fontSize: 24, fontWeight: 700 },
-  link: { color: "#2c6ecb", textDecoration: "none", fontSize: 14 },
-  linkB: { color: "#2c6ecb", fontWeight: 600 },
-  warn: { background: "#fff5ea", border: "1px solid #ffd79d", borderRadius: 8, padding: 12, fontSize: 14, marginBottom: 16 },
-  controls: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
-  select: { padding: "8px 10px", border: "1px solid #c9cccf", borderRadius: 8, fontSize: 14 },
-  subtle: { color: "#6d7175", fontSize: 13 },
-  primary: { padding: "9px 16px", background: "#111", color: "#fff", border: "none", borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: "pointer" },
-  banner: { padding: "10px 12px", borderRadius: 8, fontSize: 14, marginBottom: 14 },
-  tabs: { display: "flex", gap: 4, marginBottom: 16, borderBottom: "1px solid #e1e3e5" },
-  tab: { padding: "8px 14px", background: "none", border: "none", borderBottom: "2px solid transparent", fontSize: 14, cursor: "pointer", color: "#6d7175" },
-  tabActive: { color: "#111", fontWeight: 600, borderBottom: "2px solid #111" },
-  kpiGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12, marginBottom: 12 },
-  kpi: { background: "#fff", borderRadius: 10, padding: 16, boxShadow: "0 1px 2px rgba(0,0,0,0.06)" },
-  kpiLabel: { fontSize: 13, color: "#6d7175", marginBottom: 4 },
-  kpiValue: { fontSize: 18, fontWeight: 600 },
-  note: { fontSize: 13, color: "#6d7175", lineHeight: 1.5 },
-  tableWrap: { background: "#fff", borderRadius: 10, overflow: "auto", boxShadow: "0 1px 2px rgba(0,0,0,0.06)" },
-  table: { width: "100%", borderCollapse: "collapse", fontSize: 14 },
-  th: { textAlign: "left", padding: "10px 14px", borderBottom: "1px solid #e1e3e5", color: "#6d7175", fontWeight: 600, fontSize: 12, textTransform: "uppercase" },
-  td: { padding: "10px 14px", borderBottom: "1px solid #f1f1f1" },
-  empty: { background: "#fff", borderRadius: 10, padding: 24, textAlign: "center", color: "#6d7175", marginTop: 12 },
-};
