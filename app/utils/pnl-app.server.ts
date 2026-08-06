@@ -17,12 +17,6 @@ import type { AdminGraphql } from "./pnl.server";
 import { syncRevenueAndCogs, backfillShipping, backfillDelivery, backfillDeliveryBulk } from "./pnl-sync.server";
 
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
-function istDaysAgoStart(days: number): Date {
-  const ist = new Date(Date.now() + IST_OFFSET_MS);
-  ist.setUTCHours(0, 0, 0, 0);
-  ist.setUTCDate(ist.getUTCDate() - days);
-  return new Date(ist.getTime() - IST_OFFSET_MS);
-}
 
 const COOKIE_NAME = "pnl_session";
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -135,8 +129,11 @@ export async function runStandaloneSync(opts: {
     until = app.syncWindowEnd!;
     startCursor = app.syncCursor!;
   } else {
-    const hasData = (await prisma.orderFinancials.count({ where: { shop: app.shopDomain } })) > 0;
-    since = istDaysAgoStart(hasData ? 2 : 89);
+    // Fixed calendar-month start (NOT a rolling 90-day window, which cut off the
+    // start of May and drifted later daily). Cover complete months from
+    // backfillStartMonth to now, so no month is ever partially pulled.
+    const [by, bm] = (app.backfillStartMonth || "2026-04").split("-").map(Number);
+    since = new Date(Date.UTC(by, bm - 1, 1) - IST_OFFSET_MS);
     until = new Date();
     startCursor = null;
   }

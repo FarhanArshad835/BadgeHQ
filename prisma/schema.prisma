@@ -610,6 +610,10 @@ model PnlApp {
   gstInputRateNumer   Int    @default(18)    // ITC on (freight+ads+overhead): ×18/118
   gstInputRateDenom   Int    @default(118)
   maturityDays        Int    @default(12)    // wait this many days after month-end before the month is "matured"
+  // First calendar month to backfill ("YYYY-MM"). The sync covers COMPLETE
+  // months from here to now — NOT a rolling 90-day window (which would cut off
+  // the start of older months and drift later every day). Default Apr 2026.
+  backfillStartMonth  String @default("2026-04")
 
   // Resumable sync state. The nightly cron chunks a large backlog across runs:
   // it saves where it stopped (syncCursor) within a window (syncWindowStart /
