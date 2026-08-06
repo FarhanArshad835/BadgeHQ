@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Form, useActionData, useLoaderData, useNavigation, useSearchParams } from "@remix-run/react";
+import { Form, useActionData, useLoaderData, useNavigation, useSearchParams, useRouteError, isRouteErrorResponse } from "@remix-run/react";
 import { useEffect, useRef, useState } from "react";
 import prisma from "../db.server";
 import { rollup, completeness, type OrderRow } from "../utils/pnl.server";
@@ -193,7 +193,7 @@ export default function PnlDashboard() {
     if (!syncing) return;
     setProgress(0);
     // Aim at last run's count; if unknown, a gentle default so the bar still moves.
-    targetRef.current = Math.max(d.lastSyncCount, 25);
+    targetRef.current = Math.max(d?.lastSyncCount ?? 0, 25);
     const id = setInterval(() => {
       setProgress((p) => {
         const target = targetRef.current;
@@ -204,7 +204,14 @@ export default function PnlDashboard() {
       });
     }, 220);
     return () => clearInterval(id);
-  }, [syncing, d.lastSyncCount]);
+  }, [syncing, d?.lastSyncCount]);
+
+  // Loader data can momentarily be null (e.g. the loader redirected to /login
+  // after the session expired, while this component is mid-transition). Every
+  // line below dereferences `d`, so bail out rather than crash — the redirect
+  // navigation is already in flight.
+  if (!d) return null;
+
   // Null-value marker for empty cells. A plain hyphen, not an em dash.
   const NIL = "-";
   const fmt = (m: string | null, p = NIL) => (m == null ? p : formatMinor(BigInt(m), d.currency));
@@ -380,6 +387,32 @@ function Table({ headers, rows, numeric }: { headers: string[]; rows: React.Reac
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+// Show a readable message (and the real error) instead of the bare root error
+// page if the loader/action ever throws, so a hiccup doesn't look like a 404.
+export function ErrorBoundary() {
+  const error = useRouteError();
+  const detail = isRouteErrorResponse(error)
+    ? `${error.status} ${error.statusText}`
+    : error instanceof Error
+    ? error.message
+    : "Unknown error";
+  return (
+    <div className="pnl">
+      <PnlStyles />
+      <div className="pnl-wrap">
+        <div className="pnl-panel" style={{ marginTop: 40 }}>
+          <h1 className="pnl-h1" style={{ fontSize: 20 }}>Something went wrong</h1>
+          <p className="pnl-sub" style={{ marginTop: 8 }}>{detail}</p>
+          <div style={{ marginTop: 16, display: "flex", gap: 10 }}>
+            <a className="pnl-btn pnl-btn-primary" href="/pnl-app">Reload</a>
+            <a className="pnl-link" href="/pnl-app/login">Log in again</a>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
