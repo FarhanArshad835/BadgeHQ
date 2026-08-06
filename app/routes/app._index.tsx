@@ -180,6 +180,14 @@ const features = [
     route: "/app/ai-replies",
     key: "aiReplies" as const,
   },
+  {
+    title: "Profit & Loss",
+    description: "See real profit per day, per order and per product — revenue minus actual costs",
+    route: "/app/pnl",
+    key: "pnl" as const,
+    // Not a widget feature — show a plain "Dashboard" badge instead of a count.
+    badge: "Dashboard",
+  },
 ];
 
 export default function Dashboard() {
@@ -298,7 +306,12 @@ export default function Dashboard() {
                 </Text>
                 <InlineGrid columns={2} alignItems="center">
                   <Badge>
-                    {`${stats[feature.key]} ${stats[feature.key] === 1 ? "widget" : "widgets"}`}
+                    {(() => {
+                      const override = "badge" in feature ? feature.badge : undefined;
+                      if (override) return override;
+                      const count = (stats as Record<string, number>)[feature.key] ?? 0;
+                      return `${count} ${count === 1 ? "widget" : "widgets"}`;
+                    })()}
                   </Badge>
                   <Box>
                     <button
