@@ -40,6 +40,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     results["standalone"] = await runStandaloneSync({
       maxPages: 400,
       timeBudgetMs: STANDALONE_TIME_BUDGET_MS,
+      deliveryLimit: 150,
+      shippingLimit: 200,
     });
   } catch (e: any) {
     console.error("[pnl-cron] standalone", String(e?.message || e).slice(0, 200));

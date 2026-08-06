@@ -126,7 +126,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // click continues where the last click (or the nightly cron) stopped — it
     // does NOT re-sync the same first orders. Small bounds keep it under the
     // function timeout and off Neon; the nightly cron finishes any remainder.
-    const result = await runStandaloneSync({ maxPages: 6, timeBudgetMs: 7_000 });
+    const result = await runStandaloneSync({
+      maxPages: 6,
+      timeBudgetMs: 7_000,
+      deliveryLimit: 8, // keep carrier calls tiny on a click; the cron does the bulk
+      shippingLimit: 20,
+    });
     if ("error" in result) {
       return json({ ok: false, message: "Add your Shopify store domain and token in Settings first." }, { status: 400 });
     }

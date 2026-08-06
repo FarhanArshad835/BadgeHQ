@@ -21,6 +21,7 @@ import {
   type OrderFinancialsComputed,
 } from "./pnl.server";
 import { resolveBilling } from "./carrier-billing.server";
+import { trackParcel, type TrackingResult } from "./tracking.server";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -274,4 +275,154 @@ export async function backfillShipping(
   }
 
   return { checked: pending.length, billed, stillPending };
+}
+
+// ── Delivery outcome (the DELIVERED BASIS) ──────────────────────────────────
+//
+// Per the build spec (courier-status table, §3.1) — we use COURIER status as the
+// authority (no OMS). Richer than a bare delivered/rto flag so the monthly P&L
+// can count each state correctly and, crucially, EXCLUDE not-yet-resolved orders
+// from rate denominators instead of miscounting them as "not delivered".
+//
+// Outcome states:
+//   delivered       — parcel delivered (counts toward revenue/COGS/metrics)
+//   rto             — returned to origin, terminal (stock back; COGS = 0)
+//   rto_in_transit  — returning to origin, not yet back (NOT resolved yet)
+//   lost            — carrier lost it (resolved, but not delivered)
+//   cancelled       — cancelled/canceled scan
+//   in_transit      — shipped/out-for-delivery/attempting (NOT resolved)
+//   unresolved      — carrier gave a status we can't map (excluded from rates)
+export type DeliveryOutcome =
+  | "delivered"
+  | "rto"
+  | "rto_in_transit"
+  | "lost"
+  | "cancelled"
+  | "in_transit"
+  | "unresolved";
+
+// Carriers write statuses with underscores, hyphens or spaces interchangeably
+// ("RETURNED_TO_ORIGIN", "RTO IN TRANSIT", "rto-delivered"), so we normalise all
+// separators to a single space before matching. Order matters below: terminal
+// RTO must be tested before generic "returning to origin".
+const RTO_TERMINAL_RE = /\brto (delivered|received|complete)|returned? to origin\b|\brts\b|return (received|accepted|to (seller|warehouse|origin))/;
+const RTO_TRANSIT_RE = /returning to origin|rto (in transit|initiat)|\brto\b/;
+const LOST_RE = /\blost\b|shipment lost|untraceable/;
+const CANCELLED_RE = /\bcancel(l?ed|ed)?\b/;
+
+/** Lower-case and collapse _/-/whitespace to single spaces for status matching. */
+function normStatus(s: string): string {
+  return String(s || "").toLowerCase().replace(/[_\-\s]+/g, " ").trim();
+}
+
+/**
+ * Classify a courier TrackingResult into a delivery outcome. Uses the shipment
+ * `status` and latest `lastActivity` text. `delivered` from the carrier wins
+ * outright. Otherwise we look for terminal RTO, then in-flight RTO, lost, and
+ * cancelled, before falling back to in_transit. A status we truly can't read is
+ * "unresolved" (never silently treated as not-delivered — the spec's key rule).
+ */
+export function classifyDelivery(r: TrackingResult): DeliveryOutcome {
+  if (r.delivered) return "delivered";
+  const text = normStatus(`${r.status} ${r.lastActivity}`);
+  if (RTO_TERMINAL_RE.test(text)) return "rto";
+  if (RTO_TRANSIT_RE.test(text)) return "rto_in_transit";
+  if (LOST_RE.test(text)) return "lost";
+  if (CANCELLED_RE.test(text)) return "cancelled";
+  // A real, readable moving status → in_transit; an empty/garbage one → unresolved.
+  if (text) return "in_transit";
+  return "unresolved";
+}
+
+/** Resolved = terminal outcome, safe to count in rate denominators. in_transit,
+ *  rto_in_transit and unresolved are NOT resolved (not-yet-known, not failed). */
+export function isResolvedOutcome(o: string): boolean {
+  return o === "delivered" || o === "rto" || o === "lost" || o === "cancelled";
+}
+
+/**
+ * Fill delivery outcome for orders whose status isn't final yet. This is the
+ * backbone of the monthly P&L: revenue, COGS and per-order metrics all count
+ * DELIVERED orders only. Only re-checks orders that aren't already terminal
+ * (delivered/rto), so a settled order is never re-fetched — keeps carrier calls
+ * and Neon writes bounded. Never guesses: an order with no AWB is "no-awb", an
+ * unreadable AWB stays "unknown", and both are simply excluded from delivered.
+ */
+export async function backfillDelivery(
+  shop: string,
+  opts: {
+    limit?: number;
+    carrier?: { shiprocketEmail?: string; shiprocketPassword?: string; delhiveryApiKey?: string };
+  } = {},
+): Promise<{ checked: number; delivered: number; rto: number; inTransit: number; noAwb: number }> {
+  const limit = opts.limit ?? 60;
+
+  let creds = opts.carrier;
+  if (!creds) {
+    const [ai, delivery] = await Promise.all([
+      prisma.aiReplySettings.findUnique({
+        where: { shop },
+        select: { waShiprocketEmail: true, waShiprocketPassword: true },
+      }),
+      prisma.deliverySettings.findUnique({ where: { shop }, select: { apiToken: true } }),
+    ]);
+    creds = {
+      shiprocketEmail: ai?.waShiprocketEmail,
+      shiprocketPassword: ai?.waShiprocketPassword,
+      delhiveryApiKey: delivery?.apiToken,
+    };
+  }
+
+  // Orders not yet in a terminal delivery state. Those with no AWB get marked
+  // "no-awb" in one cheap statement (no carrier call needed).
+  const noAwbRes = await prisma.orderFinancials.updateMany({
+    where: { shop, awb: "", deliveryStatus: { in: ["unknown"] } },
+    data: { deliveryStatus: "no-awb", deliverySyncedAt: new Date() },
+  });
+
+  // Re-check only NON-terminal states — a delivered/rto/lost/cancelled order is
+  // settled and never re-fetched (keeps carrier calls + Neon writes bounded).
+  const toCheck = await prisma.orderFinancials.findMany({
+    where: {
+      shop,
+      awb: { not: "" },
+      deliveryStatus: { in: ["unknown", "in_transit", "rto_in_transit", "unresolved"] },
+    },
+    orderBy: { orderCreatedAt: "asc" },
+    take: limit,
+    select: { id: true, awb: true },
+  });
+
+  let delivered = 0;
+  let rto = 0;
+  let inTransit = 0;
+  const noAwb = noAwbRes.count;
+  for (const row of toCheck) {
+    const r = await trackParcel({
+      awb: row.awb,
+      shiprocketEmail: creds.shiprocketEmail || undefined,
+      shiprocketPassword: creds.shiprocketPassword || undefined,
+      delhiveryApiKey: creds.delhiveryApiKey || undefined,
+    });
+    if (!r) {
+      // Carrier didn't recognise/return the AWB this pass — leave as-is to retry.
+      await sleep(300);
+      continue;
+    }
+    const status = classifyDelivery(r);
+    await prisma.orderFinancials.update({
+      where: { id: row.id },
+      data: {
+        deliveryStatus: status,
+        deliveredAt: status === "delivered" ? new Date() : null,
+        deliverySyncedAt: new Date(),
+      },
+    });
+    if (status === "delivered") delivered++;
+    else if (status === "rto") rto++;
+    else inTransit++;
+    await sleep(300); // gentle pacing across carrier calls
+  }
+
+  return { checked: toCheck.length, delivered, rto, inTransit, noAwb };
 }

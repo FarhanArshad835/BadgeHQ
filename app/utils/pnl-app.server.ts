@@ -14,7 +14,7 @@
 import crypto from "node:crypto";
 import prisma from "../db.server";
 import type { AdminGraphql } from "./pnl.server";
-import { syncRevenueAndCogs, backfillShipping } from "./pnl-sync.server";
+import { syncRevenueAndCogs, backfillShipping, backfillDelivery } from "./pnl-sync.server";
 
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 function istDaysAgoStart(days: number): Date {
@@ -115,7 +115,12 @@ export async function getPnlApp() {
 export async function runStandaloneSync(opts: {
   maxPages: number;
   timeBudgetMs: number;
-}): Promise<{ orders: number; done: boolean; billed: number; pending: number } | { error: string }> {
+  deliveryLimit?: number; // how many orders to resolve delivery for this run
+  shippingLimit?: number;
+}): Promise<
+  | { orders: number; done: boolean; billed: number; pending: number; delivered: number; rto: number }
+  | { error: string }
+> {
   const app = await getPnlApp();
   if (!app.shopDomain || !app.adminToken) return { error: "not configured" };
 
@@ -164,16 +169,26 @@ export async function runStandaloneSync(opts: {
         },
   });
 
-  const bf = await backfillShipping(app.shopDomain, {
-    limit: 200,
-    carrier: {
-      shiprocketEmail: app.shiprocketEmail,
-      shiprocketPassword: app.shiprocketPassword,
-      delhiveryApiKey: app.delhiveryApiKey,
-    },
-  });
+  const carrier = {
+    shiprocketEmail: app.shiprocketEmail,
+    shiprocketPassword: app.shiprocketPassword,
+    delhiveryApiKey: app.delhiveryApiKey,
+  };
 
-  return { orders: rc.orders, done: rc.done, billed: bf.billed, pending: bf.stillPending };
+  // Delivery outcome (delivered/RTO) is the basis of the monthly P&L, so resolve
+  // it every run for orders not yet terminal. Bounded so it stays within budget:
+  // the button passes a small limit, the cron a large one (~0.3s/carrier call).
+  const dv = await backfillDelivery(app.shopDomain, { limit: opts.deliveryLimit ?? 120, carrier });
+  const bf = await backfillShipping(app.shopDomain, { limit: opts.shippingLimit ?? 200, carrier });
+
+  return {
+    orders: rc.orders,
+    done: rc.done,
+    billed: bf.billed,
+    pending: bf.stillPending,
+    delivered: dv.delivered,
+    rto: dv.rto,
+  };
 }
 
 // ── Shopify admin client from a raw custom-app token ─────────────────────────
