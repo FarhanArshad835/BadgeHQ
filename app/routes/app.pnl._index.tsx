@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useActionData, useLoaderData, useNavigation, useSearchParams, useSubmit } from "@remix-run/react";
+import { useActionData, useLoaderData, useNavigation, useRouteError, useSearchParams, useSubmit } from "@remix-run/react";
 import { useState } from "react";
 import {
   Page,
@@ -184,6 +184,31 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return json({ ok: false, message: "Sync failed. Check that carrier and Shopify access are set up." }, { status: 500 });
   }
 };
+
+// TEMP diagnostic: surface the real error instead of the blank "Application
+// Error" page, so we can see what's crashing. Remove once fixed.
+export function ErrorBoundary() {
+  const error = useRouteError() as any;
+  const msg = error?.message || String(error);
+  const stack = error?.stack || "";
+  return (
+    <Page>
+      <TitleBar title="Profit & Loss — error" />
+      <Layout>
+        <Layout.Section>
+          <Banner tone="critical" title="P&L page error (diagnostic)">
+            <BlockStack gap="200">
+              <Text as="p"><strong>{msg}</strong></Text>
+              <Box background="bg-surface-secondary" padding="200">
+                <Text as="pre" variant="bodySm">{String(stack).slice(0, 1500)}</Text>
+              </Box>
+            </BlockStack>
+          </Banner>
+        </Layout.Section>
+      </Layout>
+    </Page>
+  );
+}
 
 export default function PnlPage() {
   const d = useLoaderData<typeof loader>();
