@@ -253,7 +253,10 @@ export default function PnlDashboard() {
                 Synced {new Date(d.lastSyncAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })}
               </span>
             )}
-            <Form method="post">
+            {/* action="/pnl-app?index" targets THIS index route's action, not
+                the pnl-app.tsx layout parent (which has no action). Without the
+                ?index a POST to /pnl-app hits the layout and errors. */}
+            <Form method="post" action="/pnl-app?index">
               <input type="hidden" name="window" value={d.windowKey} />
               <button type="submit" className="pnl-btn pnl-btn-primary" disabled={busy}>
                 {syncing ? (
