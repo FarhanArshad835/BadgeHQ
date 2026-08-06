@@ -4,9 +4,8 @@ import { Form, useActionData, useLoaderData, useNavigation, useSearchParams, use
 import { useEffect, useRef, useState } from "react";
 import prisma from "../db.server";
 import { rollup, completeness, type OrderRow } from "../utils/pnl.server";
-import { syncRevenueAndCogs, backfillShipping } from "../utils/pnl-sync.server";
 import { formatMinor } from "../utils/money";
-import { getPnlApp, isAuthed, tokenAdmin } from "../utils/pnl-app.server";
+import { getPnlApp, isAuthed, runStandaloneSync } from "../utils/pnl-app.server";
 import { PnlStyles } from "../utils/pnl-styles";
 
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
@@ -121,40 +120,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (!app.shopDomain || !app.adminToken) {
     return json({ ok: false, message: "Add your Shopify store domain and token in Settings first." }, { status: 400 });
   }
-  const form = await request.formData();
-  const windowKey = String(form.get("window") || "7d");
-  const since = (WINDOWS[windowKey] || WINDOWS["7d"]).since();
-  const until = new Date();
 
   try {
-    const admin = tokenAdmin(app.shopDomain, app.adminToken);
-    // Bounded on-click sync: a store can do thousands of orders in a window, which
-    // can't finish in one serverless request and would run up Neon compute. So we
-    // sync at most a few pages within a short time budget (always returns in
-    // time, touches Neon only briefly). If there's more, the nightly cron — which
-    // chunks and resumes across runs — finishes the rest. Writes are batched.
-    const rc = await syncRevenueAndCogs(admin, app.shopDomain, {
-      since,
-      until,
-      maxPages: 6,
-      timeBudgetMs: 7_000,
-    });
-    const bf = await backfillShipping(app.shopDomain, {
-      limit: 40,
-      carrier: {
-        shiprocketEmail: app.shiprocketEmail,
-        shiprocketPassword: app.shiprocketPassword,
-        delhiveryApiKey: app.delhiveryApiKey,
-      },
-    });
-    await prisma.pnlApp.update({
-      where: { id: "default" },
-      data: { lastSyncAt: new Date(), lastSyncStatus: `synced ${rc.orders} orders` },
-    });
-    const tail = rc.done
-      ? ` Shipping billed for ${bf.billed}, ${bf.stillPending} pending.`
-      : " More orders remain; the nightly sync will finish the rest (or press Sync again).";
-    return json({ ok: true, message: `Synced ${rc.orders} orders this pass.${tail}` });
+    // Bounded on-click chunk that RESUMES from the saved cursor, so a second
+    // click continues where the last click (or the nightly cron) stopped — it
+    // does NOT re-sync the same first orders. Small bounds keep it under the
+    // function timeout and off Neon; the nightly cron finishes any remainder.
+    const result = await runStandaloneSync({ maxPages: 6, timeBudgetMs: 7_000 });
+    if ("error" in result) {
+      return json({ ok: false, message: "Add your Shopify store domain and token in Settings first." }, { status: 400 });
+    }
+    const tail = result.done
+      ? ` All caught up. Shipping billed for ${result.billed}, ${result.pending} pending.`
+      : " More orders remain; press Sync again to continue, or let the nightly sync finish.";
+    return json({ ok: true, message: `Synced ${result.orders} more orders.${tail}` });
   } catch (e: any) {
     const raw = String(e?.message || e);
     const isPcd = /not approved to access the Order|protected-customer-data/i.test(raw);

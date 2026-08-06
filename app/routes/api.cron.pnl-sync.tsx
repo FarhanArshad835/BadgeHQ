@@ -15,7 +15,7 @@ import { json } from "@remix-run/node";
 import prisma from "../db.server";
 import { unauthenticated } from "../shopify.server";
 import { syncRevenueAndCogs, backfillShipping } from "../utils/pnl-sync.server";
-import { getPnlApp, tokenAdmin } from "../utils/pnl-app.server";
+import { getPnlApp, runStandaloneSync } from "../utils/pnl-app.server";
 
 export const config = { maxDuration: 300 };
 
@@ -23,86 +23,6 @@ const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 // How long the standalone sync may run before it saves its cursor and stops,
 // leaving headroom under maxDuration for backfill + response.
 const STANDALONE_TIME_BUDGET_MS = 220_000;
-
-function istDaysAgoStart(days: number): Date {
-  const ist = new Date(Date.now() + IST_OFFSET_MS);
-  ist.setUTCHours(0, 0, 0, 0);
-  ist.setUTCDate(ist.getUTCDate() - days);
-  return new Date(ist.getTime() - IST_OFFSET_MS);
-}
-
-/**
- * Sync the standalone P&L app (PnlApp row) using its CUSTOM-APP token, which —
- * unlike the embedded app — has order access. Self-chunking: if a previous run
- * left a cursor mid-window, resume it; else open a fresh window. A first-ever
- * run backfills 90 days; steady state re-syncs the last 3 (refunds change). The
- * run stops on its time budget and persists the cursor so the next night
- * continues, so no single invocation runs unbounded or over-bills Neon.
- */
-async function runStandaloneSync(): Promise<Record<string, unknown>> {
-  const app = await getPnlApp();
-  if (!app.shopDomain || !app.adminToken) return { standalone: "not configured" };
-
-  const admin = tokenAdmin(app.shopDomain, app.adminToken);
-  const resuming = Boolean(app.syncCursor && app.syncWindowStart && app.syncWindowEnd);
-
-  // Resume the saved window, or open a new one. First-ever sync (no rows yet)
-  // reaches back 90 days; steady state just refreshes the last 3.
-  let since: Date;
-  let until: Date;
-  let startCursor: string | null;
-  if (resuming) {
-    since = app.syncWindowStart!;
-    until = app.syncWindowEnd!;
-    startCursor = app.syncCursor!;
-  } else {
-    const hasData = (await prisma.orderFinancials.count({ where: { shop: app.shopDomain } })) > 0;
-    since = istDaysAgoStart(hasData ? 2 : 89);
-    until = new Date();
-    startCursor = null;
-  }
-
-  const rc = await syncRevenueAndCogs(admin, app.shopDomain, {
-    since,
-    until,
-    startCursor,
-    maxPages: 400,
-    timeBudgetMs: STANDALONE_TIME_BUDGET_MS,
-  });
-
-  // Persist progress: keep the cursor+window if not done, clear them if done.
-  await prisma.pnlApp.update({
-    where: { id: "default" },
-    data: rc.done
-      ? {
-          syncCursor: null,
-          syncWindowStart: null,
-          syncWindowEnd: null,
-          lastSyncAt: new Date(),
-          lastSyncStatus: `synced ${rc.orders} orders`,
-        }
-      : {
-          syncCursor: rc.nextCursor,
-          syncWindowStart: since,
-          syncWindowEnd: until,
-          lastSyncAt: new Date(),
-          lastSyncStatus: `syncing (${rc.orders} this run, more pending)`,
-        },
-  });
-
-  // Backfill shipping for this shop's pending rows (verify-gated → mostly no-op
-  // until the carrier billing endpoint is enabled).
-  const bf = await backfillShipping(app.shopDomain, {
-    limit: 200,
-    carrier: {
-      shiprocketEmail: app.shiprocketEmail,
-      shiprocketPassword: app.shiprocketPassword,
-      delhiveryApiKey: app.delhiveryApiKey,
-    },
-  });
-
-  return { orders: rc.orders, done: rc.done, billed: bf.billed, pending: bf.stillPending };
-}
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const secret = process.env.CRON_SECRET;
@@ -117,7 +37,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   //    has order access here. Runs first, self-chunking within its time budget.
   const standaloneApp = await getPnlApp();
   try {
-    results["standalone"] = await runStandaloneSync();
+    results["standalone"] = await runStandaloneSync({
+      maxPages: 400,
+      timeBudgetMs: STANDALONE_TIME_BUDGET_MS,
+    });
   } catch (e: any) {
     console.error("[pnl-cron] standalone", String(e?.message || e).slice(0, 200));
     results["standalone"] = { error: true };

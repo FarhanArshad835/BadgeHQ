@@ -14,6 +14,15 @@
 import crypto from "node:crypto";
 import prisma from "../db.server";
 import type { AdminGraphql } from "./pnl.server";
+import { syncRevenueAndCogs, backfillShipping } from "./pnl-sync.server";
+
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+function istDaysAgoStart(days: number): Date {
+  const ist = new Date(Date.now() + IST_OFFSET_MS);
+  ist.setUTCHours(0, 0, 0, 0);
+  ist.setUTCDate(ist.getUTCDate() - days);
+  return new Date(ist.getTime() - IST_OFFSET_MS);
+}
 
 const COOKIE_NAME = "pnl_session";
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -87,6 +96,84 @@ export async function getPnlApp() {
   const existing = await prisma.pnlApp.findUnique({ where: { id: "default" } });
   if (existing) return existing;
   return prisma.pnlApp.create({ data: { id: "default" } });
+}
+
+/**
+ * Run one CURSOR-AWARE chunk of the standalone P&L sync, shared by BOTH the
+ * "Sync now" button and the nightly cron. This is what makes a second click (or
+ * the next cron run) continue where the last one stopped instead of re-syncing
+ * the same first orders:
+ *   - if a previous chunk left a saved cursor+window, resume it,
+ *   - otherwise open a fresh window (90 days on the very first run when there's
+ *     no data yet, else the last 3 days to catch refunds),
+ *   - run until `timeBudgetMs`/`maxPages`, then persist the cursor (or clear it
+ *     when the window is fully drained) so the next run picks up from there.
+ *
+ * The button passes small bounds (a few pages, ~7s); the cron passes large ones.
+ * They share the SAME PnlApp cursor, so clicks and nightly runs cooperate.
+ */
+export async function runStandaloneSync(opts: {
+  maxPages: number;
+  timeBudgetMs: number;
+}): Promise<{ orders: number; done: boolean; billed: number; pending: number } | { error: string }> {
+  const app = await getPnlApp();
+  if (!app.shopDomain || !app.adminToken) return { error: "not configured" };
+
+  const admin = tokenAdmin(app.shopDomain, app.adminToken);
+  const resuming = Boolean(app.syncCursor && app.syncWindowStart && app.syncWindowEnd);
+
+  let since: Date;
+  let until: Date;
+  let startCursor: string | null;
+  if (resuming) {
+    since = app.syncWindowStart!;
+    until = app.syncWindowEnd!;
+    startCursor = app.syncCursor!;
+  } else {
+    const hasData = (await prisma.orderFinancials.count({ where: { shop: app.shopDomain } })) > 0;
+    since = istDaysAgoStart(hasData ? 2 : 89);
+    until = new Date();
+    startCursor = null;
+  }
+
+  const rc = await syncRevenueAndCogs(admin, app.shopDomain, {
+    since,
+    until,
+    startCursor,
+    maxPages: opts.maxPages,
+    timeBudgetMs: opts.timeBudgetMs,
+  });
+
+  // Persist progress: keep the cursor+window if not done, clear it when drained.
+  await prisma.pnlApp.update({
+    where: { id: "default" },
+    data: rc.done
+      ? {
+          syncCursor: null,
+          syncWindowStart: null,
+          syncWindowEnd: null,
+          lastSyncAt: new Date(),
+          lastSyncStatus: `synced ${rc.orders} orders`,
+        }
+      : {
+          syncCursor: rc.nextCursor,
+          syncWindowStart: since,
+          syncWindowEnd: until,
+          lastSyncAt: new Date(),
+          lastSyncStatus: `syncing (${rc.orders} this run, more pending)`,
+        },
+  });
+
+  const bf = await backfillShipping(app.shopDomain, {
+    limit: 200,
+    carrier: {
+      shiprocketEmail: app.shiprocketEmail,
+      shiprocketPassword: app.shiprocketPassword,
+      delhiveryApiKey: app.delhiveryApiKey,
+    },
+  });
+
+  return { orders: rc.orders, done: rc.done, billed: bf.billed, pending: bf.stillPending };
 }
 
 // ── Shopify admin client from a raw custom-app token ─────────────────────────
