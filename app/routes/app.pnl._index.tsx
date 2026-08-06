@@ -22,13 +22,11 @@ import {
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate, unauthenticated } from "../shopify.server";
 import prisma from "../db.server";
-import {
-  rollup,
-  completeness,
-  formatMinor,
-  type OrderRow,
-} from "../utils/pnl.server";
+import { rollup, completeness, type OrderRow } from "../utils/pnl.server";
 import { syncRevenueAndCogs, backfillShipping } from "../utils/pnl-sync.server";
+// formatMinor is a plain (non-.server) module — the client component renders
+// amounts with it, so it must NOT come from a .server file.
+import { formatMinor } from "../utils/money";
 
 // ── date windows (IST) ───────────────────────────────────────────────────────
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;

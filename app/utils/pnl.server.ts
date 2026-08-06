@@ -95,17 +95,9 @@ export function toMinor(amount: unknown): bigint {
   return neg ? -minor : minor;
 }
 
-/** Format integer paise as a rupee string, e.g. 105000n -> "1,050.00". Display
- *  edge only — never used in math. */
-export function formatMinor(minor: bigint, currency = "INR"): string {
-  const neg = minor < 0n;
-  const abs = neg ? -minor : minor;
-  const rupees = abs / 100n;
-  const paise = abs % 100n;
-  const rupeeStr = new Intl.NumberFormat("en-IN").format(rupees);
-  const sym = currency === "INR" ? "₹" : "";
-  return `${neg ? "-" : ""}${sym}${rupeeStr}.${paise.toString().padStart(2, "0")}`;
-}
+// formatMinor lives in the plain (non-.server) money.ts so the client can use
+// it; re-exported here for server callers that import it from this module.
+export { formatMinor } from "./money";
 
 /** Extract the AWB + carrier from an order's fulfillments (first tracking
  *  number wins). Carrier name is normalised to our two known carriers. */
