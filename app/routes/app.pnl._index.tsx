@@ -200,7 +200,9 @@ export function ErrorBoundary() {
             <BlockStack gap="200">
               <Text as="p"><strong>{msg}</strong></Text>
               <Box background="bg-surface-secondary" padding="200">
-                <Text as="pre" variant="bodySm">{String(stack).slice(0, 1500)}</Text>
+                <pre style={{ whiteSpace: "pre-wrap", fontSize: 12, margin: 0 }}>
+                  {String(stack).slice(0, 1500)}
+                </pre>
               </Box>
             </BlockStack>
           </Banner>
