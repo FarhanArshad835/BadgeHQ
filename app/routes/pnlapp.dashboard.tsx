@@ -160,20 +160,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   try {
     const result = await runStandaloneSync({
-      maxPages: 6,
-      timeBudgetMs: 7_000,
-      deliveryLimit: 8,
+      maxPages: 4,
+      timeBudgetMs: 5_000,
+      deliveryLimit: 60, // bulk path (one Shiprocket auth) resolves ~60 AWBs/click
       shippingLimit: 20,
     });
     if ("error" in result) {
       return json({ ok: false, message: "Add your Shopify store domain and token in Settings first." }, { status: 400 });
     }
     const tail = result.done
-      ? " All caught up."
-      : " More orders remain; press Sync again to continue, or let the nightly sync finish.";
+      ? " Order pull is caught up."
+      : " More orders remain; press Sync again, or let the nightly sync finish.";
     return json({
       ok: true,
-      message: `Synced ${result.orders} more orders (${result.delivered} delivered, ${result.rto} RTO this pass).${tail}`,
+      message:
+        `Pulled ${result.orders} orders; resolved delivery status for this pass ` +
+        `(${result.delivered} delivered, ${result.rto} RTO).${tail}`,
     });
   } catch (e: any) {
     const raw = String(e?.message || e);
