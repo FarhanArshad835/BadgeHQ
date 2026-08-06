@@ -14,6 +14,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     shiprocketEmail: app.shiprocketEmail,
     hasShiprocketPassword: Boolean(app.shiprocketPassword),
     hasDelhiveryKey: Boolean(app.delhiveryApiKey),
+    metaAdAccountId: app.metaAdAccountId,
+    hasMetaToken: Boolean(app.metaAccessToken),
   });
 };
 
@@ -29,6 +31,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const shiprocketEmail = String(form.get("shiprocketEmail") || "").trim();
   const shiprocketPassword = String(form.get("shiprocketPassword") || "").trim();
   const delhiveryApiKey = String(form.get("delhiveryApiKey") || "").trim();
+  const metaAdAccountId = String(form.get("metaAdAccountId") || "").trim();
+  const metaAccessToken = String(form.get("metaAccessToken") || "").trim();
 
   const existing = await getPnlApp();
   const effectiveToken = adminToken || existing.adminToken;
@@ -44,9 +48,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     data: {
       shopDomain,
       shiprocketEmail,
+      metaAdAccountId,
       ...(adminToken ? { adminToken } : {}),
       ...(shiprocketPassword ? { shiprocketPassword } : {}),
       ...(delhiveryApiKey ? { delhiveryApiKey } : {}),
+      ...(metaAccessToken ? { metaAccessToken } : {}),
     },
   });
 
@@ -107,6 +113,15 @@ export default function PnlSettings() {
             name="delhiveryApiKey"
             type="password"
             placeholder={d.hasDelhiveryKey ? "•••••••• saved" : "Delhivery token"}
+          />
+          <hr className="pnl-rule" />
+          <div className="pnl-section-label">Meta ad spend (for the ad-spend line)</div>
+          <Field label="Meta ad account id" name="metaAdAccountId" defaultValue={d.metaAdAccountId} placeholder="act_908549380106884" />
+          <Field
+            label="Meta access token (ads_read)"
+            name="metaAccessToken"
+            type="password"
+            placeholder={d.hasMetaToken ? "•••••••• saved" : "EAAG… (ads_read token)"}
           />
           <button type="submit" className="pnl-btn pnl-btn-primary" style={{ marginTop: 4, alignSelf: "flex-start" }}>
             Save

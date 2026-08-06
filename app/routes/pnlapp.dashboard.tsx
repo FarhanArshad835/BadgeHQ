@@ -5,7 +5,8 @@ import { useEffect, useRef, useState } from "react";
 import prisma from "../db.server";
 import { formatMinor } from "../utils/money";
 import { getPnlApp, isAuthed, runStandaloneSync } from "../utils/pnl-app.server";
-import { computeMonth, monthWindowIst } from "../utils/monthly-pnl.server";
+import { computeMonth } from "../utils/monthly-pnl.server";
+import { toMinor } from "../utils/pnl.server";
 import { PnlStyles } from "../utils/pnl-styles";
 
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
@@ -42,10 +43,24 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const requested = url.searchParams.get("month") || "";
   const month = months.includes(requested) ? requested : months[0];
 
+  // Human labels computed server-side so the client never imports a .server
+  // module (importing monthWindowIst into the component breaks the Remix build).
+  const labelFor = (m: string) => {
+    const [y, mm] = m.split("-").map(Number);
+    return new Date(Date.UTC(y, mm - 1, 1)).toLocaleDateString("en-IN", { timeZone: "UTC", month: "long", year: "numeric" });
+  };
+  const monthLabels: Record<string, string> = {};
+  for (const m of months) monthLabels[m] = labelFor(m);
+
   const report = shop ? await computeMonth(shop, month) : null;
+  const monthInput = shop
+    ? await prisma.pnlMonthlyInput.findUnique({ where: { shop_month: { shop, month } } })
+    : null;
 
   // BigInt → string at the JSON boundary. `s` maps a bigint|null to string|null.
   const s = (v: bigint | null | undefined) => (v == null ? null : v.toString());
+  // Rupee string for prefilling inputs (paise → "1234.56").
+  const rupees = (v: bigint | null | undefined) => (v == null ? "" : (Number(v) / 100).toString());
   const r = report;
 
   const lastSyncCount = Number((app.lastSyncStatus.match(/synced (\d+)/i) || [])[1] || 0);
@@ -53,11 +68,18 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   return json({
     configured,
     months,
+    monthLabels,
     month,
     currency: "INR",
     lastSyncAt: app.lastSyncAt,
     lastSyncCount,
     metaConnected: Boolean(app.metaAccessToken && app.metaAdAccountId),
+    monthInput: {
+      overhead: rupees(monthInput?.overheadMinor),
+      returnExchangeFees: rupees(monthInput?.returnExchangeFeesMinor),
+      adSpendOverride: rupees(monthInput?.adSpendOverrideMinor),
+      freightOverride: rupees(monthInput?.freightOverrideMinor),
+    },
     report: r && {
       publishStatus: r.publishStatus,
       pendingReasons: r.pendingReasons,
@@ -109,6 +131,33 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (!app.shopDomain || !app.adminToken) {
     return json({ ok: false, message: "Add your Shopify store domain and token in Settings first." }, { status: 400 });
   }
+
+  const form = await request.formData();
+  const intent = String(form.get("intent") || "sync");
+
+  // Save the per-month manual inputs (overhead, fees, optional overrides).
+  if (intent === "save-inputs") {
+    const month = String(form.get("month") || "");
+    if (!/^\d{4}-\d{2}$/.test(month)) {
+      return json({ ok: false, message: "Bad month." }, { status: 400 });
+    }
+    // Parse rupee inputs → paise; blank overrides become null (use the auto value).
+    const money = (name: string) => {
+      const v = String(form.get(name) || "").trim();
+      return v === "" ? null : toMinor(v);
+    };
+    const overheadMinor = money("overhead") ?? 0n;
+    const returnExchangeFeesMinor = money("returnExchangeFees") ?? 0n;
+    const adSpendOverrideMinor = money("adSpendOverride");
+    const freightOverrideMinor = money("freightOverride");
+    await prisma.pnlMonthlyInput.upsert({
+      where: { shop_month: { shop: app.shopDomain, month } },
+      create: { shop: app.shopDomain, month, overheadMinor, returnExchangeFeesMinor, adSpendOverrideMinor, freightOverrideMinor },
+      update: { overheadMinor, returnExchangeFeesMinor, adSpendOverrideMinor, freightOverrideMinor },
+    });
+    return json({ ok: true, message: `Saved inputs for ${month}.` });
+  }
+
   try {
     const result = await runStandaloneSync({
       maxPages: 6,
@@ -146,7 +195,10 @@ export default function PnlDashboard() {
   const actionData = useActionData<typeof action>();
   const nav = useNavigation();
   const [searchParams, setSearchParams] = useSearchParams();
-  const syncing = nav.state === "submitting" && nav.formMethod === "POST";
+  // Distinguish the Sync POST from the save-inputs POST so the progress spinner
+  // only shows for an actual sync.
+  const submittingIntent = nav.formData?.get("intent");
+  const syncing = nav.state === "submitting" && nav.formMethod === "POST" && submittingIntent !== "save-inputs";
   const busy = nav.state !== "idle";
 
   // Live progress while a sync runs (client-side, no polling). Eases toward last
@@ -171,14 +223,7 @@ export default function PnlDashboard() {
 
   const NIL = "-";
   const fmt = (m: string | null | undefined, p = NIL) => (m == null ? p : formatMinor(BigInt(m), d.currency));
-  const monthLabel = (m: string) => {
-    const { start } = monthWindowIst(m);
-    return new Date(start.getTime() + IST_OFFSET_MS).toLocaleDateString("en-IN", {
-      timeZone: "UTC",
-      month: "long",
-      year: "numeric",
-    });
-  };
+  const monthLabel = (m: string) => d.monthLabels[m] ?? m;
   const r = d.report;
   const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
 
@@ -296,6 +341,26 @@ export default function PnlDashboard() {
           </>
         )}
 
+        {/* Per-month manual inputs (the few numbers no API provides). */}
+        {r && (
+          <div className="pnl-panel" style={{ marginTop: 20 }}>
+            <div className="pnl-section-label">Inputs for {monthLabel(d.month)} (₹)</div>
+            <Form method="post" className="pnl-form">
+              <input type="hidden" name="intent" value="save-inputs" />
+              <input type="hidden" name="month" value={d.month} />
+              <div className="pnl-grid2">
+                <MoneyField label="Overhead (Shopify + apps + Doubletick)" name="overhead" defaultValue={d.monthInput.overhead} />
+                <MoneyField label="Return / exchange fees collected" name="returnExchangeFees" defaultValue={d.monthInput.returnExchangeFees} />
+                <MoneyField label="Ad spend override (blank = use Meta)" name="adSpendOverride" defaultValue={d.monthInput.adSpendOverride} />
+                <MoneyField label="Freight override (blank = use carriers)" name="freightOverride" defaultValue={d.monthInput.freightOverride} />
+              </div>
+              <button type="submit" className="pnl-btn" style={{ marginTop: 12, alignSelf: "flex-start" }} disabled={busy}>
+                Save month inputs
+              </button>
+            </Form>
+          </div>
+        )}
+
         {r && r.placedOrders === 0 && (
           <div className="pnl-empty">No orders synced for {monthLabel(d.month)} yet. Press <strong>Sync now</strong>.</div>
         )}
@@ -325,6 +390,15 @@ function StatusBanner({ report, monthLabel }: { report: any; monthLabel: string 
         <> Net P&L is suppressed until these are known: {report.pendingReasons.join("; ")}.</>
       )}
     </div>
+  );
+}
+
+function MoneyField({ label, name, defaultValue }: { label: string; name: string; defaultValue: string }) {
+  return (
+    <label className="pnl-field">
+      <span className="pnl-field-label">{label}</span>
+      <input className="pnl-input" type="text" inputMode="decimal" name={name} defaultValue={defaultValue} placeholder="0.00" autoComplete="off" />
+    </label>
   );
 }
 
