@@ -40,7 +40,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     results["standalone"] = await runStandaloneSync({
       maxPages: 400,
       timeBudgetMs: STANDALONE_TIME_BUDGET_MS,
-      deliveryLimit: 150,
+      deliveryLimit: 800, // bulk path (one auth reused) clears the backlog fast
       shippingLimit: 200,
     });
   } catch (e: any) {

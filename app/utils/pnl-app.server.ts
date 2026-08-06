@@ -14,7 +14,7 @@
 import crypto from "node:crypto";
 import prisma from "../db.server";
 import type { AdminGraphql } from "./pnl.server";
-import { syncRevenueAndCogs, backfillShipping, backfillDelivery } from "./pnl-sync.server";
+import { syncRevenueAndCogs, backfillShipping, backfillDelivery, backfillDeliveryBulk } from "./pnl-sync.server";
 
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 function istDaysAgoStart(days: number): Date {
@@ -175,10 +175,21 @@ export async function runStandaloneSync(opts: {
     delhiveryApiKey: app.delhiveryApiKey,
   };
 
-  // Delivery outcome (delivered/RTO) is the basis of the monthly P&L, so resolve
-  // it every run for orders not yet terminal. Bounded so it stays within budget:
-  // the button passes a small limit, the cron a large one (~0.3s/carrier call).
-  const dv = await backfillDelivery(app.shopDomain, { limit: opts.deliveryLimit ?? 120, carrier });
+  // Delivery outcome (delivered/RTO) is the basis of the monthly P&L. Use the
+  // BULK path (one Shiprocket auth reused across AWBs) — far faster than the
+  // per-AWB path for the initial catch-up of thousands of orders.
+  let dv = { delivered: 0, rto: 0 };
+  if (app.shiprocketEmail && app.shiprocketPassword) {
+    const b = await backfillDeliveryBulk(app.shopDomain, {
+      limit: opts.deliveryLimit ?? 120,
+      shiprocketEmail: app.shiprocketEmail,
+      shiprocketPassword: app.shiprocketPassword,
+    });
+    dv = { delivered: b.delivered, rto: b.rto };
+  } else {
+    const b = await backfillDelivery(app.shopDomain, { limit: opts.deliveryLimit ?? 120, carrier });
+    dv = { delivered: b.delivered, rto: b.rto };
+  }
   const bf = await backfillShipping(app.shopDomain, { limit: opts.shippingLimit ?? 200, carrier });
 
   return {

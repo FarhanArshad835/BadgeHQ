@@ -24,6 +24,7 @@ import { resolveBilling } from "./carrier-billing.server";
 import { trackParcel, type TrackingResult } from "./tracking.server";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const SHIPROCKET_BASE_URL_TRACK = "https://apiv2.shiprocket.in/v1/external";
 
 /** dataComplete = COGS fully known AND shipping resolved to a real billed cost. */
 function isDataComplete(cogsComplete: boolean, shippingStatus: string): boolean {
@@ -430,4 +431,93 @@ export async function backfillDelivery(
   }
 
   return { checked: toCheck.length, delivered, rto, inTransit, noAwb };
+}
+
+/**
+ * High-throughput delivery backfill for the initial catch-up (thousands of
+ * AWBs). The per-AWB path (backfillDelivery → trackParcel) re-authenticates to
+ * Shiprocket on EVERY call, which is far too slow for a big backlog. This
+ * authenticates ONCE and reuses the token, tracking each AWB directly, with
+ * light pacing. Same classification (classifyDelivery) → same outcomes.
+ *
+ * Shiprocket-only (that's where the AWBs live). Orders it can't resolve stay
+ * as-is to retry. Returns per-outcome counts.
+ */
+export async function backfillDeliveryBulk(
+  shop: string,
+  opts: { limit?: number; shiprocketEmail: string; shiprocketPassword: string; sleepMs?: number },
+): Promise<{ checked: number; delivered: number; rto: number; other: number; unresolved: number }> {
+  const limit = opts.limit ?? 500;
+  const sleepMs = opts.sleepMs ?? 120;
+
+  // No AWB → cheap bulk mark, no carrier call.
+  await prisma.orderFinancials.updateMany({
+    where: { shop, awb: "", deliveryStatus: "unknown" },
+    data: { deliveryStatus: "no-awb", deliverySyncedAt: new Date() },
+  });
+
+  // Authenticate once.
+  const authRes = await fetch(`${SHIPROCKET_BASE_URL_TRACK}/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: opts.shiprocketEmail, password: opts.shiprocketPassword }),
+    signal: AbortSignal.timeout(10000),
+  });
+  const auth = await authRes.json().catch(() => ({}));
+  if (!auth?.token) return { checked: 0, delivered: 0, rto: 0, other: 0, unresolved: 0 };
+  const token = String(auth.token);
+
+  const toCheck = await prisma.orderFinancials.findMany({
+    where: { shop, awb: { not: "" }, deliveryStatus: { in: ["unknown", "in_transit", "rto_in_transit", "unresolved"] } },
+    orderBy: { orderCreatedAt: "asc" },
+    take: limit,
+    select: { id: true, awb: true },
+  });
+
+  let delivered = 0;
+  let rto = 0;
+  let other = 0;
+  let unresolved = 0;
+  for (const row of toCheck) {
+    let outcome: DeliveryOutcome = "unresolved";
+    try {
+      const res = await fetch(
+        `${SHIPROCKET_BASE_URL_TRACK}/courier/track/awb/${encodeURIComponent(row.awb)}`,
+        { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(10000) },
+      );
+      const data = await res.json().catch(() => ({}));
+      const td = data?.tracking_data;
+      const status = String(
+        td?.shipment_status_text ?? td?.shipment_track?.[0]?.current_status ?? "",
+      ).trim();
+      if (status) {
+        const delFlag = /\bdelivered\b/i.test(status) && !/\b(un|not\s+)delivered\b/i.test(status);
+        outcome = classifyDelivery({
+          awb: row.awb, carrier: "shiprocket", status, lastActivity: "",
+          location: "", lastUpdate: "", delivered: delFlag, failedAttempt: false,
+        });
+      }
+    } catch {
+      outcome = "unresolved";
+    }
+
+    if (outcome !== "unresolved") {
+      await prisma.orderFinancials.update({
+        where: { id: row.id },
+        data: {
+          deliveryStatus: outcome,
+          deliveredAt: outcome === "delivered" ? new Date() : null,
+          deliverySyncedAt: new Date(),
+        },
+      });
+      if (outcome === "delivered") delivered++;
+      else if (outcome === "rto") rto++;
+      else other++;
+    } else {
+      unresolved++;
+    }
+    await sleep(sleepMs);
+  }
+
+  return { checked: toCheck.length, delivered, rto, other, unresolved };
 }
