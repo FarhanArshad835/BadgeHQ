@@ -316,20 +316,25 @@ function normStatus(s: string): string {
 }
 
 /**
- * Classify a courier TrackingResult into a delivery outcome. Uses the shipment
- * `status` and latest `lastActivity` text. `delivered` from the carrier wins
- * outright. Otherwise we look for terminal RTO, then in-flight RTO, lost, and
- * cancelled, before falling back to in_transit. A status we truly can't read is
- * "unresolved" (never silently treated as not-delivered — the spec's key rule).
+ * Classify a courier TrackingResult into a delivery outcome.
+ *
+ * CRITICAL ORDERING: RTO is tested BEFORE the carrier's `delivered` flag. The
+ * carriers report "RTO Delivered" (the RETURN reached origin) with their
+ * delivered flag set — but that is an RTO, not a customer sale. Counting it as
+ * delivered would inflate delivered revenue + COGS. So terminal-RTO wins first,
+ * then the genuine delivered flag / "delivered" text, then in-flight RTO, lost,
+ * cancelled, and finally in_transit. Unreadable status → "unresolved" (never
+ * silently treated as not-delivered — the spec's key rule).
  */
 export function classifyDelivery(r: TrackingResult): DeliveryOutcome {
-  if (r.delivered) return "delivered";
   const text = normStatus(`${r.status} ${r.lastActivity}`);
+  // RTO FIRST — "rto delivered" must not be read as a customer delivery.
   if (RTO_TERMINAL_RE.test(text)) return "rto";
   if (RTO_TRANSIT_RE.test(text)) return "rto_in_transit";
+  // Genuine customer delivery (carrier flag, or a "delivered" not preceded by RTO).
+  if (r.delivered) return "delivered";
   if (LOST_RE.test(text)) return "lost";
   if (CANCELLED_RE.test(text)) return "cancelled";
-  // A real, readable moving status → in_transit; an empty/garbage one → unresolved.
   if (text) return "in_transit";
   return "unresolved";
 }
