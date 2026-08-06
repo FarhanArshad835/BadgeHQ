@@ -534,6 +534,14 @@ model OrderFinancials {
   awb               String  @default("")
   carrier           String  @default("") // shiprocket | delhivery | ""
 
+  // Delivery outcome from the carrier tracking (the DELIVERED-BASIS is the whole
+  // point of the monthly P&L: revenue/COGS/per-order metrics all key off orders
+  // that actually delivered). Derived from tracking.server.ts's delivered/RTO
+  // signals; "unknown" until the tracking backfill resolves it.
+  deliveryStatus     String    @default("unknown") // delivered | rto | in_transit | no-awb | unknown
+  deliveredAt        DateTime? // best-effort delivery timestamp when the carrier reports it
+  deliverySyncedAt   DateTime?
+
   // Bookkeeping.
   financialStatus   String   @default("")
   fulfillmentStatus String   @default("")
@@ -547,6 +555,7 @@ model OrderFinancials {
   @@unique([shop, orderId])
   @@index([shop, orderCreatedAt])
   @@index([shop, shippingStatus])
+  @@index([shop, deliveryStatus])
   @@index([awb])
 }
 
@@ -590,9 +599,18 @@ model PnlApp {
   shiprocketEmail    String @default("")
   shiprocketPassword String @default("")
   delhiveryApiKey    String @default("")
-  // Meta Ads (Phase 2).
+  // Meta Ads — direct Meta Marketing API (ads_read token), not Supermetrics.
   metaAccessToken String  @default("")
-  metaAdAccountId String  @default("")
+  metaAdAccountId String  @default("") // e.g. "act_908549380106884"
+
+  // Monthly-P&L config knobs (the method's fixed rates; editable in Settings so
+  // they're never hard-coded estimates the merchant can't see or change).
+  opsPerPairMinor     BigInt @default(2500)  // Operations cost per delivered pair (₹25)
+  gstOutputRateBp     Int    @default(487)   // Output GST on delivered revenue, basis points (4.87%)
+  gstInputRateNumer   Int    @default(18)    // ITC on (freight+ads+overhead): ×18/118
+  gstInputRateDenom   Int    @default(118)
+  maturityDays        Int    @default(12)    // wait this many days after month-end before the month is "matured"
+
   // Resumable sync state. The nightly cron chunks a large backlog across runs:
   // it saves where it stopped (syncCursor) within a window (syncWindowStart /
   // syncWindowEnd) and resumes there next run, so no single invocation runs
@@ -604,4 +622,82 @@ model PnlApp {
   lastSyncStatus String   @default("")
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+}
+
+/// Per-month MANUAL inputs for the monthly P&L — the few numbers that can't be
+/// pulled from an API (or that the user wants to override). One row per month.
+/// Money in minor units (paise) BigInt. Null override = "use the auto value".
+model PnlMonthlyInput {
+  id        String @id @default(cuid())
+  shop      String
+  month     String // "YYYY-MM" (IST calendar month)
+
+  // Overhead: Shopify subscription + apps + billing + Doubletick fees. A real
+  // invoiced figure the merchant enters; never estimated.
+  overheadMinor           BigInt @default(0)
+  // Return/exchange fees collected (added back in the assembly).
+  returnExchangeFeesMinor BigInt @default(0)
+  // Optional overrides for values that are normally auto. Null = use auto.
+  adSpendOverrideMinor    BigInt? // if the Meta pull is unavailable/wrong for a month
+  freightOverrideMinor    BigInt? // if the carrier freight can't be resolved
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([shop, month])
+}
+
+/// Computed monthly-P&L report cache (the full 8-step assembly for one month).
+/// Every money field is minor units (paise) BigInt. A field is null when its
+/// input is not yet known (e.g. freight pending) — NEVER estimated. `complete`
+/// flags whether every cost was resolved, so the headline is trustworthy.
+model PnlMonthlyReport {
+  id        String @id @default(cuid())
+  shop      String
+  month     String // "YYYY-MM"
+
+  // Revenue side.
+  grossSaleMinor           BigInt @default(0) // MRP × units, pre-discount
+  discountsMinor           BigInt @default(0)
+  netPlacedRevenueMinor    BigInt @default(0) // gross − discounts
+  deliveredRevenueMinor    BigInt @default(0)
+  cancelledRtoRevenueMinor BigInt @default(0) // netPlaced − delivered
+  refundsMinor             BigInt @default(0)
+  netSaleMinor             BigInt @default(0) // delivered − refunds
+
+  // Counts (delivered basis).
+  placedOrders    Int @default(0)
+  deliveredOrders Int @default(0)
+  rtoOrders       Int @default(0)
+  inTransitOrders Int @default(0)
+  deliveredPairs  Int @default(0) // qty sum on delivered orders
+
+  // Costs. Null = pending / not yet known (never estimated).
+  cogsMinor     BigInt? // Σ(cost-per-item × delivered qty); null if any missing
+  cogsComplete  Boolean @default(false)
+  freightMinor  BigInt? // deduped carrier freight; null until resolved
+  freightSource String  @default("") // "auto" | "manual" | "pending"
+  adSpendMinor  BigInt? // Meta month total; null until pulled
+  adSpendSource String  @default("") // "meta" | "manual" | "pending"
+  opsMinor      BigInt  @default(0) // ₹25 × delivered pairs
+  overheadMinor BigInt  @default(0) // from PnlMonthlyInput
+
+  // GST.
+  gstOutputMinor BigInt  @default(0) // delivered revenue × output rate (backed out)
+  gstInputMinor  BigInt? // (freight+ads+overhead) × 18/118; null if inputs pending
+  netGstMinor    BigInt? // ITC − output
+
+  returnExchangeFeesMinor BigInt @default(0)
+
+  // Bottom line. Null if any required cost is still pending.
+  netPnlMinor BigInt?
+  complete    Boolean @default(false) // all costs resolved → headline trustworthy
+  matured     Boolean @default(false) // month-end + maturityDays has passed
+
+  computedAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([shop, month])
+  @@index([shop, month])
 }
