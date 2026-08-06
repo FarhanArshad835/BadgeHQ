@@ -181,8 +181,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       message: `Synced ${rc.orders} orders. Shipping billed for ${bf.billed}, ${bf.stillPending} still pending.`,
     });
   } catch (e: any) {
+    const raw = String(e?.message || e);
     console.error("[pnl] sync failed", e);
-    return json({ ok: false, message: "Sync failed. Check that carrier and Shopify access are set up." }, { status: 500 });
+    // The big one: Shopify blocks ALL Order access without Protected Customer
+    // Data approval — not just name/address. Give the merchant the real reason
+    // and the fix, not a vague "check your setup".
+    const isPcd = /not approved to access the Order|protected-customer-data/i.test(raw);
+    const message = isPcd
+      ? "Shopify hasn't approved this app to read orders yet (Protected Customer Data). " +
+        "Revenue, COGS and shipping all come from your orders, so the P&L can't sync until " +
+        "that's granted. Request approval in the Partner Dashboard → your app → API access → " +
+        "Protected customer data, then sync again."
+      : "Sync failed: " + raw.slice(0, 200);
+    return json({ ok: false, message }, { status: 500 });
   }
 };
 
@@ -365,12 +376,27 @@ export default function PnlPage() {
 
             {d.completeness.total === 0 && (
               <Card>
-                <BlockStack gap="200">
+                <BlockStack gap="300">
                   <Text as="h2" variant="headingMd">No data yet</Text>
+                  <Banner tone="warning" title="Shopify order access needs approval first">
+                    <BlockStack gap="200">
+                      <Text as="p">
+                        The P&amp;L reads your orders to work out revenue, COGS and shipping. Shopify gates all order
+                        access behind <strong>Protected Customer Data (PCD)</strong> approval, and this app isn&apos;t
+                        approved yet — so <strong>Sync now</strong> will fail until it is. This is the same approval
+                        that order cancellation is waiting on.
+                      </Text>
+                      <Text as="p" variant="bodySm">
+                        To grant it: Partner Dashboard → your app → <strong>API access</strong> →
+                        <strong> Protected customer data</strong> → request access (data you need: orders, for financial
+                        reporting). Once approved, press Sync now and the P&amp;L fills in.
+                      </Text>
+                    </BlockStack>
+                  </Banner>
                   <Text as="p" tone="subdued">
-                    Press <strong>Sync now</strong> to pull orders for this period. For accurate profit, set the
-                    <strong> Cost per item</strong> on your Shopify products (without it, COGS shows “Set cost”, never zero),
-                    and make sure your Shiprocket / Delhivery credentials are saved in the relevant settings pages.
+                    Also, for accurate profit set the <strong>Cost per item</strong> on your Shopify products
+                    (without it, COGS shows “Set cost”, never zero), and make sure your Shiprocket / Delhivery
+                    credentials are saved in the relevant settings pages.
                   </Text>
                   <Divider />
                   <Text as="p" tone="subdued" variant="bodySm">
