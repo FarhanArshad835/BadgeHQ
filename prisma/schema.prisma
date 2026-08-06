@@ -593,6 +593,13 @@ model PnlApp {
   // Meta Ads (Phase 2).
   metaAccessToken String  @default("")
   metaAdAccountId String  @default("")
+  // Resumable sync state. The nightly cron chunks a large backlog across runs:
+  // it saves where it stopped (syncCursor) within a window (syncWindowStart /
+  // syncWindowEnd) and resumes there next run, so no single invocation runs
+  // unbounded (Vercel timeout) or keeps Neon awake longer than needed.
+  syncCursor      String?   // Shopify page cursor to resume from; null = window done
+  syncWindowStart DateTime? // start of the window currently being paged
+  syncWindowEnd   DateTime? // end of that window
   lastSyncAt     DateTime?
   lastSyncStatus String   @default("")
   createdAt      DateTime @default(now())

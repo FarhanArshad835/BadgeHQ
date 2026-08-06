@@ -23,6 +23,10 @@ const WINDOWS: Record<string, { label: string; since: () => Date }> = {
   "90d": { label: "Last 90 days", since: () => istDayStart(89) },
 };
 
+// Headroom for the bounded on-click sync (a ~7s sync budget + backfill pacing).
+// It only bills for time actually used; the budget keeps that to ~10s.
+export const config = { maxDuration: 60 };
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (!isAuthed(request)) return redirect("/pnl-app/login");
   const app = await getPnlApp();
@@ -127,7 +131,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   try {
     const admin = tokenAdmin(app.shopDomain, app.adminToken);
-    const rc = await syncRevenueAndCogs(admin, app.shopDomain, { since, until, maxPages: 20 });
+    // Bounded on-click sync: a store can do thousands of orders in a window, which
+    // can't finish in one serverless request and would run up Neon compute. So we
+    // sync at most a few pages within a short time budget (always returns in
+    // time, touches Neon only briefly). If there's more, the nightly cron — which
+    // chunks and resumes across runs — finishes the rest. Writes are batched.
+    const rc = await syncRevenueAndCogs(admin, app.shopDomain, {
+      since,
+      until,
+      maxPages: 6,
+      timeBudgetMs: 7_000,
+    });
     const bf = await backfillShipping(app.shopDomain, {
       limit: 40,
       carrier: {
@@ -140,7 +154,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       where: { id: "default" },
       data: { lastSyncAt: new Date(), lastSyncStatus: `synced ${rc.orders} orders` },
     });
-    return json({ ok: true, message: `Synced ${rc.orders} orders. Shipping billed for ${bf.billed}, ${bf.stillPending} pending.` });
+    const tail = rc.done
+      ? ` Shipping billed for ${bf.billed}, ${bf.stillPending} pending.`
+      : " More orders remain; the nightly sync will finish the rest (or press Sync again).";
+    return json({ ok: true, message: `Synced ${rc.orders} orders this pass.${tail}` });
   } catch (e: any) {
     const raw = String(e?.message || e);
     const isPcd = /not approved to access the Order|protected-customer-data/i.test(raw);

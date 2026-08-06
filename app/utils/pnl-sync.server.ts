@@ -11,6 +11,8 @@
  *
  * No estimates: a cost that isn't known stays null. Money is bigint paise.
  */
+import { randomUUID } from "node:crypto";
+import { Prisma } from "@prisma/client";
 import prisma from "../db.server";
 import {
   fetchOrdersPage,
@@ -28,24 +30,39 @@ function isDataComplete(cogsComplete: boolean, shippingStatus: string): boolean 
 }
 
 /**
- * Sync revenue + COGS for all orders created in [since, until]. Upserts one
+ * Sync revenue + COGS for orders created in [since, until]. Upserts one
  * OrderFinancials row per order and replaces its OrderLineFinancials. Shipping
  * is initialised to "pending" (or "no-awb" when there's no tracking number yet)
  * and filled later by backfillShipping.
  *
- * Paces on Shopify's cost-based throttle: when the available budget runs low it
- * sleeps until it refills, so a big window never 429s.
+ * CHUNKABLE + TIME-BUDGETED. A store doing ~2000 orders/week can't sync in one
+ * serverless invocation, and hammering it also runs up Neon compute hours. So:
+ *   - pass `startCursor` to resume where a previous run stopped (null = start),
+ *   - the run stops early when it nears `timeBudgetMs` and returns `nextCursor`
+ *     + `done:false` so the caller can persist the cursor and resume next time,
+ *   - writes are BATCHED per page (a handful of round-trips per 50 orders,
+ *     not ~4 per order), which is the main lever on Neon active time.
+ *
+ * Paces on Shopify's cost throttle so a big window never 429s.
  */
 export async function syncRevenueAndCogs(
   admin: AdminGraphql,
   shop: string,
-  opts: { since: Date; until: Date; maxPages?: number },
-): Promise<{ orders: number; pages: number }> {
+  opts: {
+    since: Date;
+    until: Date;
+    maxPages?: number;
+    startCursor?: string | null;
+    timeBudgetMs?: number;
+  },
+): Promise<{ orders: number; pages: number; nextCursor: string | null; done: boolean }> {
   const createdAtMin = opts.since.toISOString();
   const createdAtMax = opts.until.toISOString();
   const maxPages = opts.maxPages ?? 40;
+  const timeBudgetMs = opts.timeBudgetMs ?? Infinity;
+  const startedAt = Date.now();
 
-  let cursor: string | null = null;
+  let cursor: string | null = opts.startCursor ?? null;
   let pages = 0;
   let orders = 0;
 
@@ -57,14 +74,19 @@ export async function syncRevenueAndCogs(
     });
     pages++;
 
-    for (const node of nodes) {
-      const c = computeOrderFinancials(node);
-      await upsertOrderFinancials(shop, c);
-      orders++;
-    }
+    // Batch-write the whole page (see writeOrderPage) rather than per order.
+    await writeOrderPage(shop, nodes.map(computeOrderFinancials));
+    orders += nodes.length;
 
-    if (!nextCursor) break;
+    if (!nextCursor) {
+      return { orders, pages, nextCursor: null, done: true };
+    }
     cursor = nextCursor;
+
+    // Stop early if we're near the time budget — persist `cursor` and resume.
+    if (Date.now() - startedAt >= timeBudgetMs) {
+      return { orders, pages, nextCursor: cursor, done: false };
+    }
 
     // Pace on the GraphQL cost budget: if we're low, wait for it to refill
     // (~50 points/sec on standard). Cheap insurance against 429s on big windows.
@@ -73,71 +95,100 @@ export async function syncRevenueAndCogs(
     }
   }
 
-  return { orders, pages };
+  // Hit the page cap with more to go.
+  return { orders, pages, nextCursor: cursor, done: false };
 }
 
-/** Upsert one order's financials + replace its line rows. */
-async function upsertOrderFinancials(shop: string, c: OrderFinancialsComputed): Promise<void> {
+/**
+ * Write a whole page of orders (~50) in a FEW round-trips, not ~4 per order.
+ * This is the main lever on Neon compute hours and on the request staying under
+ * the serverless timeout.
+ *
+ * The naive `prisma.$transaction([...upserts])` looks batched but is NOT: Prisma
+ * runs each upsert as its own SELECT-then-write, serially, so 50 upserts = ~100
+ * sequential round-trips to Neon (measured at ~13s from a warm connection). So
+ * instead the whole page is written with:
+ *   - ONE parameterised `INSERT ... ON CONFLICT DO UPDATE` for OrderFinancials
+ *     (preserving an already-backfilled shipping cost/status via COALESCE),
+ *   - ONE bulk `deleteMany` + ONE `createMany` for the line rows.
+ * That's ~3 round-trips per page regardless of order count.
+ */
+async function writeOrderPage(shop: string, computed: OrderFinancialsComputed[]): Promise<void> {
+  if (!computed.length) return;
   const now = new Date();
-  const existing = await prisma.orderFinancials.findUnique({
-    where: { shop_orderId: { shop, orderId: c.orderId } },
-    select: { shippingStatus: true, shippingCostMinor: true },
+
+  // One statement: bulk upsert. On conflict we keep any shipping cost/status the
+  // backfill already set (COALESCE on the existing row), and recompute
+  // dataComplete from the merged shipping status in SQL.
+  const rows = computed.map((c) => {
+    const initialShippingStatus = c.awb ? "pending" : "no-awb";
+    return Prisma.sql`(
+      ${randomUUID()}, ${shop}, ${c.orderId}, ${c.orderName}, ${c.orderCreatedAt}, ${c.currency},
+      ${c.grossRevenueMinor}, ${c.refundsMinor}, ${c.discountsMinor},
+      ${c.cogsMinor}, ${c.cogsComplete},
+      ${initialShippingStatus}, ${c.awb}, ${c.carrier},
+      ${c.financialStatus}, ${c.fulfillmentStatus},
+      ${c.cogsComplete}, ${now}, ${now}, ${now}
+    )`;
   });
 
-  // Preserve any shipping cost already backfilled; only (re)derive the initial
-  // shipping STATUS from whether we now have an AWB.
-  const shippingStatus =
-    existing?.shippingCostMinor != null
-      ? existing.shippingStatus
-      : c.awb
-      ? "pending"
-      : "no-awb";
-  const shippingCostMinor = existing?.shippingCostMinor ?? null;
-  const dataComplete = isDataComplete(c.cogsComplete, shippingStatus);
+  // NOTE: column order below must match the VALUES tuples above.
+  await prisma.$executeRaw`
+    INSERT INTO "OrderFinancials" (
+      "id", "shop", "orderId", "orderName", "orderCreatedAt", "currency",
+      "grossRevenueMinor", "refundsMinor", "discountsMinor",
+      "cogsMinor", "cogsComplete",
+      "shippingStatus", "awb", "carrier",
+      "financialStatus", "fulfillmentStatus",
+      "dataComplete", "revenueSyncedAt", "cogsSyncedAt", "updatedAt"
+    )
+    VALUES ${Prisma.join(rows)}
+    ON CONFLICT ("shop", "orderId") DO UPDATE SET
+      "orderName"         = EXCLUDED."orderName",
+      "orderCreatedAt"    = EXCLUDED."orderCreatedAt",
+      "currency"          = EXCLUDED."currency",
+      "grossRevenueMinor" = EXCLUDED."grossRevenueMinor",
+      "refundsMinor"      = EXCLUDED."refundsMinor",
+      "discountsMinor"    = EXCLUDED."discountsMinor",
+      "cogsMinor"         = EXCLUDED."cogsMinor",
+      "cogsComplete"      = EXCLUDED."cogsComplete",
+      -- Preserve a shipping cost/status the backfill already resolved.
+      "shippingStatus"    = CASE WHEN "OrderFinancials"."shippingCostMinor" IS NOT NULL
+                                 THEN "OrderFinancials"."shippingStatus"
+                                 ELSE EXCLUDED."shippingStatus" END,
+      "awb"               = EXCLUDED."awb",
+      "carrier"           = EXCLUDED."carrier",
+      "financialStatus"   = EXCLUDED."financialStatus",
+      "fulfillmentStatus" = EXCLUDED."fulfillmentStatus",
+      "dataComplete"      = (EXCLUDED."cogsComplete" AND
+                             CASE WHEN "OrderFinancials"."shippingCostMinor" IS NOT NULL
+                                  THEN "OrderFinancials"."shippingStatus"
+                                  ELSE EXCLUDED."shippingStatus" END = 'billed'),
+      "revenueSyncedAt"   = EXCLUDED."revenueSyncedAt",
+      "cogsSyncedAt"      = EXCLUDED."cogsSyncedAt",
+      "updatedAt"         = EXCLUDED."updatedAt"
+  `;
 
-  const base = {
-    orderName: c.orderName,
-    orderCreatedAt: c.orderCreatedAt,
-    currency: c.currency,
-    grossRevenueMinor: c.grossRevenueMinor,
-    refundsMinor: c.refundsMinor,
-    discountsMinor: c.discountsMinor,
-    cogsMinor: c.cogsMinor,
-    cogsComplete: c.cogsComplete,
-    shippingStatus,
-    awb: c.awb,
-    carrier: c.carrier,
-    financialStatus: c.financialStatus,
-    fulfillmentStatus: c.fulfillmentStatus,
-    dataComplete,
-    revenueSyncedAt: now,
-    cogsSyncedAt: now,
-  };
-
-  await prisma.orderFinancials.upsert({
-    where: { shop_orderId: { shop, orderId: c.orderId } },
-    create: { shop, orderId: c.orderId, shippingCostMinor, ...base },
-    update: base,
-  });
-
-  // Replace line rows (cheap; keeps per-product view correct after edits).
-  await prisma.orderLineFinancials.deleteMany({ where: { shop, orderId: c.orderId } });
-  if (c.lines.length) {
-    await prisma.orderLineFinancials.createMany({
-      data: c.lines.map((l) => ({
-        shop,
-        orderId: c.orderId,
-        orderCreatedAt: c.orderCreatedAt,
-        productId: l.productId,
-        variantId: l.variantId,
-        productTitle: l.productTitle,
-        variantTitle: l.variantTitle,
-        quantity: l.quantity,
-        lineRevenueMinor: l.lineRevenueMinor,
-        lineCogsMinor: l.lineCogsMinor,
-        lineCogsComplete: l.lineCogsComplete,
-      })),
-    });
+  // Replace line rows for the whole page in two bulk statements.
+  const orderIds = computed.map((c) => c.orderId);
+  await prisma.orderLineFinancials.deleteMany({ where: { shop, orderId: { in: orderIds } } });
+  const lineData = computed.flatMap((c) =>
+    c.lines.map((l) => ({
+      shop,
+      orderId: c.orderId,
+      orderCreatedAt: c.orderCreatedAt,
+      productId: l.productId,
+      variantId: l.variantId,
+      productTitle: l.productTitle,
+      variantTitle: l.variantTitle,
+      quantity: l.quantity,
+      lineRevenueMinor: l.lineRevenueMinor,
+      lineCogsMinor: l.lineCogsMinor,
+      lineCogsComplete: l.lineCogsComplete,
+    })),
+  );
+  if (lineData.length) {
+    await prisma.orderLineFinancials.createMany({ data: lineData });
   }
 }
 

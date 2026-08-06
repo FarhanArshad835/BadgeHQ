@@ -34,7 +34,7 @@ const ORDER_PNL_FIELDS = `
   currentTotalPriceSet { shopMoney { amount currencyCode } }
   totalRefundedSet { shopMoney { amount currencyCode } }
   totalDiscountsSet { shopMoney { amount currencyCode } }
-  lineItems(first: 100) {
+  lineItems(first: 50) {
     nodes {
       quantity
       originalUnitPriceSet { shopMoney { amount } }
