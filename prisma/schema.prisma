@@ -571,3 +571,30 @@ model OrderLineFinancials {
   @@index([shop, productId, orderCreatedAt])
   @@index([shop, orderId])
 }
+
+/// Standalone P&L app config (single row, id="default"). This tool lives at
+/// /pnl-app — OUTSIDE the Shopify embedded app — and authenticates to Shopify
+/// with a CUSTOM-APP Admin API token the brand generates in their own admin.
+/// Custom apps get Protected Customer Data access automatically (no approval),
+/// so this path can read orders where the embedded BadgeHQ app cannot. All
+/// credentials are server-side only; the P&L data itself reuses the
+/// OrderFinancials/OrderLineFinancials tables keyed by the shop domain.
+model PnlApp {
+  id             String   @id @default("default")
+  // Access gate for the standalone tool (it's not behind Shopify login).
+  passwordHash   String   @default("") // scrypt/pbkdf2 hash of the shared password
+  // Shopify custom-app credentials.
+  shopDomain     String   @default("") // e.g. "b03304.myshopify.com"
+  adminToken     String   @default("") // shpat_… custom-app Admin API token
+  // Carrier credentials (actual billed shipping — verify-first, like the app).
+  shiprocketEmail    String @default("")
+  shiprocketPassword String @default("")
+  delhiveryApiKey    String @default("")
+  // Meta Ads (Phase 2).
+  metaAccessToken String  @default("")
+  metaAdAccountId String  @default("")
+  lastSyncAt     DateTime?
+  lastSyncStatus String   @default("")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}

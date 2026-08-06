@@ -149,17 +149,35 @@ async function upsertOrderFinancials(shop: string, c: OrderFinancialsComputed): 
  */
 export async function backfillShipping(
   shop: string,
-  opts: { limit?: number } = {},
+  opts: {
+    limit?: number;
+    // Standalone P&L app passes its own carrier creds (from PnlApp); the
+    // embedded app leaves these undefined and we read the AiReplySettings /
+    // DeliverySettings rows as before.
+    carrier?: {
+      shiprocketEmail?: string;
+      shiprocketPassword?: string;
+      delhiveryApiKey?: string;
+    };
+  } = {},
 ): Promise<{ checked: number; billed: number; stillPending: number }> {
   const limit = opts.limit ?? 40;
 
-  const [ai, delivery] = await Promise.all([
-    prisma.aiReplySettings.findUnique({
-      where: { shop },
-      select: { waShiprocketEmail: true, waShiprocketPassword: true },
-    }),
-    prisma.deliverySettings.findUnique({ where: { shop }, select: { apiToken: true } }),
-  ]);
+  let creds = opts.carrier;
+  if (!creds) {
+    const [ai, delivery] = await Promise.all([
+      prisma.aiReplySettings.findUnique({
+        where: { shop },
+        select: { waShiprocketEmail: true, waShiprocketPassword: true },
+      }),
+      prisma.deliverySettings.findUnique({ where: { shop }, select: { apiToken: true } }),
+    ]);
+    creds = {
+      shiprocketEmail: ai?.waShiprocketEmail,
+      shiprocketPassword: ai?.waShiprocketPassword,
+      delhiveryApiKey: delivery?.apiToken,
+    };
+  }
 
   const pending = await prisma.orderFinancials.findMany({
     where: { shop, shippingStatus: "pending", awb: { not: "" } },
@@ -174,9 +192,9 @@ export async function backfillShipping(
     const r = await resolveBilling({
       awb: row.awb,
       carrierHint: row.carrier,
-      shiprocketEmail: ai?.waShiprocketEmail || undefined,
-      shiprocketPassword: ai?.waShiprocketPassword || undefined,
-      delhiveryApiKey: delivery?.apiToken || undefined,
+      shiprocketEmail: creds.shiprocketEmail || undefined,
+      shiprocketPassword: creds.shiprocketPassword || undefined,
+      delhiveryApiKey: creds.delhiveryApiKey || undefined,
     });
 
     if (r && r !== "pending") {
