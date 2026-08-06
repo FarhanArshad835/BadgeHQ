@@ -158,3 +158,103 @@ export async function resolveBilling(opts: {
   // Known to a carrier but not billed yet → pending; otherwise unrecognised.
   return sawPending ? "pending" : null;
 }
+
+// ── Monthly freight aggregation with DEDUP (spec Phase 4) ────────────────────
+//
+// The single most error-prone number in the P&L. Two independent traps, both
+// hit in the manual build, both defended here:
+//   A) Transaction-date attribution — the Delhivery wallet debits in a different
+//      month than the parcel shipped. We attribute by SHIPMENT month (from the
+//      ledger Description JSON `sd`/`rd`), never the transaction date.
+//   B) Double-counting Delhivery — Delhivery AWBs booked via Shiprocket appear in
+//      BOTH the Delhivery wallet ledger AND the Shiprocket invoice. The wallet is
+//      authoritative for every Delhivery AWB (it's net of refund credits); the
+//      Shiprocket invoice contributes ONLY its non-Delhivery rows.
+//
+// These are PURE functions over already-fetched rows, so they're unit-testable
+// without the (still verify-gated) endpoint calls.
+
+/** Normalise a courier name to a known key. A naive "== Delhivery" misses the
+ *  real variants seen in the Shiprocket file: "Delhivery Surface/Air/Reverse
+ *  QC/DS". Substring match on the upper-cased name catches them all. */
+export function normalizeCarrier(name: string): string {
+  const n = String(name || "").toUpperCase();
+  for (const key of ["DELHIVERY", "BLUEDART", "BLUE DART", "XPRESSBEES", "EKART", "SHADOWFAX", "DTDC"]) {
+    if (n.includes(key)) return key.replace(/\s+/g, "");
+  }
+  return "OTHER";
+}
+
+/** Extract the shipment month ("YYYY-MM") from a Delhivery wallet ledger row's
+ *  Description JSON. `sd` = shipment date, `rd` = return date (RTO credits).
+ *  Returns null when it can't be parsed → the row is quarantined, NOT dropped
+ *  into a month by transaction date. */
+export function shipmentMonthFromDescription(description: unknown): string | null {
+  try {
+    const j = typeof description === "string" ? JSON.parse(description) : description;
+    const sd = (j as any)?.sd ?? (j as any)?.rd;
+    return sd ? String(sd).slice(0, 7) : null;
+  } catch {
+    return null;
+  }
+}
+
+export type WalletLedgerRow = { amountMinor: bigint; isCredit: boolean; description: unknown };
+export type ShiprocketInvoiceRow = { awb: string; courierName: string; freightMinor: bigint; shipmentMonth: string };
+
+export type MonthlyFreight = {
+  freightMinor: bigint; // deduped total for the month
+  delhiveryNetMinor: bigint; // wallet debits − credits (shipment-month)
+  otherCarriersMinor: bigint; // Shiprocket invoice, non-Delhivery only
+  quarantinedRows: number; // wallet rows with no parseable shipment month
+};
+
+/**
+ * Deduped monthly freight from the two sources. Delhivery wallet is authoritative
+ * for all Delhivery AWBs (net of credits); the Shiprocket invoice adds only its
+ * non-Delhivery rows. Both filtered to the target shipment month.
+ */
+export function aggregateMonthlyFreight(
+  month: string, // "YYYY-MM"
+  walletRows: WalletLedgerRow[],
+  invoiceRows: ShiprocketInvoiceRow[],
+): MonthlyFreight {
+  let delhiveryNetMinor = 0n;
+  let quarantinedRows = 0;
+  for (const row of walletRows) {
+    const sm = shipmentMonthFromDescription(row.description);
+    if (!sm) {
+      quarantinedRows++;
+      continue; // quarantine, never attribute by txn date
+    }
+    if (sm !== month) continue;
+    delhiveryNetMinor += row.isCredit ? -row.amountMinor : row.amountMinor;
+  }
+
+  let otherCarriersMinor = 0n;
+  for (const row of invoiceRows) {
+    if (row.shipmentMonth !== month) continue;
+    // Skip Delhivery rows — already counted (and netted) in the wallet ledger.
+    if (normalizeCarrier(row.courierName) === "DELHIVERY") continue;
+    otherCarriersMinor += row.freightMinor;
+  }
+
+  return {
+    freightMinor: delhiveryNetMinor + otherCarriersMinor,
+    delhiveryNetMinor,
+    otherCarriersMinor,
+    quarantinedRows,
+  };
+}
+
+/** Freight coverage gate (spec Gate 4): billed AWBs / shipped orders decides
+ *  whether the month's freight is FINAL, PROVISIONAL, or PENDING. Below 0.80 the
+ *  net P&L total must be suppressed — a P&L with an unknown freight line is not
+ *  a P&L. */
+export function freightCoverageStatus(billedAwbs: number, shippedOrders: number): "final" | "provisional" | "pending" {
+  if (shippedOrders <= 0) return "pending";
+  const coverage = billedAwbs / shippedOrders;
+  if (coverage >= 0.95) return "final";
+  if (coverage >= 0.8) return "provisional";
+  return "pending";
+}
