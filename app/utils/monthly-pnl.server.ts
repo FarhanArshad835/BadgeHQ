@@ -21,6 +21,8 @@
  */
 import prisma from "../db.server";
 import { isResolvedOutcome } from "./pnl-sync.server";
+import { getPnlApp } from "./pnl-app.server";
+import { fetchMetaMonthlySpend } from "./meta-ads.server";
 
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 
@@ -192,5 +194,227 @@ export async function deliveredCogs(shop: string, month: string): Promise<Delive
     deliveredPairs,
     matchRate,
     weightedAvgCostPerPairMinor,
+  };
+}
+
+// ── Phase 6: GST / Ops / Overhead ───────────────────────────────────────────
+
+/** GST output tax backed out of GST-inclusive collected revenue:
+ *    output = netSale × rate/(1+rate), rate as basis points (e.g. 487 = 4.87%).
+ *  Integer math in paise — round to nearest paisa, never a float. */
+export function gstOutput(netSaleMinor: bigint, rateBp: number): bigint {
+  // netSale × rate / (10000 + rate), with rounding.
+  const num = netSaleMinor * BigInt(rateBp);
+  const den = BigInt(10000 + rateBp);
+  return (num + den / 2n) / den;
+}
+
+/** ITC on operating expenses: (freight + ads + overhead) × numer/denom (18/118).
+ *  Null if any required input is still pending (never plug a gap). */
+export function gstInputCredit(
+  freightMinor: bigint | null,
+  adSpendMinor: bigint | null,
+  overheadMinor: bigint,
+  numer: number,
+  denom: number,
+): bigint | null {
+  if (freightMinor == null || adSpendMinor == null) return null;
+  const base = freightMinor + adSpendMinor + overheadMinor;
+  return (base * BigInt(numer) + BigInt(denom) / 2n) / BigInt(denom);
+}
+
+// ── Phase 7: assembly, metrics, publish gate ────────────────────────────────
+
+export type PublishStatus = "final" | "provisional" | "pending";
+
+export type MonthlyPnl = {
+  month: string;
+  // Revenue block.
+  grossSaleMinor: bigint;
+  discountsMinor: bigint;
+  netPlacedRevenueMinor: bigint;
+  cancelledRtoRevenueMinor: bigint;
+  refundsMinor: bigint;
+  netSaleMinor: bigint;
+  // Costs (null = PENDING, never estimated).
+  cogsMinor: bigint | null;
+  freightMinor: bigint | null;
+  freightStatus: PublishStatus;
+  adSpendMinor: bigint | null;
+  adSpendSource: string;
+  opsMinor: bigint;
+  overheadMinor: bigint;
+  overheadProvisional: boolean;
+  // GST.
+  gstOutputMinor: bigint;
+  gstInputMinor: bigint | null;
+  netGstMinor: bigint | null;
+  returnExchangeFeesMinor: bigint;
+  // Bottom line — null when any required cost is pending (suppressed).
+  netPnlMinor: bigint | null;
+  // Counts + basis.
+  placedOrders: number;
+  deliveredOrders: number;
+  rtoOrders: number;
+  inTransitOrders: number;
+  deliveredPairs: number;
+  // Per-delivered / per-pair metrics (null when netPnl is suppressed).
+  netPnlPerDeliveredOrderMinor: bigint | null;
+  netPnlPerDeliveredPairMinor: bigint | null;
+  adPerDeliveredOrderMinor: bigint | null;
+  freightPerDeliveredOrderMinor: bigint | null;
+  cogsPerPairMinor: bigint | null;
+  // Health + publish gate.
+  resolutionRate: number;
+  deliveredShareOfPlaced: number;
+  cogsMatchRate: number;
+  matured: boolean;
+  daysToMaturity: number; // <=0 means matured
+  publishStatus: PublishStatus;
+  pendingReasons: string[]; // named blockers on the report face
+};
+
+/**
+ * Assemble the full monthly P&L (spec Phase 7). Pulls revenue+delivered, COGS,
+ * ad spend (Meta, live) and freight (verify-gated → pending), applies GST/ops/
+ * overhead, and runs the publish gate. Any PENDING cost suppresses the net P&L
+ * total — "a P&L with an unknown freight line is not a P&L".
+ */
+export async function computeMonth(shop: string, month: string): Promise<MonthlyPnl> {
+  const app = await getPnlApp();
+  const [rev, cogs, input] = await Promise.all([
+    revenueAndDelivered(shop, month),
+    deliveredCogs(shop, month),
+    prisma.pnlMonthlyInput.findUnique({ where: { shop_month: { shop, month } } }),
+  ]);
+
+  const { start, end } = monthWindowIst(month);
+  // Shipped = has an AWB (delivery attempted). Used for freight coverage + ops basis check.
+  const shippedOrders = await prisma.orderFinancials.count({
+    where: { shop, orderCreatedAt: { gte: start, lt: end }, awb: { not: "" } },
+  });
+
+  // ── Ad spend (live Meta; override if the user entered one) ────────────────
+  let adSpendMinor: bigint | null = null;
+  let adSpendSource = "pending";
+  if (input?.adSpendOverrideMinor != null) {
+    adSpendMinor = input.adSpendOverrideMinor;
+    adSpendSource = "manual";
+  } else if (app.metaAccessToken && app.metaAdAccountId) {
+    const since = start.toISOString().slice(0, 10);
+    // until is inclusive in Meta's time_range → last day of the month = end − 1 day.
+    const until = new Date(end.getTime() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const r = await fetchMetaMonthlySpend({
+      accessToken: app.metaAccessToken,
+      adAccountId: app.metaAdAccountId,
+      since,
+      until,
+    });
+    if (r.ok) {
+      adSpendMinor = r.spendMinor;
+      adSpendSource = "meta";
+    }
+  }
+
+  // ── Freight (verify-gated aggregation → override or pending) ───────────────
+  let freightMinor: bigint | null = null;
+  let freightStatus: PublishStatus = "pending";
+  if (input?.freightOverrideMinor != null) {
+    freightMinor = input.freightOverrideMinor;
+    freightStatus = "final";
+  }
+  // else: the aggregation endpoints are verify-gated; freight stays pending until
+  // enabled + a coverage check runs (Phase 4 wiring lands with live accounts).
+
+  const overheadMinor = input?.overheadMinor ?? 0n;
+  const overheadProvisional = !input; // inherited/absent overhead is provisional
+  const returnExchangeFeesMinor = input?.returnExchangeFeesMinor ?? 0n;
+
+  // ── Ops / GST ─────────────────────────────────────────────────────────────
+  const opsMinor = app.opsPerPairMinor * BigInt(cogs.deliveredPairs);
+  const gstOutputMinor = gstOutput(rev.netSaleMinor, app.gstOutputRateBp);
+  const gstInputMinor = gstInputCredit(
+    freightMinor,
+    adSpendMinor,
+    overheadMinor,
+    app.gstInputRateNumer,
+    app.gstInputRateDenom,
+  );
+  const netGstMinor = gstInputMinor == null ? null : gstInputMinor - gstOutputMinor;
+
+  // ── Publish gate ──────────────────────────────────────────────────────────
+  const daysSince = daysSinceMonthEnd(month);
+  const daysToMaturity = app.maturityDays - daysSince;
+  const matured = daysToMaturity <= 0;
+
+  const pendingReasons: string[] = [];
+  if (cogs.cogsMinor == null) {
+    pendingReasons.push(`COGS: cost-per-item set on only ${(cogs.matchRate * 100).toFixed(1)}% of delivered lines`);
+  }
+  if (freightMinor == null) pendingReasons.push("Freight: carrier billing not yet resolved");
+  if (adSpendMinor == null) pendingReasons.push("Ad spend: Meta token not set / month not pulled");
+
+  // Net P&L is only computed when EVERY required cost is known. Any pending cost
+  // suppresses it (null), per the spec — no partial total masquerading as a P&L.
+  let netPnlMinor: bigint | null = null;
+  if (cogs.cogsMinor != null && freightMinor != null && adSpendMinor != null && netGstMinor != null) {
+    netPnlMinor =
+      rev.netSaleMinor -
+      cogs.cogsMinor -
+      freightMinor -
+      adSpendMinor -
+      opsMinor -
+      overheadMinor +
+      netGstMinor +
+      returnExchangeFeesMinor;
+  }
+
+  let publishStatus: PublishStatus = "final";
+  if (pendingReasons.length > 0) publishStatus = "pending";
+  else if (!matured || overheadProvisional || rev.resolutionRate < 0.97) publishStatus = "provisional";
+
+  const perDelOrder = (v: bigint | null): bigint | null =>
+    v == null || rev.deliveredOrders === 0 ? null : v / BigInt(rev.deliveredOrders);
+  const perPair = (v: bigint | null): bigint | null =>
+    v == null || cogs.deliveredPairs === 0 ? null : v / BigInt(cogs.deliveredPairs);
+
+  return {
+    month,
+    grossSaleMinor: rev.grossSaleMinor,
+    discountsMinor: rev.discountsMinor,
+    netPlacedRevenueMinor: rev.netPlacedRevenueMinor,
+    cancelledRtoRevenueMinor: rev.cancelledRtoRevenueMinor,
+    refundsMinor: rev.refundsMinor,
+    netSaleMinor: rev.netSaleMinor,
+    cogsMinor: cogs.cogsMinor,
+    freightMinor,
+    freightStatus,
+    adSpendMinor,
+    adSpendSource,
+    opsMinor,
+    overheadMinor,
+    overheadProvisional,
+    gstOutputMinor,
+    gstInputMinor,
+    netGstMinor,
+    returnExchangeFeesMinor,
+    netPnlMinor,
+    placedOrders: rev.placedOrders,
+    deliveredOrders: rev.deliveredOrders,
+    rtoOrders: rev.rtoOrders,
+    inTransitOrders: rev.inTransitOrders,
+    deliveredPairs: cogs.deliveredPairs,
+    netPnlPerDeliveredOrderMinor: perDelOrder(netPnlMinor),
+    netPnlPerDeliveredPairMinor: perPair(netPnlMinor),
+    adPerDeliveredOrderMinor: perDelOrder(adSpendMinor),
+    freightPerDeliveredOrderMinor: perDelOrder(freightMinor),
+    cogsPerPairMinor: perPair(cogs.cogsMinor),
+    resolutionRate: rev.resolutionRate,
+    deliveredShareOfPlaced: rev.deliveredShareOfPlaced,
+    cogsMatchRate: cogs.matchRate,
+    matured,
+    daysToMaturity,
+    publishStatus,
+    pendingReasons,
   };
 }
