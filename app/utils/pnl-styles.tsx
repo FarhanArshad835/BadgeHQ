@@ -8,6 +8,7 @@
 
 export const CSS = `
 :root {
+  color-scheme: light; /* always light — keep native controls (selects, inputs) light regardless of OS theme */
   --ink:        oklch(0.28 0.03 275);
   --ink-soft:   oklch(0.48 0.02 275);
   --ink-faint:  oklch(0.62 0.015 275);
@@ -191,17 +192,6 @@ export const CSS = `
 @media (prefers-reduced-motion: reduce) {
   .pnl *, .pnl *::after { transition: none !important; }
   .pnl-spinner { animation: none !important; }
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --ink: oklch(0.93 0.02 275); --ink-soft: oklch(0.72 0.02 275); --ink-faint: oklch(0.58 0.02 275);
-    --line: oklch(0.32 0.02 275); --line-soft: oklch(0.27 0.015 275);
-    --surface: oklch(0.24 0.015 275); --panel: oklch(0.22 0.018 275); --bg: oklch(0.18 0.02 275);
-    --accent: oklch(0.72 0.14 275); --accent-ink: oklch(0.82 0.12 275); --accent-wash: oklch(0.3 0.05 275);
-    --pos: oklch(0.72 0.12 155); --neg: oklch(0.72 0.13 35);
-    --warn-bg: oklch(0.3 0.05 75); --warn-line: oklch(0.42 0.08 75); --ok-bg: oklch(0.3 0.06 155);
-    --shadow: 0 1px 2px oklch(0 0 0 / 0.3), 0 4px 16px oklch(0 0 0 / 0.25);
-  }
 }
 `;
 
