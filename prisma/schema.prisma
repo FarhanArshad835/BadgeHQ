@@ -483,3 +483,91 @@ model ShopPlan {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
+
+/// P&L settings per shop. Carrier credentials are REUSED from AiReplySettings
+/// (Shiprocket) and DeliverySettings (Delhivery) — not duplicated here. This row
+/// holds only the P&L-specific config: the Meta Ads credentials (Phase 2) and
+/// the last-sync bookkeeping.
+model PnlSettings {
+  id             String   @id @default(cuid())
+  shop           String   @unique
+  isEnabled      Boolean  @default(false)
+  // Meta (Facebook) Ads — Phase 2. Ad spend is aggregate-only (never per-order).
+  metaEnabled     Boolean @default(false)
+  metaAccessToken String  @default("") // long-lived token, server-side only
+  metaAdAccountId String  @default("") // "act_<id>"
+  // Last sync bookkeeping, shown in the admin.
+  lastSyncAt     DateTime?
+  lastSyncStatus String   @default("")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+/// Per-order financials cache — the core P&L table. One row per Shopify order,
+/// written on first sync and refreshed as costs bill in. Money is stored in
+/// integer MINOR UNITS (paise) as BigInt — never Float/Decimal — so sums are
+/// exact. A null cost means "not known yet" (Pending / cost-per-item missing),
+/// NEVER zero and NEVER an estimate.
+model OrderFinancials {
+  id             String   @id @default(cuid())
+  shop           String
+  orderId        String // Shopify order gid
+  orderName      String   @default("")
+  orderCreatedAt DateTime
+  currency       String   @default("INR")
+
+  // Revenue side (from Shopify — always available once synced).
+  grossRevenueMinor BigInt @default(0) // currentTotalPriceSet (net of order discounts)
+  refundsMinor      BigInt @default(0) // totalRefundedSet
+  discountsMinor    BigInt @default(0) // totalDiscountsSet (display only)
+
+  // COGS (Shopify inventoryItem.unitCost × qty). Null = at least one sold line
+  // item has no cost-per-item set, so COGS is INCOMPLETE — not zero.
+  cogsMinor    BigInt?
+  cogsComplete Boolean @default(false)
+
+  // Shipping (ACTUAL billed freight from the carrier). Null = pending.
+  shippingCostMinor BigInt?
+  shippingStatus    String  @default("pending") // pending | billed | no-awb | unmatched | rto
+  rtoCostMinor      BigInt?
+  codChargeMinor    BigInt?
+  awb               String  @default("")
+  carrier           String  @default("") // shiprocket | delhivery | ""
+
+  // Bookkeeping.
+  financialStatus   String   @default("")
+  fulfillmentStatus String   @default("")
+  dataComplete      Boolean  @default(false) // cogsComplete AND shipping resolved
+  revenueSyncedAt   DateTime?
+  cogsSyncedAt      DateTime?
+  shippingSyncedAt  DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([shop, orderId])
+  @@index([shop, orderCreatedAt])
+  @@index([shop, shippingStatus])
+  @@index([awb])
+}
+
+/// Per-line-item financials, for the per-product profitability view. Grouping by
+/// productId gives contribution margin ex-shipping-ex-ad (shipping is order-level
+/// and can't be split per line honestly).
+model OrderLineFinancials {
+  id             String   @id @default(cuid())
+  shop           String
+  orderId        String
+  orderCreatedAt DateTime // denormalised for date-window filtering
+  productId      String   @default("")
+  variantId      String   @default("")
+  productTitle   String   @default("")
+  variantTitle   String   @default("")
+  quantity       Int      @default(0)
+  lineRevenueMinor BigInt @default(0)
+  lineCogsMinor    BigInt?
+  lineCogsComplete Boolean @default(false)
+  createdAt      DateTime @default(now())
+
+  @@index([shop, productId, orderCreatedAt])
+  @@index([shop, orderId])
+}

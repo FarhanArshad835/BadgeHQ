@@ -1,7 +1,10 @@
 {
   "framework": "remix",
   "regions": ["iad1"],
-  "crons": [{ "path": "/api/cron/whatsapp-replies", "schedule": "0 * * * *" }],
+  "crons": [
+    { "path": "/api/cron/whatsapp-replies", "schedule": "0 * * * *" },
+    { "path": "/api/cron/pnl-sync", "schedule": "30 2 * * *" }
+  ],
   "headers": [
     {
       "source": "/widget.js",
