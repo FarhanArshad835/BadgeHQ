@@ -1,7 +1,7 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Form, useActionData, useLoaderData, useNavigation, useSearchParams } from "@remix-run/react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import prisma from "../db.server";
 import { rollup, completeness, type OrderRow } from "../utils/pnl.server";
 import { syncRevenueAndCogs, backfillShipping } from "../utils/pnl-sync.server";
@@ -78,11 +78,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }))
     .sort((a, b) => Number(BigInt(b.margin ?? "0") - BigInt(a.margin ?? "0")));
 
+  // Anchor for the live progress counter: how many orders the last sync touched.
+  // Parsed from the "synced N orders" status string; 0 on a first-ever run.
+  const lastSyncCount = Number((app.lastSyncStatus.match(/synced (\d+)/i) || [])[1] || 0);
+
   return json({
     configured,
     windowKey,
     currency,
     lastSyncAt: app.lastSyncAt,
+    lastSyncCount,
     kpis: {
       orders: agg.orders,
       revenue: agg.revenueMinor.toString(),
@@ -158,6 +163,31 @@ export default function PnlDashboard() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [tab, setTab] = useState<"glance" | "orders" | "products">("glance");
   const busy = nav.state !== "idle";
+  // A sync is the only POST on this page; a window switch is a GET navigation.
+  const syncing = nav.state === "submitting" && nav.formMethod === "POST";
+
+  // Live progress while a sync runs. There's no server round-trip to poll (that
+  // would bill an invocation per tick), so we count up smoothly toward last
+  // run's order count as a target, then snap to the true figure when the action
+  // returns. The number is labelled "about" so it never reads as exact mid-run.
+  const [progress, setProgress] = useState(0);
+  const targetRef = useRef(0);
+  useEffect(() => {
+    if (!syncing) return;
+    setProgress(0);
+    // Aim at last run's count; if unknown, a gentle default so the bar still moves.
+    targetRef.current = Math.max(d.lastSyncCount, 25);
+    const id = setInterval(() => {
+      setProgress((p) => {
+        const target = targetRef.current;
+        // Ease toward the target and hold just short of it until the real result
+        // lands, so we never claim "done" before the server actually is.
+        const next = p + Math.max(1, Math.round((target - p) * 0.18));
+        return Math.min(next, Math.max(target - 1, p));
+      });
+    }, 220);
+    return () => clearInterval(id);
+  }, [syncing, d.lastSyncCount]);
   // Null-value marker for empty cells. A plain hyphen, not an em dash.
   const NIL = "-";
   const fmt = (m: string | null, p = NIL) => (m == null ? p : formatMinor(BigInt(m), d.currency));
@@ -202,7 +232,14 @@ export default function PnlDashboard() {
             <Form method="post">
               <input type="hidden" name="window" value={d.windowKey} />
               <button type="submit" className="pnl-btn pnl-btn-primary" disabled={busy}>
-                {busy ? "Syncing…" : "Sync now"}
+                {syncing ? (
+                  <span className="pnl-btn-busy">
+                    <span className="pnl-spinner" aria-hidden="true" />
+                    Syncing {progress} orders
+                  </span>
+                ) : (
+                  "Sync now"
+                )}
               </button>
             </Form>
           </div>

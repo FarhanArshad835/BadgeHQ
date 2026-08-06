@@ -72,6 +72,15 @@ export const CSS = `
 .pnl-btn-primary:active { transform: translateY(1px); box-shadow: 0 1px 2px oklch(0.42 0.16 275 / 0.3); }
 .pnl-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .pnl-btn:disabled { opacity: 0.6; cursor: default; }
+.pnl-btn-primary:disabled { opacity: 1; } /* stays solid while syncing so the count reads clearly */
+.pnl-btn-busy { display: inline-flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; }
+.pnl-spinner {
+  width: 13px; height: 13px; border-radius: 50%;
+  border: 2px solid oklch(0.99 0.003 275 / 0.35);
+  border-top-color: oklch(0.99 0.003 275);
+  animation: pnl-spin 0.7s linear infinite;
+}
+@keyframes pnl-spin { to { transform: rotate(360deg); } }
 
 /* select */
 .pnl-select {
@@ -181,6 +190,7 @@ export const CSS = `
 
 @media (prefers-reduced-motion: reduce) {
   .pnl *, .pnl *::after { transition: none !important; }
+  .pnl-spinner { animation: none !important; }
 }
 @media (prefers-color-scheme: dark) {
   :root {
