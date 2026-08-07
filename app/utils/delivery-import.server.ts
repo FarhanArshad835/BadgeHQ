@@ -67,6 +67,41 @@ export function parseDeliveryCsv(csv: string): {
   return { pairs, totalRows: lines.length - start, skipped };
 }
 
+/**
+ * Fetch the published-to-web delivery sheet (a Google "Publish to web → CSV"
+ * URL) and apply it. No Google auth — the URL returns the live CSV directly.
+ * This is the automatic path: a button and the nightly cron call it so delivery
+ * status stays fresh without a manual download/upload.
+ */
+export async function fetchAndApplyDeliverySheet(
+  shop: string,
+  url: string,
+): Promise<{ ok: true; matched: number; delivered: number; rto: number; parsed: number; skipped: number } | { ok: false; reason: string }> {
+  if (!url) return { ok: false, reason: "No delivery-sheet URL set in Settings." };
+  // Guard: must look like a published Google CSV (or any CSV endpoint).
+  if (!/^https?:\/\//i.test(url)) return { ok: false, reason: "The delivery-sheet URL must start with http(s)://." };
+
+  let text: string;
+  try {
+    const res = await fetch(url, { redirect: "follow", signal: AbortSignal.timeout(30000) });
+    if (!res.ok) return { ok: false, reason: `Sheet URL returned HTTP ${res.status}. Re-check the Publish-to-web link.` };
+    text = await res.text();
+    // A private/unpublished sheet returns an HTML login page, not CSV.
+    if (/^\s*</.test(text) || /<html/i.test(text.slice(0, 200))) {
+      return { ok: false, reason: "That URL returned a web page, not CSV. Use File → Share → Publish to web → the AWB tab → CSV." };
+    }
+  } catch {
+    return { ok: false, reason: "Couldn't fetch the delivery-sheet URL. Check the link and try again." };
+  }
+
+  const { pairs, totalRows, skipped } = parseDeliveryCsv(text);
+  if (!pairs.length) {
+    return { ok: false, reason: `No usable rows in the sheet (parsed ${totalRows}). It needs an AWB column and a Delivery Status column.` };
+  }
+  const res = await applyDeliveryStatuses(shop, pairs);
+  return { ok: true, matched: res.updated, delivered: res.delivered, rto: res.rto, parsed: pairs.length, skipped };
+}
+
 /** Minimal CSV line splitter that respects double-quoted fields. */
 function splitCsvLine(line: string): string[] {
   const out: string[] = [];

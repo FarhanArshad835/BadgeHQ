@@ -16,6 +16,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     hasDelhiveryKey: Boolean(app.delhiveryApiKey),
     metaAdAccountId: app.metaAdAccountId,
     hasMetaToken: Boolean(app.metaAccessToken),
+    deliverySheetUrl: app.deliverySheetUrl,
   });
 };
 
@@ -33,6 +34,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const delhiveryApiKey = String(form.get("delhiveryApiKey") || "").trim();
   const metaAdAccountId = String(form.get("metaAdAccountId") || "").trim();
   const metaAccessToken = String(form.get("metaAccessToken") || "").trim();
+  const deliverySheetUrl = String(form.get("deliverySheetUrl") || "").trim();
 
   const existing = await getPnlApp();
   const effectiveToken = adminToken || existing.adminToken;
@@ -49,6 +51,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       shopDomain,
       shiprocketEmail,
       metaAdAccountId,
+      deliverySheetUrl,
       ...(adminToken ? { adminToken } : {}),
       ...(shiprocketPassword ? { shiprocketPassword } : {}),
       ...(delhiveryApiKey ? { delhiveryApiKey } : {}),
@@ -123,6 +126,13 @@ export default function PnlSettings() {
             type="password"
             placeholder={d.hasMetaToken ? "•••••••• saved" : "EAAG… (ads_read token)"}
           />
+          <hr className="pnl-rule" />
+          <div className="pnl-section-label">Delivery status sheet (auto-fetch)</div>
+          <div className="pnl-help" style={{ marginBottom: 12 }}>
+            In Google Sheets: File, Share, Publish to web, pick the AWB tab, format CSV, Publish. Paste that link here.
+            The app fetches it directly (delivered / RTO matched by AWB) on the dashboard button and nightly.
+          </div>
+          <Field label="Published CSV URL" name="deliverySheetUrl" defaultValue={d.deliverySheetUrl} placeholder="https://docs.google.com/…/pub?gid=…&output=csv" />
           <button type="submit" className="pnl-btn pnl-btn-primary" style={{ marginTop: 4, alignSelf: "flex-start" }}>
             Save
           </button>

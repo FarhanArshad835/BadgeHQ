@@ -16,6 +16,7 @@ import prisma from "../db.server";
 import { unauthenticated } from "../shopify.server";
 import { syncRevenueAndCogs, backfillShipping } from "../utils/pnl-sync.server";
 import { getPnlApp, runStandaloneSync } from "../utils/pnl-app.server";
+import { fetchAndApplyDeliverySheet } from "../utils/delivery-import.server";
 
 export const config = { maxDuration: 300 };
 
@@ -40,12 +41,29 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     results["standalone"] = await runStandaloneSync({
       maxPages: 400,
       timeBudgetMs: STANDALONE_TIME_BUDGET_MS,
-      deliveryLimit: 800, // bulk path (one auth reused) clears the backlog fast
       shippingLimit: 200,
     });
   } catch (e: any) {
     console.error("[pnl-cron] standalone", String(e?.message || e).slice(0, 200));
     results["standalone"] = { error: true };
+  }
+
+  // Delivery status from the published sheet (the authority). Fetch nightly so
+  // delivered/RTO stays current without a manual refresh.
+  if (standaloneApp.deliverySheetUrl) {
+    try {
+      const r = await fetchAndApplyDeliverySheet(standaloneApp.shopDomain, standaloneApp.deliverySheetUrl);
+      results["deliverySheet"] = r.ok ? { matched: r.matched, delivered: r.delivered, rto: r.rto } : { error: r.reason };
+      if (r.ok) {
+        await prisma.pnlApp.update({
+          where: { id: "default" },
+          data: { deliverySheetSyncedAt: new Date(), deliverySheetStatus: `matched ${r.matched}` },
+        });
+      }
+    } catch (e: any) {
+      console.error("[pnl-cron] deliverySheet", String(e?.message || e).slice(0, 200));
+      results["deliverySheet"] = { error: true };
+    }
   }
 
   // 2) Embedded-app shops (OAuth session). Skip the standalone shop — it's

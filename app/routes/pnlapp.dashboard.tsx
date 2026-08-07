@@ -7,7 +7,7 @@ import { formatMinor } from "../utils/money";
 import { getPnlApp, isAuthed, runStandaloneSync } from "../utils/pnl-app.server";
 import { computeMonth } from "../utils/monthly-pnl.server";
 import { toMinor } from "../utils/pnl.server";
-import { parseDeliveryCsv, applyDeliveryStatuses } from "../utils/delivery-import.server";
+import { parseDeliveryCsv, applyDeliveryStatuses, fetchAndApplyDeliverySheet } from "../utils/delivery-import.server";
 import { PnlStyles } from "../utils/pnl-styles";
 
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
@@ -75,6 +75,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     lastSyncAt: app.lastSyncAt,
     lastSyncCount,
     metaConnected: Boolean(app.metaAccessToken && app.metaAdAccountId),
+    hasDeliverySheet: Boolean(app.deliverySheetUrl),
     monthInput: {
       overhead: rupees(monthInput?.overheadMinor),
       returnExchangeFees: rupees(monthInput?.returnExchangeFeesMinor),
@@ -135,6 +136,23 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   const form = await request.formData();
   const intent = String(form.get("intent") || "sync");
+
+  // Fetch delivery status directly from the published Google-Sheet CSV URL.
+  if (intent === "fetch-delivery") {
+    if (!app.deliverySheetUrl) {
+      return json({ ok: false, message: "Add the published delivery-sheet CSV URL in Settings first." }, { status: 400 });
+    }
+    const r = await fetchAndApplyDeliverySheet(app.shopDomain, app.deliverySheetUrl);
+    if (!r.ok) return json({ ok: false, message: r.reason }, { status: 400 });
+    await prisma.pnlApp.update({
+      where: { id: "default" },
+      data: { deliverySheetSyncedAt: new Date(), deliverySheetStatus: `matched ${r.matched}` },
+    });
+    return json({
+      ok: true,
+      message: `Fetched delivery sheet: ${r.parsed} rows, matched ${r.matched} orders (${r.delivered} delivered, ${r.rto} RTO in the sheet).`,
+    });
+  }
 
   // Import delivery status from the uploaded sheet (the AUTHORITY for delivery
   // outcome). Bulk-set OrderFinancials.deliveryStatus by AWB.
@@ -226,7 +244,8 @@ export default function PnlDashboard() {
     nav.state === "submitting" &&
     nav.formMethod === "POST" &&
     submittingIntent !== "save-inputs" &&
-    submittingIntent !== "upload-delivery";
+    submittingIntent !== "upload-delivery" &&
+    submittingIntent !== "fetch-delivery";
   const busy = nav.state !== "idle";
 
   // Live progress while a sync runs (client-side, no polling). Eases toward last
@@ -369,21 +388,36 @@ export default function PnlDashboard() {
           </>
         )}
 
-        {/* Delivery-status import — the uploaded sheet is the authority. */}
+        {/* Delivery-status — fetched from the published sheet (authority). */}
         {r && (
           <div className="pnl-panel" style={{ marginTop: 20 }}>
-            <div className="pnl-section-label">Import delivery status (from your tracking sheet)</div>
+            <div className="pnl-section-label">Delivery status (from your tracking sheet)</div>
             <p className="pnl-sub" style={{ marginTop: 0, marginBottom: 12, fontSize: 13 }}>
-              Export the AWB tab as CSV (needs an <strong>AWB</strong> column and a <strong>Delivery Status</strong> column) and upload it.
-              Delivered / RTO / cancelled are matched to orders by AWB, across all months. This is the source of truth for delivery outcome.
+              Delivered / RTO matched to orders by AWB, across all months. This is the source of truth for delivery outcome.
             </p>
-            <Form method="post" encType="multipart/form-data" className="pnl-form">
-              <input type="hidden" name="intent" value="upload-delivery" />
-              <input className="pnl-input" type="file" name="deliveryCsv" accept=".csv,text/csv" />
-              <button type="submit" className="pnl-btn pnl-btn-primary" style={{ marginTop: 12, alignSelf: "flex-start" }} disabled={busy}>
-                Upload &amp; apply
-              </button>
-            </Form>
+            {d.hasDeliverySheet ? (
+              <Form method="post" className="pnl-form">
+                <input type="hidden" name="intent" value="fetch-delivery" />
+                <button type="submit" className="pnl-btn pnl-btn-primary" style={{ alignSelf: "flex-start" }} disabled={busy}>
+                  Refresh delivery from sheet
+                </button>
+              </Form>
+            ) : (
+              <p className="pnl-sub" style={{ fontSize: 13 }}>
+                Add the published-sheet CSV URL in <a className="pnl-link" href="/pnl-app/settings">Settings</a> to fetch automatically.
+                Or upload a CSV below.
+              </p>
+            )}
+            <details style={{ marginTop: 12 }}>
+              <summary className="pnl-sub" style={{ fontSize: 13, cursor: "pointer" }}>Upload a CSV instead</summary>
+              <Form method="post" encType="multipart/form-data" className="pnl-form" style={{ marginTop: 10 }}>
+                <input type="hidden" name="intent" value="upload-delivery" />
+                <input className="pnl-input" type="file" name="deliveryCsv" accept=".csv,text/csv" />
+                <button type="submit" className="pnl-btn" style={{ marginTop: 12, alignSelf: "flex-start" }} disabled={busy}>
+                  Upload &amp; apply
+                </button>
+              </Form>
+            </details>
           </div>
         )}
 

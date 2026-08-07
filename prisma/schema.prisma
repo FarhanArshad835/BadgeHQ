@@ -614,6 +614,11 @@ model PnlApp {
   // months from here to now — NOT a rolling 90-day window (which would cut off
   // the start of older months and drift later every day). Default Apr 2026.
   backfillStartMonth  String @default("2026-04")
+  // Published-to-web CSV URL of the delivery-status sheet (AWB tab). The app
+  // fetches this directly (no Google auth) to set delivery outcome by AWB.
+  deliverySheetUrl    String @default("")
+  deliverySheetSyncedAt DateTime?
+  deliverySheetStatus String @default("")
 
   // Resumable sync state. The nightly cron chunks a large backlog across runs:
   // it saves where it stopped (syncCursor) within a window (syncWindowStart /
