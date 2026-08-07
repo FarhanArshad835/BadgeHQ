@@ -7,6 +7,7 @@ import { formatMinor } from "../utils/money";
 import { getPnlApp, isAuthed, runStandaloneSync } from "../utils/pnl-app.server";
 import { computeMonth } from "../utils/monthly-pnl.server";
 import { toMinor } from "../utils/pnl.server";
+import { parseDeliveryCsv, applyDeliveryStatuses } from "../utils/delivery-import.server";
 import { PnlStyles } from "../utils/pnl-styles";
 
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
@@ -135,6 +136,27 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const form = await request.formData();
   const intent = String(form.get("intent") || "sync");
 
+  // Import delivery status from the uploaded sheet (the AUTHORITY for delivery
+  // outcome). Bulk-set OrderFinancials.deliveryStatus by AWB.
+  if (intent === "upload-delivery") {
+    const file = form.get("deliveryCsv");
+    if (!(file instanceof File) || file.size === 0) {
+      return json({ ok: false, message: "Choose a CSV file to upload." }, { status: 400 });
+    }
+    const text = await file.text();
+    const { pairs, totalRows, skipped } = parseDeliveryCsv(text);
+    if (!pairs.length) {
+      return json({ ok: false, message: `No usable rows found (parsed ${totalRows}, skipped ${skipped}). Expect columns AWB and Delivery Status.` }, { status: 400 });
+    }
+    const res = await applyDeliveryStatuses(app.shopDomain, pairs);
+    return json({
+      ok: true,
+      message:
+        `Imported ${pairs.length} statuses; matched and updated ${res.updated} orders ` +
+        `(${res.delivered} delivered, ${res.rto} RTO in the file). Skipped ${skipped} unrecognised rows.`,
+    });
+  }
+
   // Save the per-month manual inputs (overhead, fees, optional overrides).
   if (intent === "save-inputs") {
     const month = String(form.get("month") || "");
@@ -200,7 +222,11 @@ export default function PnlDashboard() {
   // Distinguish the Sync POST from the save-inputs POST so the progress spinner
   // only shows for an actual sync.
   const submittingIntent = nav.formData?.get("intent");
-  const syncing = nav.state === "submitting" && nav.formMethod === "POST" && submittingIntent !== "save-inputs";
+  const syncing =
+    nav.state === "submitting" &&
+    nav.formMethod === "POST" &&
+    submittingIntent !== "save-inputs" &&
+    submittingIntent !== "upload-delivery";
   const busy = nav.state !== "idle";
 
   // Live progress while a sync runs (client-side, no polling). Eases toward last
@@ -341,6 +367,24 @@ export default function PnlDashboard() {
               </div>
             </div>
           </>
+        )}
+
+        {/* Delivery-status import — the uploaded sheet is the authority. */}
+        {r && (
+          <div className="pnl-panel" style={{ marginTop: 20 }}>
+            <div className="pnl-section-label">Import delivery status (from your tracking sheet)</div>
+            <p className="pnl-sub" style={{ marginTop: 0, marginBottom: 12, fontSize: 13 }}>
+              Export the AWB tab as CSV (needs an <strong>AWB</strong> column and a <strong>Delivery Status</strong> column) and upload it.
+              Delivered / RTO / cancelled are matched to orders by AWB, across all months. This is the source of truth for delivery outcome.
+            </p>
+            <Form method="post" encType="multipart/form-data" className="pnl-form">
+              <input type="hidden" name="intent" value="upload-delivery" />
+              <input className="pnl-input" type="file" name="deliveryCsv" accept=".csv,text/csv" />
+              <button type="submit" className="pnl-btn pnl-btn-primary" style={{ marginTop: 12, alignSelf: "flex-start" }} disabled={busy}>
+                Upload &amp; apply
+              </button>
+            </Form>
+          </div>
         )}
 
         {/* Per-month manual inputs (the few numbers no API provides). */}
