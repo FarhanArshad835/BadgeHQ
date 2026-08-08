@@ -150,7 +150,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
     return json({
       ok: true,
-      message: `Fetched delivery sheet: ${r.parsed} rows, matched ${r.matched} orders (${r.delivered} delivered, ${r.rto} RTO in the sheet).`,
+      message:
+        `Fetched delivery sheet: ${r.parsed} rows (${r.delivered} delivered, ${r.rto} RTO). ` +
+        `Updated ${r.matched} orders that changed since last time.`,
     });
   }
 
@@ -246,6 +248,7 @@ export default function PnlDashboard() {
     submittingIntent !== "save-inputs" &&
     submittingIntent !== "upload-delivery" &&
     submittingIntent !== "fetch-delivery";
+  const fetchingDelivery = nav.state === "submitting" && submittingIntent === "fetch-delivery";
   const busy = nav.state !== "idle";
 
   // Live progress while a sync runs (client-side, no polling). Eases toward last
@@ -399,7 +402,9 @@ export default function PnlDashboard() {
               <Form method="post" className="pnl-form">
                 <input type="hidden" name="intent" value="fetch-delivery" />
                 <button type="submit" className="pnl-btn pnl-btn-primary" style={{ alignSelf: "flex-start" }} disabled={busy}>
-                  Refresh delivery from sheet
+                  {fetchingDelivery ? (
+                    <span className="pnl-btn-busy"><span className="pnl-spinner" aria-hidden="true" />Fetching sheet… (up to a minute)</span>
+                  ) : "Refresh delivery from sheet"}
                 </button>
               </Form>
             ) : (
