@@ -149,6 +149,9 @@ export async function applyDeliveryStatuses(
       slice.map(([awb, outcome]) => Prisma.sql`(${awb}, ${outcome})`),
     );
     // Update matching orders; set deliveredAt only for delivered.
+    // IS DISTINCT FROM: only write rows whose status actually CHANGED. A nightly
+    // re-run where most orders are already terminal does ~zero writes (cheap
+    // index reads only), which keeps Neon compute minimal on the repeating cron.
     const res = await prisma.$executeRaw`
       UPDATE "OrderFinancials" AS o
       SET "deliveryStatus" = v.outcome,
@@ -156,6 +159,7 @@ export async function applyDeliveryStatuses(
           "deliverySyncedAt" = ${now}
       FROM (VALUES ${values}) AS v(awb, outcome)
       WHERE o.shop = ${shop} AND o.awb = v.awb
+        AND o."deliveryStatus" IS DISTINCT FROM v.outcome
     `;
     updated += Number(res);
   }
