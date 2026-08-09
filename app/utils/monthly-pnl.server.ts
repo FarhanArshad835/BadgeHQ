@@ -111,7 +111,10 @@ export async function revenueAndDelivered(shop: string, month: string): Promise<
       cancelledOrders++;
     } else if (oc === "abandoned") {
       abandonedOrders++;
-    } else if (oc === "in_transit" || oc === "no-awb" || oc === "unknown") {
+    } else {
+      // Catch-all so the five funnel buckets ALWAYS sum to placed: in_transit,
+      // no-awb, unknown, lost, and any future/unmapped status land here rather
+      // than vanishing (lost was previously counted nowhere).
       inTransitOrders++;
     }
     if (oc === "unresolved") unresolvedOrders++;
