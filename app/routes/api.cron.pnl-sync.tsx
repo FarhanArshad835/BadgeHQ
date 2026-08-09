@@ -263,6 +263,41 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     });
   }
 
+  // One-time backfill: reclassify already-stored orders from their financial +
+  // fulfillment status, WITHOUT a Shopify resync. VOIDED -> cancelled, PENDING &
+  // never-fulfilled -> abandoned. Only touches stuck rows (no-awb/unknown), so a
+  // delivered/rto outcome the sheet resolved is never disturbed.
+  if (new URL(request.url).searchParams.get("reclassify") === "1") {
+    const app = await getPnlApp();
+    const shop = app.shopDomain;
+    if (!shop) return json({ error: "not-configured" }, { status: 400 });
+
+    const cancelled = await prisma.orderFinancials.updateMany({
+      where: {
+        shop,
+        deliveryStatus: { in: ["no-awb", "unknown"] },
+        financialStatus: { equals: "VOIDED", mode: "insensitive" },
+      },
+      data: { deliveryStatus: "cancelled" },
+    });
+
+    const abandoned = await prisma.orderFinancials.updateMany({
+      where: {
+        shop,
+        deliveryStatus: { in: ["no-awb", "unknown"] },
+        financialStatus: { equals: "PENDING", mode: "insensitive" },
+        NOT: { fulfillmentStatus: { equals: "FULFILLED", mode: "insensitive" } },
+      },
+      data: { deliveryStatus: "abandoned" },
+    });
+
+    return json({
+      ok: true,
+      shop,
+      reclassified: { cancelled: cancelled.count, abandoned: abandoned.count },
+    });
+  }
+
   const results: Record<string, unknown> = {};
 
   // 1) Standalone P&L app (custom-app token) — this is the one that actually
