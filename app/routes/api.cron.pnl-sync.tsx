@@ -298,6 +298,31 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     });
   }
 
+  // Read-only: ?order=170499,170505 shows exactly what the P&L stored for named
+  // orders — the AWB it captured and the deliveryStatus — to diagnose orders
+  // that look delivered in Shopify but read wrong here.
+  const orderQ = new URL(request.url).searchParams.get("order");
+  if (orderQ) {
+    const app = await getPnlApp();
+    const shop = app.shopDomain;
+    if (!shop) return json({ error: "not-configured" }, { status: 400 });
+    const names = orderQ.split(",").map((n) => n.trim()).filter(Boolean);
+    const nameVariants = names.flatMap((n) => [n, `#${n}`, n.replace(/^#/, "")]);
+    const rows = await prisma.orderFinancials.findMany({
+      where: { shop, orderName: { in: Array.from(new Set(nameVariants)) } },
+      select: {
+        orderName: true,
+        awb: true,
+        carrier: true,
+        deliveryStatus: true,
+        shippingStatus: true,
+        financialStatus: true,
+        fulfillmentStatus: true,
+      },
+    });
+    return json({ ok: true, shop, found: rows.length, orders: rows });
+  }
+
   const results: Record<string, unknown> = {};
 
   // 1) Standalone P&L app (custom-app token) — this is the one that actually
