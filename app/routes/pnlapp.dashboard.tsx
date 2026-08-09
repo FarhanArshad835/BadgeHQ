@@ -369,12 +369,16 @@ export default function PnlDashboard() {
                 <table className="pnl-table">
                   <tbody>
                     <Row label="Placed orders" value={String(r.placedOrders)} />
-                    <Row label="Delivered" value={String(r.deliveredOrders)} />
-                    <Row label="RTO" value={String(r.rtoOrders)} />
-                    <Row label="Cancelled" value={String(r.cancelledOrders)} />
-                    <Row label="Abandoned" value={String(r.abandonedOrders)} />
-                    <Row label="In transit / unknown" value={String(r.inTransitOrders)} />
-                    <Row label="Delivered pairs" value={String(r.deliveredPairs)} />
+                    <Row label="— Delivered" value={String(r.deliveredOrders)} />
+                    <Row label="— RTO" value={String(r.rtoOrders)} />
+                    <Row label="— Cancelled" value={String(r.cancelledOrders)} />
+                    <Row label="— Abandoned" value={String(r.abandonedOrders)} />
+                    <Row label="— In transit / unknown" value={String(r.inTransitOrders)} />
+                    {/* The five outcome lines sum to Placed by construction. */}
+                    <Row
+                      label="Delivered items (pairs)"
+                      value={String(r.deliveredPairs)}
+                    />
                     <Row label="Resolution rate" value={pct(r.resolutionRate)} />
                     <Row label="Delivered share of placed" value={pct(r.deliveredShareOfPlaced)} />
                   </tbody>
