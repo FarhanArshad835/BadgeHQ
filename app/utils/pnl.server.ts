@@ -30,6 +30,7 @@ const ORDER_PNL_FIELDS = `
   name
   createdAt
   cancelledAt
+  tags
   displayFinancialStatus
   displayFulfillmentStatus
   currentTotalPriceSet { shopMoney { amount currencyCode } }
@@ -73,6 +74,7 @@ export type OrderFinancialsComputed = {
   financialStatus: string;
   fulfillmentStatus: string;
   isCancelled: boolean;
+  isReturnFeeOrder: boolean;
   awb: string;
   carrier: string;
   lines: LineFinancials[];
@@ -194,10 +196,28 @@ export function computeOrderFinancials(node: any): OrderFinancialsComputed {
     // and never appears in the delivery sheet; without this it'd be miscounted
     // as an unresolved "no-awb" shipment forever.
     isCancelled: Boolean(node?.cancelledAt),
+    // ReturnHQ ₹100 reverse-shipment fee order for a RETURN — tagged
+    // "returnhq-fee" + "do-not-ship", never shipped, contains no real product.
+    // It's fee collection, not a sale, so the monthly engine drops it entirely
+    // (placed count, revenue, funnel). The EXCHANGE fee order is tagged
+    // "returnhq-fee" + "exchange" and DOES carry the real replacement product,
+    // so it is a genuine sale and is deliberately NOT excluded here.
+    isReturnFeeOrder: isReturnHqReturnFee(node?.tags),
     awb,
     carrier,
     lines,
   };
+}
+
+/** True for a ReturnHQ return-only fee order (never shipped, no product). */
+function isReturnHqReturnFee(tags: unknown): boolean {
+  const list = Array.isArray(tags)
+    ? tags.map((t) => String(t).toLowerCase())
+    : String(tags || "")
+        .toLowerCase()
+        .split(",")
+        .map((t) => t.trim());
+  return list.includes("returnhq-fee") && list.includes("do-not-ship");
 }
 
 /**

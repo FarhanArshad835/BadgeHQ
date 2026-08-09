@@ -127,6 +127,9 @@ export async function syncRevenueAndCogs(
  * from the courier, never from its payment state.
  */
 function initialDelivery(c: OrderFinancialsComputed): string {
+  // ReturnHQ return-fee order: not a sale at all. Mark it so the monthly engine
+  // drops it from placed/revenue/funnel entirely. Wins over everything else.
+  if (c.isReturnFeeOrder) return "returnhq-fee";
   if (c.awb) return "unknown"; // shipped — let the sheet decide
   const fin = c.financialStatus.toUpperCase();
   const ful = c.fulfillmentStatus.toUpperCase();
@@ -187,7 +190,7 @@ async function writeOrderPage(shop: string, computed: OrderFinancialsComputed[])
       -- otherwise keep the outcome the sheet resolved (delivered/rto/…). Never
       -- downgrade a resolved order — and these only fire for orders with no AWB,
       -- so the sheet never set anything to lose.
-      "deliveryStatus"    = CASE WHEN EXCLUDED."deliveryStatus" IN ('cancelled', 'abandoned')
+      "deliveryStatus"    = CASE WHEN EXCLUDED."deliveryStatus" IN ('cancelled', 'abandoned', 'returnhq-fee')
                                  THEN EXCLUDED."deliveryStatus"
                                  ELSE "OrderFinancials"."deliveryStatus" END,
       "dataComplete"      = (EXCLUDED."cogsComplete" AND

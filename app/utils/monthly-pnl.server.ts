@@ -72,7 +72,10 @@ export type RevenueDelivered = {
 export async function revenueAndDelivered(shop: string, month: string): Promise<RevenueDelivered> {
   const { start, end } = monthWindowIst(month);
   const orders = await prisma.orderFinancials.findMany({
-    where: { shop, orderCreatedAt: { gte: start, lt: end } },
+    // Exclude ReturnHQ return-fee orders (the ₹100 do-not-ship carriers): they're
+    // fee collection, not sales, so they must not inflate placed count/revenue
+    // or the funnel. Exchange-fee orders keep a real status and are NOT excluded.
+    where: { shop, orderCreatedAt: { gte: start, lt: end }, deliveryStatus: { not: "returnhq-fee" } },
     select: {
       grossRevenueMinor: true,
       refundsMinor: true,
