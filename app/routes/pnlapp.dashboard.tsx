@@ -321,8 +321,13 @@ export default function PnlDashboard() {
   const r = d.report;
   const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
   // Funnel drill-in link: same month, toggles the status list open/closed.
+  // ABSOLUTE path — this route is explicitly mapped, and a bare "?query" Link
+  // resolves its .data fetch wrong here (see the prefix-route note in routes.ts),
+  // so clicks silently do nothing.
   const drill = (status: string) =>
-    d.drillStatus === status ? `?month=${d.month}` : `?month=${d.month}&status=${status}`;
+    d.drillStatus === status
+      ? `/pnl-app/home?month=${d.month}`
+      : `/pnl-app/home?month=${d.month}&status=${status}`;
 
   return (
     <div className="pnl">
