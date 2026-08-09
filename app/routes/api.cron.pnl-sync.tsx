@@ -205,9 +205,29 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         awb: "",
         deliveryStatus: { notIn: ["delivered", "rto"] },
       },
-      select: { orderName: true, orderId: true, orderCreatedAt: true, deliveryStatus: true },
+      select: {
+        orderName: true,
+        orderId: true,
+        orderCreatedAt: true,
+        deliveryStatus: true,
+        financialStatus: true,
+        fulfillmentStatus: true,
+      },
       orderBy: { orderCreatedAt: "asc" },
     });
+
+    // Break the no-awb bucket down by Shopify's financial + fulfillment status.
+    // A genuinely-cancelled order reads differently (VOIDED / REFUNDED) from an
+    // unshipped-but-live one (PENDING / PAID + UNFULFILLED) — this tells us what
+    // signal actually marks these, since cancelledAt evidently does not.
+    if (new URL(request.url).searchParams.get("by") === "status") {
+      const combo: Record<string, number> = {};
+      for (const r of rows) {
+        const k = `${r.financialStatus || "?"} / ${r.fulfillmentStatus || "?"}`;
+        combo[k] = (combo[k] || 0) + 1;
+      }
+      return json({ ok: true, shop, month: noawbMonth, count: rows.length, byFinancialFulfillment: combo });
+    }
 
     if (new URL(request.url).searchParams.get("format") === "csv") {
       const esc = (v: string) => `"${String(v).replace(/"/g, '""')}"`;
