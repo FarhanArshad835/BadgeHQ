@@ -138,6 +138,53 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     });
   }
 
+  // Read-only: ?transit=YYYY-MM breaks down the "in transit / unknown" orders
+  // for a month — why each isn't delivered/RTO. Old months should be nearly
+  // empty; a large bucket points at the cause (no AWB, AWB not in the sheet,
+  // or an unreadable raw status).
+  const transitMonth = new URL(request.url).searchParams.get("transit");
+  if (transitMonth) {
+    const app = await getPnlApp();
+    const shop = app.shopDomain;
+    if (!shop) return json({ error: "not-configured" }, { status: 400 });
+
+    const [ty, tm] = transitMonth.split("-").map(Number);
+    const tStart = new Date(Date.UTC(ty, tm - 1, 1) - IST_OFFSET_MS);
+    const tEnd = new Date(Date.UTC(ty, tm, 1) - IST_OFFSET_MS);
+
+    const orders = await prisma.orderFinancials.findMany({
+      where: { shop, orderCreatedAt: { gte: tStart, lt: tEnd } },
+      select: { deliveryStatus: true, awb: true, shippingStatus: true },
+    });
+
+    const byStatus: Record<string, number> = {};
+    let total = 0;
+    let notResolved = 0;
+    let noAwb = 0;
+    let hasAwbUnresolved = 0;
+    for (const o of orders) {
+      total++;
+      byStatus[o.deliveryStatus] = (byStatus[o.deliveryStatus] || 0) + 1;
+      const resolved = o.deliveryStatus === "delivered" || o.deliveryStatus === "rto";
+      if (resolved) continue;
+      notResolved++;
+      if (!o.awb) noAwb++;
+      else hasAwbUnresolved++;
+    }
+    return json({
+      ok: true,
+      shop,
+      month: transitMonth,
+      totalOrders: total,
+      notResolved, // neither delivered nor rto
+      breakdown: {
+        noAwb, // nothing to match against the sheet
+        hasAwbButUnresolved: hasAwbUnresolved, // AWB present, sheet didn't resolve it
+      },
+      byDeliveryStatus: byStatus,
+    });
+  }
+
   const results: Record<string, unknown> = {};
 
   // 1) Standalone P&L app (custom-app token) — this is the one that actually
