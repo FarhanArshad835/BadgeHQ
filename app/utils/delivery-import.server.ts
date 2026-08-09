@@ -56,7 +56,12 @@ export function parseDeliveryCsv(csv: string): {
   const start = hasHeader ? 1 : 0;
   for (let i = start; i < lines.length; i++) {
     const cells = splitCsvLine(lines[i]);
-    const awb = String(cells[awbCol] ?? "").replace(/[^0-9]/g, "").trim();
+    // Keep ALPHANUMERICS — some AWBs contain letters (e.g. BlueDart "7D131105745",
+    // Shiprocket "SRSP…"). Stripping to digits corrupted them ("7D131105745" ->
+    // "7131105745") so they never matched OrderFinancials.awb (stored verbatim
+    // from Shopify), leaving delivered orders stuck as "unknown". Only remove
+    // whitespace/punctuation, and don't lower-case (AWBs are case-sensitive IDs).
+    const awb = String(cells[awbCol] ?? "").replace(/[^0-9a-zA-Z]/g, "").trim();
     const outcome = mapSheetStatus(String(cells[statusCol] ?? ""));
     if (!awb || awb.length < 8 || !outcome) {
       skipped++;
