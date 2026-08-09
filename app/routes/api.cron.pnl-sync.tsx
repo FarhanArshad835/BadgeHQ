@@ -323,6 +323,46 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     return json({ ok: true, shop, found: rows.length, orders: rows });
   }
 
+  // Read-only: ?onhold=YYYY-MM shows the revenue distribution of PAID/ON_HOLD
+  // orders — to confirm whether they're tiny ReturnHQ ₹100 fee orders (which
+  // pollute placed revenue + the funnel) vs real held sales.
+  const onholdMonth = new URL(request.url).searchParams.get("onhold");
+  if (onholdMonth) {
+    const app = await getPnlApp();
+    const shop = app.shopDomain;
+    if (!shop) return json({ error: "not-configured" }, { status: 400 });
+    const [y, m] = onholdMonth.split("-").map(Number);
+    const start = new Date(Date.UTC(y, m - 1, 1) - IST_OFFSET_MS);
+    const end = new Date(Date.UTC(y, m, 1) - IST_OFFSET_MS);
+    const rows = await prisma.orderFinancials.findMany({
+      where: {
+        shop,
+        orderCreatedAt: { gte: start, lt: end },
+        financialStatus: { equals: "PAID", mode: "insensitive" },
+        fulfillmentStatus: { equals: "ON_HOLD", mode: "insensitive" },
+      },
+      select: { orderName: true, grossRevenueMinor: true },
+    });
+    // Bucket by rupee value.
+    const buckets: Record<string, number> = {};
+    let sum = 0n;
+    for (const r of rows) {
+      const rupees = Number(r.grossRevenueMinor) / 100;
+      sum += r.grossRevenueMinor;
+      const key = rupees <= 100 ? "≤₹100" : rupees <= 200 ? "₹101-200" : rupees <= 500 ? "₹201-500" : ">₹500";
+      buckets[key] = (buckets[key] || 0) + 1;
+    }
+    return json({
+      ok: true,
+      shop,
+      month: onholdMonth,
+      count: rows.length,
+      totalRevenueRupees: Number(sum) / 100,
+      byValueBucket: buckets,
+      sample: rows.slice(0, 5).map((r) => ({ name: r.orderName, rupees: Number(r.grossRevenueMinor) / 100 })),
+    });
+  }
+
   const results: Record<string, unknown> = {};
 
   // 1) Standalone P&L app (custom-app token) — this is the one that actually
