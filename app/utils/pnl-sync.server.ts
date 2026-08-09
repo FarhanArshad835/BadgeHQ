@@ -124,13 +124,17 @@ async function writeOrderPage(shop: string, computed: OrderFinancialsComputed[])
   // dataComplete from the merged shipping status in SQL.
   const rows = computed.map((c) => {
     const initialShippingStatus = c.awb ? "pending" : "no-awb";
+    // Shopify-cancelled orders get a terminal deliveryStatus straight away: they
+    // have no AWB, so the delivery sheet (keyed by AWB) will never resolve them —
+    // without this they'd sit as "no-awb" forever and be miscounted as in-transit.
+    const initialDeliveryStatus = c.isCancelled ? "cancelled" : "unknown";
     return Prisma.sql`(
       ${randomUUID()}, ${shop}, ${c.orderId}, ${c.orderName}, ${c.orderCreatedAt}, ${c.currency},
       ${c.grossRevenueMinor}, ${c.refundsMinor}, ${c.discountsMinor},
       ${c.cogsMinor}, ${c.cogsComplete},
       ${initialShippingStatus}, ${c.awb}, ${c.carrier},
       ${c.financialStatus}, ${c.fulfillmentStatus},
-      ${c.cogsComplete}, ${now}, ${now}, ${now}
+      ${c.cogsComplete}, ${initialDeliveryStatus}, ${now}, ${now}, ${now}
     )`;
   });
 
@@ -142,7 +146,7 @@ async function writeOrderPage(shop: string, computed: OrderFinancialsComputed[])
       "cogsMinor", "cogsComplete",
       "shippingStatus", "awb", "carrier",
       "financialStatus", "fulfillmentStatus",
-      "dataComplete", "revenueSyncedAt", "cogsSyncedAt", "updatedAt"
+      "dataComplete", "deliveryStatus", "revenueSyncedAt", "cogsSyncedAt", "updatedAt"
     )
     VALUES ${Prisma.join(rows)}
     ON CONFLICT ("shop", "orderId") DO UPDATE SET
@@ -162,6 +166,13 @@ async function writeOrderPage(shop: string, computed: OrderFinancialsComputed[])
       "carrier"           = EXCLUDED."carrier",
       "financialStatus"   = EXCLUDED."financialStatus",
       "fulfillmentStatus" = EXCLUDED."fulfillmentStatus",
+      -- A newly-cancelled order becomes 'cancelled'; otherwise keep the delivery
+      -- outcome the sheet resolved (delivered/rto/…). Never downgrade a resolved
+      -- order — only cancelled wins, and a cancelled order has no AWB so the
+      -- sheet never set anything to lose.
+      "deliveryStatus"    = CASE WHEN EXCLUDED."deliveryStatus" = 'cancelled'
+                                 THEN 'cancelled'
+                                 ELSE "OrderFinancials"."deliveryStatus" END,
       "dataComplete"      = (EXCLUDED."cogsComplete" AND
                              CASE WHEN "OrderFinancials"."shippingCostMinor" IS NOT NULL
                                   THEN "OrderFinancials"."shippingStatus"

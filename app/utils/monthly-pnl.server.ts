@@ -54,6 +54,7 @@ export type RevenueDelivered = {
   placedOrders: number;
   deliveredOrders: number;
   rtoOrders: number;
+  cancelledOrders: number;
   inTransitOrders: number;
   unresolvedOrders: number;
   deliveredPairs: number; // Σ qty on delivered orders
@@ -85,6 +86,7 @@ export async function revenueAndDelivered(shop: string, month: string): Promise<
   let refundsMinor = 0n;
   let deliveredOrders = 0;
   let rtoOrders = 0;
+  let cancelledOrders = 0;
   let inTransitOrders = 0;
   let unresolvedOrders = 0;
   let resolvedOrders = 0;
@@ -103,6 +105,8 @@ export async function revenueAndDelivered(shop: string, month: string): Promise<
       deliveredRevenueMinor += o.grossRevenueMinor; // net-of-discount order value
     } else if (oc === "rto" || oc === "rto_in_transit") {
       rtoOrders++;
+    } else if (oc === "cancelled") {
+      cancelledOrders++;
     } else if (oc === "in_transit" || oc === "no-awb" || oc === "unknown") {
       inTransitOrders++;
     }
@@ -126,6 +130,7 @@ export async function revenueAndDelivered(shop: string, month: string): Promise<
     placedOrders,
     deliveredOrders,
     rtoOrders,
+    cancelledOrders,
     inTransitOrders,
     unresolvedOrders,
     deliveredPairs: 0, // filled by deliveredCogs (needs line rows) — set in computeMonth
@@ -261,6 +266,7 @@ export type MonthlyPnl = {
   placedOrders: number;
   deliveredOrders: number;
   rtoOrders: number;
+  cancelledOrders: number;
   inTransitOrders: number;
   deliveredPairs: number;
   // Per-delivered / per-pair metrics (null when netPnl is suppressed).
@@ -407,6 +413,7 @@ export async function computeMonth(shop: string, month: string): Promise<Monthly
     placedOrders: rev.placedOrders,
     deliveredOrders: rev.deliveredOrders,
     rtoOrders: rev.rtoOrders,
+    cancelledOrders: rev.cancelledOrders,
     inTransitOrders: rev.inTransitOrders,
     deliveredPairs: cogs.deliveredPairs,
     netPnlPerDeliveredOrderMinor: perDelOrder(netPnlMinor),
