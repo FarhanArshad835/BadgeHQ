@@ -67,6 +67,77 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     return json({ ok: true, shop, months: stats });
   }
 
+  // Read-only: ?missing=YYYY-MM lists the delivered lines that still have NO
+  // cost-per-item — the exact rows dragging that month's match rate below 100%.
+  // Grouped by variant so a fixable variant shows once with its total line count.
+  const missingMonth = new URL(request.url).searchParams.get("missing");
+  if (missingMonth) {
+    const app = await getPnlApp();
+    const shop = app.shopDomain;
+    if (!shop) return json({ error: "not-configured" }, { status: 400 });
+
+    // Same window + delivered-set as deliveredCogs(), so the counts reconcile.
+    const [y, mo] = missingMonth.split("-").map(Number);
+    const start = new Date(Date.UTC(y, mo - 1, 1) - IST_OFFSET_MS);
+    const end = new Date(Date.UTC(y, mo, 1) - IST_OFFSET_MS);
+
+    const delivered = await prisma.orderFinancials.findMany({
+      where: { shop, orderCreatedAt: { gte: start, lt: end }, deliveryStatus: "delivered" },
+      select: { orderId: true },
+    });
+    const ids = delivered.map((d) => d.orderId);
+
+    const lines = await prisma.orderLineFinancials.findMany({
+      where: { shop, orderId: { in: ids } },
+      select: {
+        variantId: true,
+        productTitle: true,
+        variantTitle: true,
+        quantity: true,
+        lineCogsComplete: true,
+        lineCogsMinor: true,
+      },
+    });
+
+    let deliveredLines = 0;
+    let missingLines = 0;
+    const byVariant = new Map<
+      string,
+      { productTitle: string; variantTitle: string; variantId: string; lines: number; pairs: number }
+    >();
+    for (const l of lines) {
+      deliveredLines++;
+      const hasCost = l.lineCogsComplete && l.lineCogsMinor != null;
+      if (hasCost) continue;
+      missingLines++;
+      const key = l.variantId || `${l.productTitle}|${l.variantTitle}`;
+      const g =
+        byVariant.get(key) ??
+        {
+          productTitle: l.productTitle,
+          variantTitle: l.variantTitle,
+          variantId: l.variantId,
+          lines: 0,
+          pairs: 0,
+        };
+      g.lines += 1;
+      g.pairs += l.quantity;
+      byVariant.set(key, g);
+    }
+
+    const missing = Array.from(byVariant.values()).sort((a, b) => b.lines - a.lines);
+    return json({
+      ok: true,
+      shop,
+      month: missingMonth,
+      deliveredLines,
+      missingLines,
+      matchRatePct: deliveredLines ? Number((((deliveredLines - missingLines) / deliveredLines) * 100).toFixed(2)) : 100,
+      distinctVariantsMissing: missing.length,
+      missing,
+    });
+  }
+
   const results: Record<string, unknown> = {};
 
   // 1) Standalone P&L app (custom-app token) — this is the one that actually
