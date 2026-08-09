@@ -306,7 +306,7 @@ export type DeliveryOutcome =
 // ("RETURNED_TO_ORIGIN", "RTO IN TRANSIT", "rto-delivered"), so we normalise all
 // separators to a single space before matching. Order matters below: terminal
 // RTO must be tested before generic "returning to origin".
-const RTO_TERMINAL_RE = /\brto (delivered|received|complete)|returned? to origin\b|\brts\b|return (received|accepted|to (seller|warehouse|origin))/;
+const RTO_TERMINAL_RE = /\brto (delivered|received|complete)|returned? to origin\b|\brts\b|return (received|accepted|to (seller|warehouse|origin))|reached back at seller/;
 const RTO_TRANSIT_RE = /returning to origin|rto (in transit|initiat)|\brto\b/;
 const LOST_RE = /\blost\b|shipment lost|untraceable/;
 const CANCELLED_RE = /\bcancel(l?ed|ed)?\b/;
