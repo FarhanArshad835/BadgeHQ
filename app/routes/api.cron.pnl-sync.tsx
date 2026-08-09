@@ -17,6 +17,7 @@ import { unauthenticated } from "../shopify.server";
 import { syncRevenueAndCogs, backfillShipping } from "../utils/pnl-sync.server";
 import { getPnlApp, runStandaloneSync } from "../utils/pnl-app.server";
 import { fetchAndApplyDeliverySheet } from "../utils/delivery-import.server";
+import { computeMonth } from "../utils/monthly-pnl.server";
 
 export const config = { maxDuration: 300 };
 
@@ -30,6 +31,40 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const auth = request.headers.get("Authorization");
   if (!secret || auth !== `Bearer ${secret}`) {
     return json({ error: "unauthorized" }, { status: 401 });
+  }
+
+  // Read-only reporting mode: ?stats=1 returns the COGS cost-match rate (and a
+  // few funnel counts) for every month with orders. Runs NO sync — it only
+  // reads the already-synced tables, so it's safe to call any time.
+  if (new URL(request.url).searchParams.get("stats") === "1") {
+    const app = await getPnlApp();
+    const shop = app.shopDomain;
+    if (!shop) return json({ error: "not-configured" }, { status: 400 });
+
+    // Distinct order-months (IST), same derivation the dashboard dropdown uses.
+    const rows = await prisma.orderFinancials.findMany({
+      where: { shop },
+      select: { orderCreatedAt: true },
+    });
+    const months = new Set<string>();
+    for (const r of rows) {
+      const ist = new Date(r.orderCreatedAt.getTime() + IST_OFFSET_MS);
+      months.add(`${ist.getUTCFullYear()}-${String(ist.getUTCMonth() + 1).padStart(2, "0")}`);
+    }
+    const sorted = Array.from(months).sort();
+
+    const stats = [];
+    for (const month of sorted) {
+      const m = await computeMonth(shop, month);
+      stats.push({
+        month,
+        cogsMatchRate: Number((m.cogsMatchRate * 100).toFixed(1)),
+        placedOrders: m.placedOrders,
+        deliveredOrders: m.deliveredOrders,
+        deliveredPairs: m.deliveredPairs,
+      });
+    }
+    return json({ ok: true, shop, months: stats });
   }
 
   const results: Record<string, unknown> = {};
