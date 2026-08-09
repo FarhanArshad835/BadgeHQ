@@ -21,10 +21,8 @@ import {
   type OrderFinancialsComputed,
 } from "./pnl.server";
 import { resolveBilling } from "./carrier-billing.server";
-import { trackParcel, type TrackingResult } from "./tracking.server";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const SHIPROCKET_BASE_URL_TRACK = "https://apiv2.shiprocket.in/v1/external";
 
 /** dataComplete = COGS fully known AND shipping resolved to a real billed cost. */
 function isDataComplete(cogsComplete: boolean, shippingStatus: string): boolean {
@@ -332,43 +330,12 @@ export type DeliveryOutcome =
   | "in_transit"
   | "unresolved";
 
-// Carriers write statuses with underscores, hyphens or spaces interchangeably
-// ("RETURNED_TO_ORIGIN", "RTO IN TRANSIT", "rto-delivered"), so we normalise all
-// separators to a single space before matching. Order matters below: terminal
-// RTO must be tested before generic "returning to origin".
-const RTO_TERMINAL_RE = /\brto (delivered|received|complete)|returned? to origin\b|\brts\b|return (received|accepted|to (seller|warehouse|origin))|reached back at seller/;
-const RTO_TRANSIT_RE = /returning to origin|rto (in transit|initiat)|\brto\b/;
-const LOST_RE = /\blost\b|shipment lost|untraceable/;
-const CANCELLED_RE = /\bcancel(l?ed|ed)?\b/;
-
-/** Lower-case and collapse _/-/whitespace to single spaces for status matching. */
-function normStatus(s: string): string {
-  return String(s || "").toLowerCase().replace(/[_\-\s]+/g, " ").trim();
-}
-
-/**
- * Classify a courier TrackingResult into a delivery outcome.
- *
- * CRITICAL ORDERING: RTO is tested BEFORE the carrier's `delivered` flag. The
- * carriers report "RTO Delivered" (the RETURN reached origin) with their
- * delivered flag set — but that is an RTO, not a customer sale. Counting it as
- * delivered would inflate delivered revenue + COGS. So terminal-RTO wins first,
- * then the genuine delivered flag / "delivered" text, then in-flight RTO, lost,
- * cancelled, and finally in_transit. Unreadable status → "unresolved" (never
- * silently treated as not-delivered — the spec's key rule).
- */
-export function classifyDelivery(r: TrackingResult): DeliveryOutcome {
-  const text = normStatus(`${r.status} ${r.lastActivity}`);
-  // RTO FIRST — "rto delivered" must not be read as a customer delivery.
-  if (RTO_TERMINAL_RE.test(text)) return "rto";
-  if (RTO_TRANSIT_RE.test(text)) return "rto_in_transit";
-  // Genuine customer delivery (carrier flag, or a "delivered" not preceded by RTO).
-  if (r.delivered) return "delivered";
-  if (LOST_RE.test(text)) return "lost";
-  if (CANCELLED_RE.test(text)) return "cancelled";
-  if (text) return "in_transit";
-  return "unresolved";
-}
+// Delivery outcome now comes ENTIRELY from the uploaded/published tracking sheet
+// (delivery-import.server.ts → mapSheetStatus), keyed by AWB. The courier-status
+// lookup was removed: it depended on a Delhivery/Shiprocket token that was
+// unreliable (99% of sheet rows had logged "Lookup Failed: token missing"), and
+// the sheet is the merchant's authority anyway. The freight-COST backfill
+// (backfillShipping, above) still calls the courier — that's a separate concern.
 
 /** Resolved = terminal outcome, safe to count in rate denominators. in_transit,
  *  rto_in_transit and unresolved are NOT resolved (not-yet-known, not failed). */
@@ -384,178 +351,3 @@ export function isResolvedOutcome(o: string): boolean {
   );
 }
 
-/**
- * Fill delivery outcome for orders whose status isn't final yet. This is the
- * backbone of the monthly P&L: revenue, COGS and per-order metrics all count
- * DELIVERED orders only. Only re-checks orders that aren't already terminal
- * (delivered/rto), so a settled order is never re-fetched — keeps carrier calls
- * and Neon writes bounded. Never guesses: an order with no AWB is "no-awb", an
- * unreadable AWB stays "unknown", and both are simply excluded from delivered.
- */
-export async function backfillDelivery(
-  shop: string,
-  opts: {
-    limit?: number;
-    carrier?: { shiprocketEmail?: string; shiprocketPassword?: string; delhiveryApiKey?: string };
-  } = {},
-): Promise<{ checked: number; delivered: number; rto: number; inTransit: number; noAwb: number }> {
-  const limit = opts.limit ?? 60;
-
-  let creds = opts.carrier;
-  if (!creds) {
-    const [ai, delivery] = await Promise.all([
-      prisma.aiReplySettings.findUnique({
-        where: { shop },
-        select: { waShiprocketEmail: true, waShiprocketPassword: true },
-      }),
-      prisma.deliverySettings.findUnique({ where: { shop }, select: { apiToken: true } }),
-    ]);
-    creds = {
-      shiprocketEmail: ai?.waShiprocketEmail,
-      shiprocketPassword: ai?.waShiprocketPassword,
-      delhiveryApiKey: delivery?.apiToken,
-    };
-  }
-
-  // Orders not yet in a terminal delivery state. Those with no AWB get marked
-  // "no-awb" in one cheap statement (no carrier call needed).
-  const noAwbRes = await prisma.orderFinancials.updateMany({
-    where: { shop, awb: "", deliveryStatus: { in: ["unknown"] } },
-    data: { deliveryStatus: "no-awb", deliverySyncedAt: new Date() },
-  });
-
-  // Re-check only NON-terminal states — a delivered/rto/lost/cancelled order is
-  // settled and never re-fetched (keeps carrier calls + Neon writes bounded).
-  const toCheck = await prisma.orderFinancials.findMany({
-    where: {
-      shop,
-      awb: { not: "" },
-      deliveryStatus: { in: ["unknown", "in_transit", "rto_in_transit", "unresolved"] },
-    },
-    orderBy: { orderCreatedAt: "asc" },
-    take: limit,
-    select: { id: true, awb: true },
-  });
-
-  let delivered = 0;
-  let rto = 0;
-  let inTransit = 0;
-  const noAwb = noAwbRes.count;
-  for (const row of toCheck) {
-    const r = await trackParcel({
-      awb: row.awb,
-      shiprocketEmail: creds.shiprocketEmail || undefined,
-      shiprocketPassword: creds.shiprocketPassword || undefined,
-      delhiveryApiKey: creds.delhiveryApiKey || undefined,
-    });
-    if (!r) {
-      // Carrier didn't recognise/return the AWB this pass — leave as-is to retry.
-      await sleep(300);
-      continue;
-    }
-    const status = classifyDelivery(r);
-    await prisma.orderFinancials.update({
-      where: { id: row.id },
-      data: {
-        deliveryStatus: status,
-        deliveredAt: status === "delivered" ? new Date() : null,
-        deliverySyncedAt: new Date(),
-      },
-    });
-    if (status === "delivered") delivered++;
-    else if (status === "rto") rto++;
-    else inTransit++;
-    await sleep(300); // gentle pacing across carrier calls
-  }
-
-  return { checked: toCheck.length, delivered, rto, inTransit, noAwb };
-}
-
-/**
- * High-throughput delivery backfill for the initial catch-up (thousands of
- * AWBs). The per-AWB path (backfillDelivery → trackParcel) re-authenticates to
- * Shiprocket on EVERY call, which is far too slow for a big backlog. This
- * authenticates ONCE and reuses the token, tracking each AWB directly, with
- * light pacing. Same classification (classifyDelivery) → same outcomes.
- *
- * Shiprocket-only (that's where the AWBs live). Orders it can't resolve stay
- * as-is to retry. Returns per-outcome counts.
- */
-export async function backfillDeliveryBulk(
-  shop: string,
-  opts: { limit?: number; shiprocketEmail: string; shiprocketPassword: string; sleepMs?: number },
-): Promise<{ checked: number; delivered: number; rto: number; other: number; unresolved: number }> {
-  const limit = opts.limit ?? 500;
-  const sleepMs = opts.sleepMs ?? 120;
-
-  // No AWB → cheap bulk mark, no carrier call.
-  await prisma.orderFinancials.updateMany({
-    where: { shop, awb: "", deliveryStatus: "unknown" },
-    data: { deliveryStatus: "no-awb", deliverySyncedAt: new Date() },
-  });
-
-  // Authenticate once.
-  const authRes = await fetch(`${SHIPROCKET_BASE_URL_TRACK}/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email: opts.shiprocketEmail, password: opts.shiprocketPassword }),
-    signal: AbortSignal.timeout(10000),
-  });
-  const auth = await authRes.json().catch(() => ({}));
-  if (!auth?.token) return { checked: 0, delivered: 0, rto: 0, other: 0, unresolved: 0 };
-  const token = String(auth.token);
-
-  const toCheck = await prisma.orderFinancials.findMany({
-    where: { shop, awb: { not: "" }, deliveryStatus: { in: ["unknown", "in_transit", "rto_in_transit", "unresolved"] } },
-    orderBy: { orderCreatedAt: "asc" },
-    take: limit,
-    select: { id: true, awb: true },
-  });
-
-  let delivered = 0;
-  let rto = 0;
-  let other = 0;
-  let unresolved = 0;
-  for (const row of toCheck) {
-    let outcome: DeliveryOutcome = "unresolved";
-    try {
-      const res = await fetch(
-        `${SHIPROCKET_BASE_URL_TRACK}/courier/track/awb/${encodeURIComponent(row.awb)}`,
-        { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(10000) },
-      );
-      const data = await res.json().catch(() => ({}));
-      const td = data?.tracking_data;
-      const status = String(
-        td?.shipment_status_text ?? td?.shipment_track?.[0]?.current_status ?? "",
-      ).trim();
-      if (status) {
-        const delFlag = /\bdelivered\b/i.test(status) && !/\b(un|not\s+)delivered\b/i.test(status);
-        outcome = classifyDelivery({
-          awb: row.awb, carrier: "shiprocket", status, lastActivity: "",
-          location: "", lastUpdate: "", delivered: delFlag, failedAttempt: false,
-        });
-      }
-    } catch {
-      outcome = "unresolved";
-    }
-
-    if (outcome !== "unresolved") {
-      await prisma.orderFinancials.update({
-        where: { id: row.id },
-        data: {
-          deliveryStatus: outcome,
-          deliveredAt: outcome === "delivered" ? new Date() : null,
-          deliverySyncedAt: new Date(),
-        },
-      });
-      if (outcome === "delivered") delivered++;
-      else if (outcome === "rto") rto++;
-      else other++;
-    } else {
-      unresolved++;
-    }
-    await sleep(sleepMs);
-  }
-
-  return { checked: toCheck.length, delivered, rto, other, unresolved };
-}
