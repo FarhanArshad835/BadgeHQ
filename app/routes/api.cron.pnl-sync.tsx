@@ -185,6 +185,64 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     });
   }
 
+  // Read-only: ?noawb=YYYY-MM lists every order in the month with no AWB and
+  // no delivered/rto outcome — the orders stuck as "no-awb". Add &format=csv to
+  // download. These are the ones that can never resolve without a tracking no.
+  const noawbMonth = new URL(request.url).searchParams.get("noawb");
+  if (noawbMonth) {
+    const app = await getPnlApp();
+    const shop = app.shopDomain;
+    if (!shop) return json({ error: "not-configured" }, { status: 400 });
+
+    const [ny, nm] = noawbMonth.split("-").map(Number);
+    const nStart = new Date(Date.UTC(ny, nm - 1, 1) - IST_OFFSET_MS);
+    const nEnd = new Date(Date.UTC(ny, nm, 1) - IST_OFFSET_MS);
+
+    const rows = await prisma.orderFinancials.findMany({
+      where: {
+        shop,
+        orderCreatedAt: { gte: nStart, lt: nEnd },
+        awb: "",
+        deliveryStatus: { notIn: ["delivered", "rto"] },
+      },
+      select: { orderName: true, orderId: true, orderCreatedAt: true, deliveryStatus: true },
+      orderBy: { orderCreatedAt: "asc" },
+    });
+
+    if (new URL(request.url).searchParams.get("format") === "csv") {
+      const esc = (v: string) => `"${String(v).replace(/"/g, '""')}"`;
+      const csv = [
+        "order_name,order_id,created_at,delivery_status",
+        ...rows.map((r) =>
+          [
+            esc(r.orderName),
+            esc(r.orderId),
+            esc(r.orderCreatedAt.toISOString()),
+            esc(r.deliveryStatus),
+          ].join(","),
+        ),
+      ].join("\n");
+      return new Response(csv, {
+        headers: {
+          "Content-Type": "text/csv; charset=utf-8",
+          "Content-Disposition": `attachment; filename="no-awb-${noawbMonth}.csv"`,
+        },
+      });
+    }
+
+    return json({
+      ok: true,
+      shop,
+      month: noawbMonth,
+      count: rows.length,
+      orders: rows.map((r) => ({
+        name: r.orderName,
+        createdAt: r.orderCreatedAt.toISOString().slice(0, 10),
+        status: r.deliveryStatus,
+      })),
+    });
+  }
+
   const results: Record<string, unknown> = {};
 
   // 1) Standalone P&L app (custom-app token) — this is the one that actually
