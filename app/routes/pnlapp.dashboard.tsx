@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Form, useActionData, useLoaderData, useNavigation, useSearchParams, useRouteError, isRouteErrorResponse } from "@remix-run/react";
+import { Form, Link, useActionData, useLoaderData, useNavigation, useSearchParams, useRouteError, isRouteErrorResponse } from "@remix-run/react";
 import { useEffect, useRef, useState } from "react";
 import prisma from "../db.server";
 import { formatMinor } from "../utils/money";
@@ -58,6 +58,37 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     ? await prisma.pnlMonthlyInput.findUnique({ where: { shop_month: { shop, month } } })
     : null;
 
+  // Funnel drill-in: ?status=<funnel bucket> lists that month's orders. Each
+  // funnel line maps to the underlying deliveryStatus values (some are groups).
+  const DRILL: Record<string, string[]> = {
+    delivered: ["delivered"],
+    rto: ["rto", "rto_in_transit"],
+    cancelled: ["cancelled"],
+    abandoned: ["abandoned"],
+    intransit: ["in_transit", "no-awb", "unknown", "lost"], // the catch-all bucket
+  };
+  const drillStatus = url.searchParams.get("status") || "";
+  let drillOrders: Array<{ name: string; id: string; status: string; created: string }> | null = null;
+  if (shop && drillStatus && DRILL[drillStatus]) {
+    const [dy, dm] = month.split("-").map(Number);
+    const IST = 5.5 * 60 * 60 * 1000;
+    const dStart = new Date(Date.UTC(dy, dm - 1, 1) - IST);
+    const dEnd = new Date(Date.UTC(dy, dm, 1) - IST);
+    const rows = await prisma.orderFinancials.findMany({
+      where: { shop, orderCreatedAt: { gte: dStart, lt: dEnd }, deliveryStatus: { in: DRILL[drillStatus] } },
+      select: { orderName: true, orderId: true, deliveryStatus: true, orderCreatedAt: true },
+      orderBy: { orderCreatedAt: "asc" },
+      take: 5000,
+    });
+    drillOrders = rows.map((o) => ({
+      name: o.orderName,
+      // Numeric id for the Shopify admin order URL.
+      id: o.orderId.replace(/^.*\//, ""),
+      status: o.deliveryStatus,
+      created: o.orderCreatedAt.toISOString().slice(0, 10),
+    }));
+  }
+
   // BigInt → string at the JSON boundary. `s` maps a bigint|null to string|null.
   const s = (v: bigint | null | undefined) => (v == null ? null : v.toString());
   // Rupee string for prefilling inputs (paise → "1234.56").
@@ -71,6 +102,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     months,
     monthLabels,
     month,
+    shopDomain: shop || "",
+    drillStatus: drillOrders ? drillStatus : "",
+    drillOrders,
     currency: "INR",
     lastSyncAt: app.lastSyncAt,
     lastSyncCount,
@@ -236,6 +270,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 };
 
+const DRILL_LABELS: Record<string, string> = {
+  delivered: "Delivered",
+  rto: "RTO",
+  cancelled: "Cancelled",
+  abandoned: "Abandoned",
+  intransit: "In transit / unknown",
+};
+
 export default function PnlDashboard() {
   const d = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
@@ -278,6 +320,9 @@ export default function PnlDashboard() {
   const monthLabel = (m: string) => d.monthLabels[m] ?? m;
   const r = d.report;
   const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
+  // Funnel drill-in link: same month, toggles the status list open/closed.
+  const drill = (status: string) =>
+    d.drillStatus === status ? `?month=${d.month}` : `?month=${d.month}&status=${status}`;
 
   return (
     <div className="pnl">
@@ -302,7 +347,7 @@ export default function PnlDashboard() {
           <select
             className="pnl-select"
             value={d.month}
-            onChange={(e) => { const p = new URLSearchParams(searchParams); p.set("month", e.target.value); setSearchParams(p); }}
+            onChange={(e) => { const p = new URLSearchParams(searchParams); p.set("month", e.target.value); p.delete("status"); setSearchParams(p); }}
           >
             {d.months.map((m) => <option key={m} value={m}>{monthLabel(m)}</option>)}
           </select>
@@ -369,11 +414,11 @@ export default function PnlDashboard() {
                 <table className="pnl-table">
                   <tbody>
                     <Row label="Placed orders" value={String(r.placedOrders)} />
-                    <Row label="— Delivered" value={String(r.deliveredOrders)} />
-                    <Row label="— RTO" value={String(r.rtoOrders)} />
-                    <Row label="— Cancelled" value={String(r.cancelledOrders)} />
-                    <Row label="— Abandoned" value={String(r.abandonedOrders)} />
-                    <Row label="— In transit / unknown" value={String(r.inTransitOrders)} />
+                    <Row label="— Delivered" value={String(r.deliveredOrders)} to={drill("delivered")} active={d.drillStatus === "delivered"} />
+                    <Row label="— RTO" value={String(r.rtoOrders)} to={drill("rto")} active={d.drillStatus === "rto"} />
+                    <Row label="— Cancelled" value={String(r.cancelledOrders)} to={drill("cancelled")} active={d.drillStatus === "cancelled"} />
+                    <Row label="— Abandoned" value={String(r.abandonedOrders)} to={drill("abandoned")} active={d.drillStatus === "abandoned"} />
+                    <Row label="— In transit / unknown" value={String(r.inTransitOrders)} to={drill("intransit")} active={d.drillStatus === "intransit"} />
                     {/* The five outcome lines sum to Placed by construction. */}
                     <Row
                       label="Delivered items (pairs)"
@@ -396,6 +441,46 @@ export default function PnlDashboard() {
                 </table>
               </div>
             </div>
+
+            {/* Funnel drill-in: the orders behind the clicked status line. */}
+            {d.drillOrders && (
+              <div className="pnl-panel" style={{ marginTop: 20 }}>
+                <div className="pnl-section-label">
+                  {DRILL_LABELS[d.drillStatus] || d.drillStatus} — {d.drillOrders.length} order
+                  {d.drillOrders.length === 1 ? "" : "s"} ({d.monthLabels[d.month] || d.month})
+                </div>
+                {d.drillOrders.length === 0 ? (
+                  <p className="pnl-sub" style={{ marginTop: 0 }}>No orders in this status for the month.</p>
+                ) : (
+                  <div style={{ maxHeight: 420, overflowY: "auto" }}>
+                    <table className="pnl-table">
+                      <tbody>
+                        {d.drillOrders.map((o) => (
+                          <tr key={o.id}>
+                            <td>
+                              {d.shopDomain ? (
+                                <a
+                                  href={`https://admin.shopify.com/store/${d.shopDomain.replace(".myshopify.com", "")}/orders/${o.id}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  style={{ color: "inherit" }}
+                                >
+                                  {o.name || o.id}
+                                </a>
+                              ) : (
+                                o.name || o.id
+                              )}
+                            </td>
+                            <td className="pnl-num" style={{ fontSize: 12, opacity: 0.7 }}>{o.status}</td>
+                            <td className="pnl-num" style={{ fontSize: 12, opacity: 0.7 }}>{o.created}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
           </>
         )}
 
@@ -505,12 +590,21 @@ function Kpi({ label, value, sub, accent, big }: { label: string; value: string;
   );
 }
 
-function Row({ label, value, neg, strong, hl, big, pending }: {
+function Row({ label, value, neg, strong, hl, big, pending, to, active }: {
   label: string; value: string; neg?: boolean; strong?: boolean; hl?: boolean; big?: boolean; pending?: boolean;
+  to?: string; active?: boolean;
 }) {
   return (
-    <tr className={hl ? "pnl-row-hl" : ""}>
-      <td className={strong ? "pnl-strong" : ""}>{label}</td>
+    <tr className={`${hl ? "pnl-row-hl" : ""} ${active ? "pnl-row-active" : ""}`}>
+      <td className={strong ? "pnl-strong" : ""}>
+        {to ? (
+          <Link to={to} prefetch="intent" style={{ color: "inherit", textDecoration: active ? "underline" : "none" }}>
+            {label}
+          </Link>
+        ) : (
+          label
+        )}
+      </td>
       <td className={`pnl-num ${strong ? "pnl-strong" : ""} ${neg ? "pnl-neg" : ""} ${pending ? "pnl-pending" : ""}`}
         style={big ? { fontSize: 18, fontWeight: 700 } : undefined}>
         {value}
