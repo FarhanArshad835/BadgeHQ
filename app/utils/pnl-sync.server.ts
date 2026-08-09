@@ -115,6 +115,28 @@ export async function syncRevenueAndCogs(
  *   - ONE bulk `deleteMany` + ONE `createMany` for the line rows.
  * That's ~3 round-trips per page regardless of order count.
  */
+/**
+ * Terminal delivery status an order gets at write time, BEFORE the courier
+ * sheet weighs in — for orders that will never appear in the sheet (no AWB).
+ *
+ * These stores' cancel tooling (Codify, OMS Guru) VOIDS the payment instead of
+ * calling Shopify's native cancel, so cancelledAt stays null; VOIDED is the real
+ * cancel signal. PENDING + never-fulfilled is an abandoned COD (confirmation
+ * never completed) — a distinct outcome, kept separate from a true cancel and
+ * from a paid-but-stuck order.
+ *
+ * Only applied when the order has NO AWB: a shipped order's outcome must come
+ * from the courier, never from its payment state.
+ */
+function initialDelivery(c: OrderFinancialsComputed): string {
+  if (c.awb) return "unknown"; // shipped — let the sheet decide
+  const fin = c.financialStatus.toUpperCase();
+  const ful = c.fulfillmentStatus.toUpperCase();
+  if (c.isCancelled || fin === "VOIDED") return "cancelled";
+  if (fin === "PENDING" && ful !== "FULFILLED") return "abandoned";
+  return "unknown";
+}
+
 async function writeOrderPage(shop: string, computed: OrderFinancialsComputed[]): Promise<void> {
   if (!computed.length) return;
   const now = new Date();
@@ -124,10 +146,7 @@ async function writeOrderPage(shop: string, computed: OrderFinancialsComputed[])
   // dataComplete from the merged shipping status in SQL.
   const rows = computed.map((c) => {
     const initialShippingStatus = c.awb ? "pending" : "no-awb";
-    // Shopify-cancelled orders get a terminal deliveryStatus straight away: they
-    // have no AWB, so the delivery sheet (keyed by AWB) will never resolve them —
-    // without this they'd sit as "no-awb" forever and be miscounted as in-transit.
-    const initialDeliveryStatus = c.isCancelled ? "cancelled" : "unknown";
+    const initialDeliveryStatus = initialDelivery(c);
     return Prisma.sql`(
       ${randomUUID()}, ${shop}, ${c.orderId}, ${c.orderName}, ${c.orderCreatedAt}, ${c.currency},
       ${c.grossRevenueMinor}, ${c.refundsMinor}, ${c.discountsMinor},
@@ -166,12 +185,12 @@ async function writeOrderPage(shop: string, computed: OrderFinancialsComputed[])
       "carrier"           = EXCLUDED."carrier",
       "financialStatus"   = EXCLUDED."financialStatus",
       "fulfillmentStatus" = EXCLUDED."fulfillmentStatus",
-      -- A newly-cancelled order becomes 'cancelled'; otherwise keep the delivery
-      -- outcome the sheet resolved (delivered/rto/…). Never downgrade a resolved
-      -- order — only cancelled wins, and a cancelled order has no AWB so the
-      -- sheet never set anything to lose.
-      "deliveryStatus"    = CASE WHEN EXCLUDED."deliveryStatus" = 'cancelled'
-                                 THEN 'cancelled'
+      -- A no-AWB order newly resolved as cancelled/abandoned takes that status;
+      -- otherwise keep the outcome the sheet resolved (delivered/rto/…). Never
+      -- downgrade a resolved order — and these only fire for orders with no AWB,
+      -- so the sheet never set anything to lose.
+      "deliveryStatus"    = CASE WHEN EXCLUDED."deliveryStatus" IN ('cancelled', 'abandoned')
+                                 THEN EXCLUDED."deliveryStatus"
                                  ELSE "OrderFinancials"."deliveryStatus" END,
       "dataComplete"      = (EXCLUDED."cogsComplete" AND
                              CASE WHEN "OrderFinancials"."shippingCostMinor" IS NOT NULL
@@ -354,7 +373,15 @@ export function classifyDelivery(r: TrackingResult): DeliveryOutcome {
 /** Resolved = terminal outcome, safe to count in rate denominators. in_transit,
  *  rto_in_transit and unresolved are NOT resolved (not-yet-known, not failed). */
 export function isResolvedOutcome(o: string): boolean {
-  return o === "delivered" || o === "rto" || o === "lost" || o === "cancelled";
+  // abandoned = payment pending + never fulfilled: terminal (never shipping), so
+  // it counts as resolved just like cancelled.
+  return (
+    o === "delivered" ||
+    o === "rto" ||
+    o === "lost" ||
+    o === "cancelled" ||
+    o === "abandoned"
+  );
 }
 
 /**
