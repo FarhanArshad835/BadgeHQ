@@ -29,6 +29,7 @@ const ORDER_PNL_FIELDS = `
   id
   name
   createdAt
+  cancelledAt
   displayFinancialStatus
   displayFulfillmentStatus
   currentTotalPriceSet { shopMoney { amount currencyCode } }
@@ -71,6 +72,7 @@ export type OrderFinancialsComputed = {
   cogsComplete: boolean;
   financialStatus: string;
   fulfillmentStatus: string;
+  isCancelled: boolean;
   awb: string;
   carrier: string;
   lines: LineFinancials[];
@@ -187,6 +189,11 @@ export function computeOrderFinancials(node: any): OrderFinancialsComputed {
     cogsComplete,
     financialStatus: String(node?.displayFinancialStatus || ""),
     fulfillmentStatus: String(node?.displayFulfillmentStatus || ""),
+    // Shopify's authoritative cancel flag — set by whoever cancelled (Codify,
+    // OMS Guru, manual). A cancelled order was never shipped, so it has no AWB
+    // and never appears in the delivery sheet; without this it'd be miscounted
+    // as an unresolved "no-awb" shipment forever.
+    isCancelled: Boolean(node?.cancelledAt),
     awb,
     carrier,
     lines,

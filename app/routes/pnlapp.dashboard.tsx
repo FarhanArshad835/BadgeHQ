@@ -111,6 +111,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       placedOrders: r.placedOrders,
       deliveredOrders: r.deliveredOrders,
       rtoOrders: r.rtoOrders,
+      cancelledOrders: r.cancelledOrders,
       inTransitOrders: r.inTransitOrders,
       deliveredPairs: r.deliveredPairs,
       // Per-delivered metrics.
@@ -369,6 +370,7 @@ export default function PnlDashboard() {
                     <Row label="Placed orders" value={String(r.placedOrders)} />
                     <Row label="Delivered" value={String(r.deliveredOrders)} />
                     <Row label="RTO" value={String(r.rtoOrders)} />
+                    <Row label="Cancelled" value={String(r.cancelledOrders)} />
                     <Row label="In transit / unknown" value={String(r.inTransitOrders)} />
                     <Row label="Delivered pairs" value={String(r.deliveredPairs)} />
                     <Row label="Resolution rate" value={pct(r.resolutionRate)} />
