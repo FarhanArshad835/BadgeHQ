@@ -1046,12 +1046,14 @@
       var handleForExclude = (productData && productData.handle) || getHandleFromImg(img);
       if (exMembers && exMembers.loaded) {
         if (handleForExclude && exMembers.products[handleForExclude]) return false;
-      } else {
-        // Excluded-collection list still loading — withhold the badge until we
-        // know for sure, so we don't briefly flash on products that should be
-        // hidden. A retry pass after the prefetch lands will pick it up.
-        return false;
       }
+      // If the excluded-collection list is still loading, FAIL OPEN — show the
+      // badge now rather than withhold it. A large excluded collection can take
+      // many seconds / MBs to prefetch, and withholding meant the badge never
+      // appeared on ANY product before the retry passes gave up. Once the list
+      // lands, removeExcludedBadges() strips the badge from any product that
+      // turns out to be excluded. Better a brief flash on a few excluded cards
+      // than the badge missing everywhere.
     }
 
     if (t.type === "all") return true;
@@ -1165,8 +1167,39 @@
         // Each collection's data lands independently; re-attach so any cards
         // that are now resolvable get their badge.
         if (typeof findAndAttach === "function") findAndAttach();
+        // We FAIL OPEN while an excluded-collection list loads (so the badge
+        // isn't starved by a slow/large prefetch). Once it lands, strip the
+        // badge back off any card whose product is actually in the excluded set.
+        removeExcludedBadges();
       });
     });
+
+    // Remove already-attached image badges from products in a badge's
+    // excludeCollection, after that list has loaded. Each badge element carries
+    // the class badgehq-pb-<id>; we resolve its card's product handle from the
+    // card's product image and drop it if excluded.
+    function removeExcludedBadges() {
+      eligible.forEach(function (badge) {
+        var t = badge.targeting;
+        if (!t || !t.excludeCollection || !t.excludeCollection.value) return;
+        var ex = _collectionMembers[t.excludeCollection.value];
+        if (!ex || !ex.loaded) return;
+        var els = document.querySelectorAll(".badgehq-pb-" + badge.id);
+        for (var i = 0; i < els.length; i++) {
+          var el = els[i];
+          // Find the card root, then its product image, then the handle.
+          var card = el.closest("[class*='card'], [class*='product'], li, article") || el.parentElement;
+          var cardImg = card && card.querySelector("img");
+          var handle = cardImg ? getHandleFromImg(cardImg) : null;
+          if (handle && ex.products[handle]) {
+            // Remove the badge; if its corner stack is now empty, drop that too.
+            var stack = el.parentElement;
+            el.remove();
+            if (stack && stack.children.length === 0 && /badgehq/.test(stack.className || "")) stack.remove();
+          }
+        }
+      });
+    }
 
     // Selectors covering Dawn, Debut, Broadcast, Impulse and other popular themes
     var SELECTORS = [
