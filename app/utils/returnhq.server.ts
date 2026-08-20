@@ -50,6 +50,7 @@ export type ReturnHqMonth = {
   returns: number;
   exchanges: number;
   available: boolean; // false when RETURNHQ_DATABASE_URL isn't set / shop not found
+  debug?: string; // TEMP: why it's unavailable (env missing / connect error / no shop)
 };
 
 /**
@@ -61,11 +62,18 @@ export type ReturnHqMonth = {
  */
 export async function returnHqCountsForMonth(month: string): Promise<ReturnHqMonth> {
   const db = returnHqClient();
-  if (!db) return { returns: 0, exchanges: 0, available: false };
+  if (!db) {
+    return {
+      returns: 0,
+      exchanges: 0,
+      available: false,
+      debug: process.env.RETURNHQ_DATABASE_URL ? "url-set-but-no-client" : "RETURNHQ_DATABASE_URL not set on this deploy",
+    };
+  }
 
   try {
     const shopId = await jmShopId(db);
-    if (shopId == null) return { returns: 0, exchanges: 0, available: false };
+    if (shopId == null) return { returns: 0, exchanges: 0, available: false, debug: "connected but JM Looks shop not found" };
 
     const { start, end } = monthWindowIst(month);
     const rows = await db.$queryRawUnsafe<Array<{ type: string; n: bigint }>>(
@@ -93,7 +101,8 @@ export async function returnHqCountsForMonth(month: string): Promise<ReturnHqMon
     }
     return { returns, exchanges, available: true };
   } catch (e: any) {
-    console.error("[returnhq]", String(e?.message || e).slice(0, 200));
-    return { returns: 0, exchanges: 0, available: false };
+    const msg = String(e?.message || e).slice(0, 200);
+    console.error("[returnhq]", msg);
+    return { returns: 0, exchanges: 0, available: false, debug: "query/connect error: " + msg };
   }
 }
