@@ -447,13 +447,11 @@ export default function PnlDashboard() {
                     {/* Post-delivery: returns/exchanges from ReturnHQ (live). Not
                         part of the placed->outcome sum — a delivered order can be
                         returned later. */}
-                    {d.returnhq.available ? (
+                    {d.returnhq.available && (
                       <>
                         <Row label="Returns requested" value={String(d.returnhq.returns)} />
                         <Row label="Exchanges requested" value={String(d.returnhq.exchanges)} />
                       </>
-                    ) : (
-                      <Row label="Returns/Exchanges (ReturnHQ)" value={d.returnhq.debug ? `unavailable: ${d.returnhq.debug}` : "unavailable"} />
                     )}
                     <Row label="Resolution rate" value={pct(r.resolutionRate)} />
                     <Row label="Delivered share of placed" value={pct(r.deliveredShareOfPlaced)} />
