@@ -218,6 +218,49 @@ export async function deliveredCogs(shop: string, month: string): Promise<Delive
   };
 }
 
+export type UnmatchedCostItem = {
+  productId: string;
+  variantId: string;
+  productTitle: string;
+  variantTitle: string;
+  units: number; // delivered units affected
+  lines: number; // delivered line rows affected
+};
+
+/**
+ * Delivered products/variants that have NO cost-per-item in Shopify, for a
+ * month. These are exactly what keeps COGS incomplete — the merchant fixes them
+ * by setting "Cost per item" on the variant in Shopify. Grouped by product +
+ * variant, sorted by units (biggest COGS gap first). Delivered basis only, so
+ * the list is actionable (a variant that never delivered doesn't affect COGS).
+ */
+export async function unmatchedCostItems(shop: string, month: string): Promise<UnmatchedCostItem[]> {
+  const { start, end } = monthWindowIst(month);
+  const delivered = await prisma.orderFinancials.findMany({
+    where: { shop, orderCreatedAt: { gte: start, lt: end }, deliveryStatus: "delivered" },
+    select: { orderId: true },
+  });
+  const ids = delivered.map((d) => d.orderId);
+  if (!ids.length) return [];
+
+  const lines = await prisma.orderLineFinancials.findMany({
+    where: { shop, orderId: { in: ids }, lineCogsComplete: false },
+    select: { productId: true, variantId: true, productTitle: true, variantTitle: true, quantity: true },
+  });
+
+  const map = new Map<string, UnmatchedCostItem>();
+  for (const l of lines) {
+    const key = `${l.productId}|${l.variantId}`;
+    const e =
+      map.get(key) ||
+      { productId: l.productId, variantId: l.variantId, productTitle: l.productTitle, variantTitle: l.variantTitle, units: 0, lines: 0 };
+    e.units += l.quantity;
+    e.lines += 1;
+    map.set(key, e);
+  }
+  return Array.from(map.values()).sort((a, b) => b.units - a.units);
+}
+
 // ── Phase 6: GST / Ops / Overhead ───────────────────────────────────────────
 
 /** GST output tax backed out of GST-inclusive collected revenue:

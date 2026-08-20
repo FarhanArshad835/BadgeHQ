@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import prisma from "../db.server";
 import { formatMinor } from "../utils/money";
 import { getPnlApp, isAuthed, runStandaloneSync } from "../utils/pnl-app.server";
-import { computeMonth } from "../utils/monthly-pnl.server";
+import { computeMonth, unmatchedCostItems } from "../utils/monthly-pnl.server";
 import { toMinor } from "../utils/pnl.server";
 import { parseDeliveryCsv, applyDeliveryStatuses, fetchAndApplyDeliverySheet } from "../utils/delivery-import.server";
 import { PnlStyles } from "../utils/pnl-styles";
@@ -54,6 +54,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   for (const m of months) monthLabels[m] = labelFor(m);
 
   const report = shop ? await computeMonth(shop, month) : null;
+  // Delivered items missing cost-per-item (what keeps COGS incomplete). Cap the
+  // list so the loader stays light; show a total count alongside.
+  const unmatchedAll = shop ? await unmatchedCostItems(shop, month) : [];
+  const unmatched = unmatchedAll.slice(0, 100);
+  const unmatchedTotal = unmatchedAll.length;
+  const unmatchedUnits = unmatchedAll.reduce((s, u) => s + u.units, 0);
   const monthInput = shop
     ? await prisma.pnlMonthlyInput.findUnique({ where: { shop_month: { shop, month } } })
     : null;
@@ -160,6 +166,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       deliveredShareOfPlaced: r.deliveredShareOfPlaced,
       cogsMatchRate: r.cogsMatchRate,
     },
+    unmatched,
+    unmatchedTotal,
+    unmatchedUnits,
   });
 };
 
@@ -446,6 +455,47 @@ export default function PnlDashboard() {
                 </table>
               </div>
             </div>
+
+            {/* Delivered items missing cost-per-item — the fixable COGS gap. */}
+            {d.unmatchedTotal > 0 && (
+              <div className="pnl-panel" style={{ marginTop: 20 }}>
+                <div className="pnl-section-label">
+                  Delivered items missing cost-per-item — {d.unmatchedTotal} product{d.unmatchedTotal === 1 ? "" : "s"},{" "}
+                  {d.unmatchedUnits} unit{d.unmatchedUnits === 1 ? "" : "s"}
+                </div>
+                <p className="pnl-sub" style={{ marginTop: 0, marginBottom: 12, fontSize: 13 }}>
+                  These delivered items have no <strong>Cost per item</strong> set in Shopify, so their COGS is unknown.
+                  Set the cost on each variant in Shopify (Products, the variant, Cost per item) and it fills in on the next sync.
+                </p>
+                <div className="pnl-table-wrap">
+                  <table className="pnl-table">
+                    <thead>
+                      <tr>
+                        <th>Product</th>
+                        <th>Variant</th>
+                        <th className="pnl-num">Units</th>
+                        <th className="pnl-num">Lines</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {d.unmatched.map((u) => (
+                        <tr key={u.productId + "|" + u.variantId}>
+                          <td>{u.productTitle || <span className="pnl-muted">(no product / deleted)</span>}</td>
+                          <td>{u.variantTitle || NIL}</td>
+                          <td className="pnl-num">{u.units}</td>
+                          <td className="pnl-num">{u.lines}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {d.unmatchedTotal > d.unmatched.length && (
+                  <p className="pnl-sub" style={{ marginTop: 10, fontSize: 12 }}>
+                    Showing the top {d.unmatched.length} of {d.unmatchedTotal} by units.
+                  </p>
+                )}
+              </div>
+            )}
 
             {/* Funnel drill-in: the orders behind the clicked status line. */}
             {d.drillOrders && (
