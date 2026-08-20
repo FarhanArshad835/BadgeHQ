@@ -6,6 +6,7 @@ import prisma from "../db.server";
 import { formatMinor } from "../utils/money";
 import { getPnlApp, isAuthed, runStandaloneSync } from "../utils/pnl-app.server";
 import { computeMonth, unmatchedCostItems } from "../utils/monthly-pnl.server";
+import { returnHqCountsForMonth } from "../utils/returnhq.server";
 import { toMinor } from "../utils/pnl.server";
 import { parseDeliveryCsv, applyDeliveryStatuses, fetchAndApplyDeliverySheet } from "../utils/delivery-import.server";
 import { PnlStyles } from "../utils/pnl-styles";
@@ -60,6 +61,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const unmatched = unmatchedAll.slice(0, 100);
   const unmatchedTotal = unmatchedAll.length;
   const unmatchedUnits = unmatchedAll.reduce((s, u) => s + u.units, 0);
+
+  // Returns & exchanges, read live from ReturnHQ's own DB (not Shopify tags, so
+  // late-created returns are never missed).
+  const returnhq = shop ? await returnHqCountsForMonth(month) : { returns: 0, exchanges: 0, available: false };
   const monthInput = shop
     ? await prisma.pnlMonthlyInput.findUnique({ where: { shop_month: { shop, month } } })
     : null;
@@ -169,6 +174,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     unmatched,
     unmatchedTotal,
     unmatchedUnits,
+    returnhq,
   });
 };
 
@@ -438,6 +444,15 @@ export default function PnlDashboard() {
                       label="Delivered items (pairs)"
                       value={String(r.deliveredPairs)}
                     />
+                    {/* Post-delivery: returns/exchanges from ReturnHQ (live). Not
+                        part of the placed->outcome sum — a delivered order can be
+                        returned later. */}
+                    {d.returnhq.available && (
+                      <>
+                        <Row label="Returns requested" value={String(d.returnhq.returns)} />
+                        <Row label="Exchanges requested" value={String(d.returnhq.exchanges)} />
+                      </>
+                    )}
                     <Row label="Resolution rate" value={pct(r.resolutionRate)} />
                     <Row label="Delivered share of placed" value={pct(r.deliveredShareOfPlaced)} />
                   </tbody>
