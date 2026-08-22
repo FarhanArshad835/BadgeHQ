@@ -3644,11 +3644,13 @@
       var style = document.createElement("style");
       style.id = "badgehq-ai-style";
       style.textContent =
-        ".badgehq-ai-bubble{position:fixed;bottom:20px;" + side +
+        // bottom = base 20px + an offset a host page can raise (e.g. a sticky
+        // add-to-cart bar) via --badgehq-ai-offset, animated so it glides up.
+        ".badgehq-ai-bubble{position:fixed;bottom:calc(20px + var(--badgehq-ai-offset, 0px));" + side +
         "z-index:9992;width:56px;height:56px;display:flex;align-items:center;justify-content:center;" +
         "border:none;border-radius:50%;cursor:pointer;background:" + accent + ";color:#fff;" +
-        "box-shadow:0 4px 14px rgba(0,0,0,0.25);}" +
-        ".badgehq-ai-panel{position:fixed;bottom:88px;" + side +
+        "box-shadow:0 4px 14px rgba(0,0,0,0.25);transition:bottom 350ms cubic-bezier(0.22,1,0.36,1);}" +
+        ".badgehq-ai-panel{position:fixed;bottom:calc(88px + var(--badgehq-ai-offset, 0px));" + side +
         "z-index:9992;width:340px;max-width:calc(100vw - 32px);height:460px;max-height:calc(100vh - 120px);" +
         "display:none;flex-direction:column;overflow:hidden;background:#fff;color:#1a1a1a;" +
         "border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,0.22);font-size:14px;line-height:1.5;}" +
