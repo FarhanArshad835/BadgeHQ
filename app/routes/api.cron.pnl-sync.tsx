@@ -17,6 +17,7 @@ import { unauthenticated } from "../shopify.server";
 import { syncRevenueAndCogs, backfillShipping } from "../utils/pnl-sync.server";
 import { getPnlApp, runStandaloneSync } from "../utils/pnl-app.server";
 import { fetchAndApplyDeliverySheet } from "../utils/delivery-import.server";
+import { refreshReturnHqCache } from "../utils/returnhq.server";
 import { computeMonth } from "../utils/monthly-pnl.server";
 
 export const config = { maxDuration: 300 };
@@ -395,6 +396,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       console.error("[pnl-cron] deliverySheet", String(e?.message || e).slice(0, 200));
       results["deliverySheet"] = { error: true };
     }
+  }
+
+  // Refresh the ReturnHQ cache (returns/exchanges mapped to each order's month),
+  // read live from ReturnHQ's DB. Runs after the order sync so the mapping uses
+  // the freshest synced orders. The dashboard reads the cache, not ReturnHQ.
+  try {
+    results["returnhq"] = await refreshReturnHqCache();
+  } catch (e: any) {
+    console.error("[pnl-cron] returnhq", String(e?.message || e).slice(0, 200));
+    results["returnhq"] = { error: true };
   }
 
   // 2) Embedded-app shops (OAuth session). Skip the standalone shop — it's

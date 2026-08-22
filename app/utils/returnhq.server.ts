@@ -11,6 +11,7 @@
  * (no ReturnHQ models in our schema needed). Scoped to JM Looks' shop_id only.
  */
 import { PrismaClient } from "@prisma/client";
+import bhq from "../db.server";
 
 // ReturnHQ is multi-tenant; we only ever read JM Looks' rows. Resolved by
 // domain the first time, then cached, so a shop-id change can't silently break.
@@ -38,12 +39,12 @@ async function jmShopId(db: PrismaClient): Promise<number | null> {
 }
 
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
-function monthWindowIst(month: string): { start: Date; end: Date } {
-  const [y, m] = month.split("-").map(Number);
-  return {
-    start: new Date(Date.UTC(y, m - 1, 1) - IST_OFFSET_MS),
-    end: new Date(Date.UTC(m === 12 ? y + 1 : y, m === 12 ? 0 : m, 1) - IST_OFFSET_MS),
-  };
+
+const SHOP = "b03304.myshopify.com";
+const IST = IST_OFFSET_MS;
+function orderMonthIst(orderCreatedAt: Date): string {
+  const d = new Date(orderCreatedAt.getTime() + IST);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
 export type ReturnHqMonth = {
@@ -53,47 +54,76 @@ export type ReturnHqMonth = {
 };
 
 /**
- * Count returns and exchanges CREATED in an IST calendar month for JM Looks.
- * `mixed`-type requests count as both a return and an exchange (they contain
- * both). Cancelled requests are excluded — they were requested then withdrawn,
- * so they aren't real returns/exchanges. Grouped by created_at (when the
- * customer raised the request), matching the delivery funnel's placed basis.
+ * Refresh the ReturnHQ cache for ALL months, mapping every return/exchange to
+ * the month of the ORDER it belongs to (so it lines up with the delivery
+ * funnel's placed basis, not the request date). Called by the P&L cron twice a
+ * day; the dashboard reads the cached rows, never ReturnHQ live.
+ *
+ * Mapping: each return_requests row carries shopify_order_number; we join it to
+ * OrderFinancials.orderName and bucket by that order's IST month. A request
+ * whose order isn't synced yet is skipped (it'll count once the order syncs).
+ * `mixed` counts as both; cancelled excluded.
  */
-export async function returnHqCountsForMonth(month: string): Promise<ReturnHqMonth> {
+export async function refreshReturnHqCache(): Promise<{ ok: boolean; months: number }> {
   const db = returnHqClient();
-  if (!db) return { returns: 0, exchanges: 0, available: false };
-
+  if (!db) return { ok: false, months: 0 };
   try {
     const shopId = await jmShopId(db);
-    if (shopId == null) return { returns: 0, exchanges: 0, available: false };
+    if (shopId == null) return { ok: false, months: 0 };
 
-    const { start, end } = monthWindowIst(month);
-    const rows = await db.$queryRawUnsafe<Array<{ type: string; n: bigint }>>(
-      `SELECT type::text AS type, count(*) AS n
+    // All non-cancelled requests: order number + type.
+    const reqs = await db.$queryRawUnsafe<Array<{ shopify_order_number: string; type: string }>>(
+      `SELECT shopify_order_number, type::text AS type
          FROM return_requests
-        WHERE shop_id = $1
-          AND created_at >= $2 AND created_at < $3
-          AND status::text <> 'cancelled'
-        GROUP BY type`,
+        WHERE shop_id = $1 AND status::text <> 'cancelled'`,
       shopId,
-      start,
-      end,
     );
 
-    let returns = 0;
-    let exchanges = 0;
-    for (const r of rows) {
-      const n = Number(r.n);
-      if (r.type === "return") returns += n;
-      else if (r.type === "exchange") exchanges += n;
-      else if (r.type === "mixed") {
-        returns += n;
-        exchanges += n;
-      }
+    // Resolve each order number -> the order's IST month (from our synced data).
+    const orderNames = Array.from(new Set(reqs.map((r) => String(r.shopify_order_number || "").trim()).filter(Boolean)));
+    const orders = await bhq.orderFinancials.findMany({
+      where: { shop: SHOP, orderName: { in: orderNames } },
+      select: { orderName: true, orderCreatedAt: true },
+    });
+    const monthByOrder = new Map(orders.map((o) => [o.orderName, orderMonthIst(o.orderCreatedAt)]));
+
+    // Bucket returns/exchanges by the order's month.
+    const counts = new Map<string, { returns: number; exchanges: number }>();
+    for (const r of reqs) {
+      const month = monthByOrder.get(String(r.shopify_order_number || "").trim());
+      if (!month) continue; // order not synced yet
+      const e = counts.get(month) || { returns: 0, exchanges: 0 };
+      if (r.type === "return") e.returns += 1;
+      else if (r.type === "exchange") e.exchanges += 1;
+      else if (r.type === "mixed") { e.returns += 1; e.exchanges += 1; }
+      counts.set(month, e);
     }
-    return { returns, exchanges, available: true };
+
+    // Upsert each month's cache row.
+    const now = new Date();
+    for (const [month, c] of counts) {
+      await bhq.returnHqCache.upsert({
+        where: { shop_month: { shop: SHOP, month } },
+        create: { shop: SHOP, month, returns: c.returns, exchanges: c.exchanges, syncedAt: now },
+        update: { returns: c.returns, exchanges: c.exchanges, syncedAt: now },
+      });
+    }
+    return { ok: true, months: counts.size };
   } catch (e: any) {
-    console.error("[returnhq]", String(e?.message || e).slice(0, 200));
-    return { returns: 0, exchanges: 0, available: false };
+    console.error("[returnhq] refresh", String(e?.message || e).slice(0, 200));
+    return { ok: false, months: 0 };
   }
+}
+
+/**
+ * Read the cached ReturnHQ counts for a month (populated by the cron). No live
+ * ReturnHQ query — fast, and doesn't hit ReturnHQ on every page load.
+ */
+export async function returnHqCountsForMonth(month: string): Promise<ReturnHqMonth> {
+  const row = await bhq.returnHqCache.findUnique({
+    where: { shop_month: { shop: SHOP, month } },
+    select: { returns: true, exchanges: true },
+  });
+  if (!row) return { returns: 0, exchanges: 0, available: false };
+  return { returns: row.returns, exchanges: row.exchanges, available: true };
 }

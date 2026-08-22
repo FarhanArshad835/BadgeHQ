@@ -660,6 +660,19 @@ model PnlMonthlyInput {
 /// Every money field is minor units (paise) BigInt. A field is null when its
 /// input is not yet known (e.g. freight pending) — NEVER estimated. `complete`
 /// flags whether every cost was resolved, so the headline is trustworthy.
+/// Cached ReturnHQ counts per month. Refreshed by the P&L cron (twice daily),
+/// read by the dashboard so it no longer queries ReturnHQ live on every load.
+model ReturnHqCache {
+  id           String   @id @default(cuid())
+  shop         String
+  month        String // "YYYY-MM"
+  returns      Int      @default(0)
+  exchanges    Int      @default(0)
+  syncedAt     DateTime @default(now())
+
+  @@unique([shop, month])
+}
+
 model PnlMonthlyReport {
   id        String @id @default(cuid())
   shop      String
