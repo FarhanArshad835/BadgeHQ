@@ -277,10 +277,14 @@ export async function writeShopifyOrderForPayment(opts: {
     `Razorpay order: ${opts.razorpayOrderId}\n` +
     `Razorpay payment: ${opts.razorpayPaymentId}`;
 
+  // We do NOT request the Order object back: reading Order fields (name, address)
+  // needs Protected Customer Data approval, which this app doesn't have — asking
+  // for them returns ACCESS_DENIED even though the order IS created. We only need
+  // to CREATE it, so we request just userErrors and treat "no userErrors" as
+  // success (the order lands in Shopify regardless).
   const mutation = `
     mutation UsdOrderCreate($order: OrderCreateOrderInput!, $options: OrderCreateOptionsInput) {
       orderCreate(order: $order, options: $options) {
-        order { id name }
         userErrors { field message }
       }
     }`;
@@ -348,11 +352,19 @@ export async function writeShopifyOrderForPayment(opts: {
     });
     const body = await res.json().catch(() => ({} as any));
     const errs = body?.data?.orderCreate?.userErrors ?? [];
-    const created = body?.data?.orderCreate?.order;
-    if (!res.ok || errs.length || !created?.id) {
+
+    // Ignore ACCESS_DENIED errors on reading the Order object back — we don't
+    // request Order fields, but if any protected-data error slips through it does
+    // NOT mean creation failed (the order still lands). Only real errors count.
+    const topErrs: any[] = Array.isArray(body?.errors) ? body.errors : [];
+    const realTopErrs = topErrs.filter(
+      (e: any) => e?.extensions?.code !== "ACCESS_DENIED",
+    );
+
+    if (!res.ok || errs.length || realTopErrs.length) {
       const reason =
         (errs.length ? errs.map((e: any) => e.message).join("; ") : null) ||
-        body?.errors?.[0]?.message ||
+        realTopErrs[0]?.message ||
         `Shopify HTTP ${res.status}`;
       await prisma.usdOrder.update({
         where: { razorpayOrderId: opts.razorpayOrderId },
@@ -360,17 +372,18 @@ export async function writeShopifyOrderForPayment(opts: {
       });
       return { ok: false, reason: String(reason).slice(0, 300) };
     }
+
+    // No userErrors and no real top-level errors → the order was created. We can't
+    // read its name back (protected data), so we just mark it written.
     await prisma.usdOrder.update({
       where: { razorpayOrderId: opts.razorpayOrderId },
       data: {
         status: "shopify_written",
         razorpayPaymentId: opts.razorpayPaymentId,
-        shopifyOrderId: created.id,
-        shopifyOrderName: created.name ?? null,
         errorNote: null,
       },
     });
-    return { ok: true, orderName: created.name ?? null, duplicate: false };
+    return { ok: true, orderName: null, duplicate: false };
   } catch (e: any) {
     await prisma.usdOrder.update({
       where: { razorpayOrderId: opts.razorpayOrderId },
