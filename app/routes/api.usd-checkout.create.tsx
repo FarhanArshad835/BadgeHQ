@@ -17,6 +17,7 @@ import {
   createRazorpayUsdOrder,
   recordUsdOrder,
   type UsdLineItem,
+  type UsdShippingAddress,
 } from "../utils/usd-checkout.server";
 
 const CORS = {
@@ -88,6 +89,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       amountUsdCents: order.amount,
       inrToUsdRate: rate,
       lineItems: items,
+      address: parseAddress(payload?.address),
     });
   } catch {
     // if this fails, the payment still works; write-back just won't have the cart
@@ -107,6 +109,28 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 // ── helpers ──────────────────────────────────────────────────────────────────
+
+/** Sanitize the address object from the storefront into a typed shape. */
+function parseAddress(a: any): UsdShippingAddress | undefined {
+  if (!a || typeof a !== "object") return undefined;
+  const s = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : undefined);
+  const addr: UsdShippingAddress = {
+    name: s(a.name, 200),
+    email: s(a.email, 200),
+    address1: s(a.address1, 300),
+    address2: s(a.address2, 300),
+    city: s(a.city, 120),
+    province: s(a.province, 60),
+    zip: s(a.zip, 20),
+    country: s(a.country, 4) || "US",
+    phone: s(a.phone, 40),
+  };
+  // Only return if there's at least a usable street+city+zip.
+  if (addr.address1 && addr.city && addr.zip) return addr;
+  // Still keep email/name even if address incomplete (useful for the record).
+  if (addr.email || addr.name) return addr;
+  return undefined;
+}
 
 function toVariantGid(v: string | number): string {
   const s = String(v || "").trim();

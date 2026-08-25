@@ -763,6 +763,16 @@ model UsdOrder {
   shopifyOrderId    String? // gid of the order we wrote back
   shopifyOrderName  String? // e.g. "#1234"
   errorNote         String? // last error, if any
+  // US shipping address + contact, captured before payment (inline drawer form).
+  custName          String?
+  custEmail         String?
+  addr1             String?
+  addr2             String?
+  city              String?
+  province          String? // US state code, e.g. "CA"
+  zip               String?
+  country           String?  @default("US")
+  phone             String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 

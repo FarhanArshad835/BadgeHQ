@@ -132,11 +132,24 @@ export function verifyRazorpaySignature(orderId: string, paymentId: string, sign
 
 /** Remember a USD checkout attempt (cart snapshot) at Razorpay-order time, so the
  *  return handler can write the Shopify order without re-pricing. */
+export type UsdShippingAddress = {
+  name?: string;
+  email?: string;
+  address1?: string;
+  address2?: string;
+  city?: string;
+  province?: string; // US state code
+  zip?: string;
+  country?: string;
+  phone?: string;
+};
+
 export async function recordUsdOrder(opts: {
   razorpayOrderId: string;
   amountUsdCents: number;
   inrToUsdRate: number;
   lineItems: Array<{ variantId: string; quantity: number; inrBasePaise: bigint; title?: string }>;
+  address?: UsdShippingAddress;
 }) {
   const lineItemsJson = JSON.stringify(
     opts.lineItems.map((li) => ({
@@ -146,6 +159,18 @@ export async function recordUsdOrder(opts: {
       title: li.title,
     })),
   );
+  const a = opts.address ?? {};
+  const addrFields = {
+    custName: a.name?.slice(0, 200) || null,
+    custEmail: a.email?.slice(0, 200) || null,
+    addr1: a.address1?.slice(0, 300) || null,
+    addr2: a.address2?.slice(0, 300) || null,
+    city: a.city?.slice(0, 120) || null,
+    province: a.province?.slice(0, 60) || null,
+    zip: a.zip?.slice(0, 20) || null,
+    country: (a.country || "US").slice(0, 4),
+    phone: a.phone?.slice(0, 40) || null,
+  };
   await prisma.usdOrder.upsert({
     where: { razorpayOrderId: opts.razorpayOrderId },
     create: {
@@ -154,8 +179,14 @@ export async function recordUsdOrder(opts: {
       inrToUsdRate: opts.inrToUsdRate,
       lineItemsJson,
       status: "created",
+      ...addrFields,
     },
-    update: { amountUsdCents: opts.amountUsdCents, inrToUsdRate: opts.inrToUsdRate, lineItemsJson },
+    update: {
+      amountUsdCents: opts.amountUsdCents,
+      inrToUsdRate: opts.inrToUsdRate,
+      lineItemsJson,
+      ...addrFields,
+    },
   });
 }
 
@@ -216,14 +247,37 @@ export async function writeShopifyOrderForPayment(opts: {
         userErrors { field message }
       }
     }`;
+  // Build the shipping address (if we captured one) for the Shopify order.
+  const nameParts = (rec.custName || "").trim().split(/\s+/);
+  const firstName = nameParts.shift() || "";
+  const lastName = nameParts.join(" ");
+  const hasAddress = Boolean(rec.addr1 && rec.city && rec.zip);
+  const shippingAddress = hasAddress
+    ? {
+        firstName: firstName || undefined,
+        lastName: lastName || undefined,
+        address1: rec.addr1,
+        address2: rec.addr2 || undefined,
+        city: rec.city,
+        provinceCode: rec.province || undefined, // US state code, e.g. "CA"
+        zip: rec.zip,
+        countryCode: (rec.country || "US") as "US",
+        phone: rec.phone || undefined,
+      }
+    : undefined;
+
+  const orderInput: Record<string, unknown> = {
+    lineItems: lineItems.map((li) => ({ variantId: li.variantId, quantity: li.quantity })),
+    financialStatus: "PAID",
+    currency: "USD",
+    note,
+    tags: ["usd-checkout", "razorpay-international"],
+  };
+  if (rec.custEmail) orderInput.email = rec.custEmail;
+  if (shippingAddress) orderInput.shippingAddress = shippingAddress;
+
   const variables = {
-    order: {
-      lineItems: lineItems.map((li) => ({ variantId: li.variantId, quantity: li.quantity })),
-      financialStatus: "PAID",
-      currency: "USD",
-      note,
-      tags: ["usd-checkout", "razorpay-international"],
-    },
+    order: orderInput,
     // Don't email the customer from Shopify — Razorpay already confirmed payment.
     options: { sendReceipt: false, sendFulfillmentReceipt: false },
   };

@@ -1,0 +1,10 @@
+-- USD checkout: capture US shipping address + contact on the order record.
+ALTER TABLE "UsdOrder" ADD COLUMN IF NOT EXISTS "custName"  TEXT;
+ALTER TABLE "UsdOrder" ADD COLUMN IF NOT EXISTS "custEmail" TEXT;
+ALTER TABLE "UsdOrder" ADD COLUMN IF NOT EXISTS "addr1"     TEXT;
+ALTER TABLE "UsdOrder" ADD COLUMN IF NOT EXISTS "addr2"     TEXT;
+ALTER TABLE "UsdOrder" ADD COLUMN IF NOT EXISTS "city"      TEXT;
+ALTER TABLE "UsdOrder" ADD COLUMN IF NOT EXISTS "province"  TEXT;
+ALTER TABLE "UsdOrder" ADD COLUMN IF NOT EXISTS "zip"       TEXT;
+ALTER TABLE "UsdOrder" ADD COLUMN IF NOT EXISTS "country"   TEXT DEFAULT 'US';
+ALTER TABLE "UsdOrder" ADD COLUMN IF NOT EXISTS "phone"     TEXT;
