@@ -32,15 +32,41 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const mutation = `
     mutation UsdOrderCreate($order: OrderCreateOrderInput!, $options: OrderCreateOptionsInput) {
       orderCreate(order: $order, options: $options) {
-        order { id name displayFinancialStatus shippingAddress { address1 city provinceCode zip countryCodeV2 } }
+        order {
+          id name displayFinancialStatus
+          totalPriceSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } }
+          shippingAddress { address1 city provinceCode zip countryCodeV2 }
+        }
         userErrors { field message }
       }
     }`;
 
+  // Mirror the real write-back: explicit priceSet per line + a SALE transaction.
+  // ₹795 base × 4 = ₹3180 → at ~0.0104 → ~$33.20 (values are illustrative for test).
   const order = {
-    lineItems: [{ variantId: variantGid, quantity: 1 }],
+    lineItems: [
+      {
+        variantId: variantGid,
+        quantity: 1,
+        priceSet: {
+          shopMoney: { amount: "3180.00", currencyCode: "INR" },
+          presentmentMoney: { amount: "33.20", currencyCode: "USD" },
+        },
+      },
+    ],
     financialStatus: "PAID",
     currency: "USD",
+    transactions: [
+      {
+        kind: "SALE",
+        status: "SUCCESS",
+        amountSet: {
+          shopMoney: { amount: "3180.00", currencyCode: "INR" },
+          presentmentMoney: { amount: "33.20", currencyCode: "USD" },
+        },
+        gateway: "razorpay-international",
+      },
+    ],
     email: "test-buyer@example.com",
     note: "TEST ORDER — USD write-back verification. Safe to delete.",
     tags: ["usd-checkout", "razorpay-international", "TEST-DELETE-ME"],

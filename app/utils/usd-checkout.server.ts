@@ -216,15 +216,47 @@ export async function writeShopifyOrderForPayment(opts: {
     return { ok: false, reason: "Shopify not configured." };
   }
 
-  let parsed: Array<{ variantId: string; quantity: number }> = [];
+  let parsed: Array<{ variantId: string; quantity: number; inrBasePaise?: string }> = [];
   try {
     parsed = JSON.parse(rec.lineItemsJson);
   } catch {
     parsed = [];
   }
+
+  // Build line items with an explicit priceSet (shopMoney INR + presentmentMoney
+  // USD). Shopify REQUIRES this when the order currency (USD) differs from the
+  // shop currency (INR) — otherwise it errors, and if we omit presentmentMoney it
+  // silently re-converts with its own rate. Per-unit prices from the base price:
+  //   markedUpPaise = base × markupBps/10000  (₹ ×4)
+  //   usdCents      = markedUpPaise × rate
+  const rate = rec.inrToUsdRate;
+  const markupBps = cfg.markupBps;
+  let sumUsdCents = 0;
   const lineItems = parsed
-    .map((li) => ({ variantId: li.variantId, quantity: Math.max(1, Number(li.quantity) || 1) }))
-    .filter((li) => li.variantId);
+    .map((li) => {
+      const gid = li.variantId;
+      const qty = Math.max(1, Number(li.quantity) || 1);
+      if (!gid) return null;
+      const basePaise = BigInt(li.inrBasePaise ?? "0");
+      const markedUpPaise = (basePaise * BigInt(markupBps)) / 10000n; // per-unit INR paise
+      const unitUsdCents = Math.round(Number(markedUpPaise) * rate); // per-unit USD cents
+      sumUsdCents += unitUsdCents * qty;
+      const inrUnit = (Number(markedUpPaise) / 100).toFixed(2); // e.g. "3180.00"
+      const usdUnit = (unitUsdCents / 100).toFixed(2); // e.g. "33.20"
+      return {
+        variantId: gid,
+        quantity: qty,
+        priceSet: {
+          shopMoney: { amount: inrUnit, currencyCode: "INR" },
+          presentmentMoney: { amount: usdUnit, currencyCode: "USD" },
+        },
+      };
+    })
+    .filter(Boolean) as Array<{
+    variantId: string;
+    quantity: number;
+    priceSet: { shopMoney: { amount: string; currencyCode: string }; presentmentMoney: { amount: string; currencyCode: string } };
+  }>;
   if (!lineItems.length) {
     await prisma.usdOrder.update({
       where: { razorpayOrderId: opts.razorpayOrderId },
@@ -232,6 +264,11 @@ export async function writeShopifyOrderForPayment(opts: {
     });
     return { ok: false, reason: "No line items to write." };
   }
+
+  // The transaction amount must equal the sum of the line-item presentment
+  // amounts (Shopify validates this). Use the per-line sum, not the stored total,
+  // so rounding lines up exactly.
+  const txnUsd = (sumUsdCents / 100).toFixed(2);
 
   const usd = (rec.amountUsdCents / 100).toFixed(2);
   const note =
@@ -267,9 +304,27 @@ export async function writeShopifyOrderForPayment(opts: {
     : undefined;
 
   const orderInput: Record<string, unknown> = {
-    lineItems: lineItems.map((li) => ({ variantId: li.variantId, quantity: li.quantity })),
+    // Each line carries an explicit priceSet (INR shopMoney + USD presentmentMoney).
+    lineItems: lineItems.map((li) => ({
+      variantId: li.variantId,
+      quantity: li.quantity,
+      priceSet: li.priceSet,
+    })),
     financialStatus: "PAID",
-    currency: "USD",
+    currency: "USD", // presentment currency
+    // PAID sticks only with a matching SALE transaction in the same currency; its
+    // amount must equal the sum of the line presentment amounts (Shopify validates).
+    transactions: [
+      {
+        kind: "SALE",
+        status: "SUCCESS",
+        amountSet: {
+          shopMoney: { amount: (Number(rec.inrToUsdRate) > 0 ? (sumUsdCents / 100 / rec.inrToUsdRate).toFixed(2) : "0.00"), currencyCode: "INR" },
+          presentmentMoney: { amount: txnUsd, currencyCode: "USD" },
+        },
+        gateway: "razorpay-international",
+      },
+    ],
     note,
     tags: ["usd-checkout", "razorpay-international"],
   };
