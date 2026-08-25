@@ -723,3 +723,27 @@ model PnlMonthlyReport {
   @@unique([shop, month])
   @@index([shop, month])
 }
+
+/// Config + settings for the "Pay in USD" checkout (six-by-eleven). Single row
+/// (id="default"). Razorpay International charges USD OUTSIDE Shopify checkout;
+/// on payment the order is written back to Shopify. Secrets are server-side only.
+model UsdCheckout {
+  id                String   @id @default("default")
+  enabled           Boolean  @default(false) // master on/off (also gated in theme)
+  // Razorpay (test until go-live).
+  razorpayKeyId     String   @default("")
+  razorpayKeySecret String   @default("")
+  razorpayWebhookSecret String @default("")
+  // Shopify Admin token for the store we write orders into.
+  shopDomain        String   @default("") // e.g. six-by-eleven.myshopify.com
+  shopifyAdminToken String   @default("")
+  // Pricing rule: customer pays (INR base × markupBps/10000) converted to USD.
+  // markupBps 40000 = ×4 (the "Rs1000 -> Rs4000" rule).
+  markupBps         Int      @default(40000)
+  // Live rate cache (INR->USD), refreshed periodically so we don't hit the rate
+  // API on every checkout. rate = USD per 1 INR.
+  inrToUsdRate      Float    @default(0)
+  rateFetchedAt     DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
