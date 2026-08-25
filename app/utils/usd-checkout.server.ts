@@ -127,3 +127,145 @@ export function verifyRazorpaySignature(orderId: string, paymentId: string, sign
     return false;
   }
 }
+
+// ── Order persistence + Shopify write-back ────────────────────────────────────
+
+/** Remember a USD checkout attempt (cart snapshot) at Razorpay-order time, so the
+ *  return handler can write the Shopify order without re-pricing. */
+export async function recordUsdOrder(opts: {
+  razorpayOrderId: string;
+  amountUsdCents: number;
+  inrToUsdRate: number;
+  lineItems: Array<{ variantId: string; quantity: number; inrBasePaise: bigint; title?: string }>;
+}) {
+  const lineItemsJson = JSON.stringify(
+    opts.lineItems.map((li) => ({
+      variantId: li.variantId,
+      quantity: li.quantity,
+      inrBasePaise: li.inrBasePaise.toString(), // BigInt -> string for JSON
+      title: li.title,
+    })),
+  );
+  await prisma.usdOrder.upsert({
+    where: { razorpayOrderId: opts.razorpayOrderId },
+    create: {
+      razorpayOrderId: opts.razorpayOrderId,
+      amountUsdCents: opts.amountUsdCents,
+      inrToUsdRate: opts.inrToUsdRate,
+      lineItemsJson,
+      status: "created",
+    },
+    update: { amountUsdCents: opts.amountUsdCents, inrToUsdRate: opts.inrToUsdRate, lineItemsJson },
+  });
+}
+
+/**
+ * On a verified USD payment, create the matching order in Shopify so it shows in
+ * Orders (inventory decrements, fulfillment works). The money actually moved
+ * through Razorpay, not Shopify — so we mark the order PAID and stamp the Razorpay
+ * payment id + USD total in the order note. Idempotent: if we already wrote a
+ * Shopify order for this Razorpay order, we return it without creating a duplicate.
+ */
+export async function writeShopifyOrderForPayment(opts: {
+  razorpayOrderId: string;
+  razorpayPaymentId: string;
+}): Promise<{ ok: true; orderName: string | null; duplicate: boolean } | { ok: false; reason: string }> {
+  const rec = await prisma.usdOrder.findUnique({ where: { razorpayOrderId: opts.razorpayOrderId } });
+  if (!rec) return { ok: false, reason: "No record for this order." };
+  if (rec.status === "shopify_written" && rec.shopifyOrderId) {
+    return { ok: true, orderName: rec.shopifyOrderName, duplicate: true };
+  }
+
+  const cfg = await getUsdConfig();
+  if (!cfg.shopDomain || !cfg.shopifyAdminToken) {
+    await prisma.usdOrder.update({
+      where: { razorpayOrderId: opts.razorpayOrderId },
+      data: { status: "failed", errorNote: "Shopify not configured." },
+    });
+    return { ok: false, reason: "Shopify not configured." };
+  }
+
+  let parsed: Array<{ variantId: string; quantity: number }> = [];
+  try {
+    parsed = JSON.parse(rec.lineItemsJson);
+  } catch {
+    parsed = [];
+  }
+  const lineItems = parsed
+    .map((li) => ({ variantId: li.variantId, quantity: Math.max(1, Number(li.quantity) || 1) }))
+    .filter((li) => li.variantId);
+  if (!lineItems.length) {
+    await prisma.usdOrder.update({
+      where: { razorpayOrderId: opts.razorpayOrderId },
+      data: { status: "failed", errorNote: "No line items to write." },
+    });
+    return { ok: false, reason: "No line items to write." };
+  }
+
+  const usd = (rec.amountUsdCents / 100).toFixed(2);
+  const note =
+    `Paid in USD via Razorpay International (outside Shopify checkout).\n` +
+    `USD charged: $${usd}\n` +
+    `Razorpay order: ${opts.razorpayOrderId}\n` +
+    `Razorpay payment: ${opts.razorpayPaymentId}`;
+
+  const mutation = `
+    mutation UsdOrderCreate($order: OrderCreateOrderInput!, $options: OrderCreateOptionsInput) {
+      orderCreate(order: $order, options: $options) {
+        order { id name }
+        userErrors { field message }
+      }
+    }`;
+  const variables = {
+    order: {
+      lineItems: lineItems.map((li) => ({ variantId: li.variantId, quantity: li.quantity })),
+      financialStatus: "PAID",
+      currency: "USD",
+      note,
+      tags: ["usd-checkout", "razorpay-international"],
+    },
+    // Don't email the customer from Shopify — Razorpay already confirmed payment.
+    options: { sendReceipt: false, sendFulfillmentReceipt: false },
+  };
+
+  try {
+    const url = `https://${cfg.shopDomain}/admin/api/2025-01/graphql.json`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Shopify-Access-Token": cfg.shopifyAdminToken },
+      body: JSON.stringify({ query: mutation, variables }),
+      signal: AbortSignal.timeout(20000),
+    });
+    const body = await res.json().catch(() => ({} as any));
+    const errs = body?.data?.orderCreate?.userErrors ?? [];
+    const created = body?.data?.orderCreate?.order;
+    if (!res.ok || errs.length || !created?.id) {
+      const reason =
+        (errs.length ? errs.map((e: any) => e.message).join("; ") : null) ||
+        body?.errors?.[0]?.message ||
+        `Shopify HTTP ${res.status}`;
+      await prisma.usdOrder.update({
+        where: { razorpayOrderId: opts.razorpayOrderId },
+        data: { status: "failed", errorNote: String(reason).slice(0, 300) },
+      });
+      return { ok: false, reason: String(reason).slice(0, 300) };
+    }
+    await prisma.usdOrder.update({
+      where: { razorpayOrderId: opts.razorpayOrderId },
+      data: {
+        status: "shopify_written",
+        razorpayPaymentId: opts.razorpayPaymentId,
+        shopifyOrderId: created.id,
+        shopifyOrderName: created.name ?? null,
+        errorNote: null,
+      },
+    });
+    return { ok: true, orderName: created.name ?? null, duplicate: false };
+  } catch (e: any) {
+    await prisma.usdOrder.update({
+      where: { razorpayOrderId: opts.razorpayOrderId },
+      data: { status: "failed", errorNote: String(e?.message || e).slice(0, 300) },
+    });
+    return { ok: false, reason: "Couldn't reach Shopify: " + String(e?.message || e).slice(0, 200) };
+  }
+}

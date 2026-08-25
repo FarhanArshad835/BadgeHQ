@@ -7,7 +7,11 @@
  * For now it confirms the USD charge succeeded.
  */
 import type { LoaderFunctionArgs } from "@remix-run/node";
-import { getUsdConfig, verifyRazorpaySignature } from "../utils/usd-checkout.server";
+import {
+  getUsdConfig,
+  verifyRazorpaySignature,
+  writeShopifyOrderForPayment,
+} from "../utils/usd-checkout.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
@@ -20,9 +24,26 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     orderId && paymentId && signature &&
     verifyRazorpaySignature(orderId, paymentId, signature, cfg.razorpayKeySecret);
 
+  // On a verified payment, write the order into Shopify (idempotent). Never let a
+  // write-back hiccup show the customer a failure — they DID pay; we log and
+  // reconcile server-side. The confirmation only depends on signature validity.
+  let orderName: string | null = null;
+  if (valid) {
+    try {
+      const w = await writeShopifyOrderForPayment({ razorpayOrderId: orderId, razorpayPaymentId: paymentId });
+      if (w.ok) orderName = w.orderName;
+    } catch {
+      // logged in UsdOrder.errorNote by the writer; still confirm to the customer
+    }
+  }
+
+  const orderLine = orderName
+    ? `<p style="font-family:system-ui">Shopify order ${orderName} created.</p>`
+    : "";
   const html = valid
     ? `<h1 style="font-family:system-ui">Payment received ✓</h1>
        <p style="font-family:system-ui">Your USD payment was successful. Order ${paymentId}.</p>
+       ${orderLine}
        <p style="font-family:system-ui"><a href="https://sixbyeleven.com">Back to store</a></p>`
     : `<h1 style="font-family:system-ui">Could not verify payment</h1>
        <p style="font-family:system-ui">If you were charged, contact support with reference ${paymentId || "N/A"}.</p>`;

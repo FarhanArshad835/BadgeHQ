@@ -15,6 +15,7 @@ import {
   getInrToUsdRate,
   cartUsdCents,
   createRazorpayUsdOrder,
+  recordUsdOrder,
   type UsdLineItem,
 } from "../utils/usd-checkout.server";
 
@@ -78,6 +79,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     notes: { source: "six-by-eleven-usd-checkout", items: String(items.length) },
   });
   if (!order.ok) return json({ error: order.reason }, { status: 502, headers: CORS });
+
+  // Remember the cart against this Razorpay order so the return handler can write
+  // the Shopify order without re-pricing. Best-effort — never block the checkout.
+  try {
+    await recordUsdOrder({
+      razorpayOrderId: order.orderId,
+      amountUsdCents: order.amount,
+      inrToUsdRate: rate,
+      lineItems: items,
+    });
+  } catch {
+    // if this fails, the payment still works; write-back just won't have the cart
+  }
 
   return json(
     {

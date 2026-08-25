@@ -747,3 +747,24 @@ model UsdCheckout {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 }
+
+// One row per USD checkout attempt. Created when we make the Razorpay order (so
+// we remember the cart), updated to "paid" + written back to Shopify when the
+// signed payment returns. Keyed by the Razorpay order id.
+model UsdOrder {
+  id                String   @id @default(cuid())
+  razorpayOrderId   String   @unique
+  razorpayPaymentId String? // set on paid
+  amountUsdCents    Int // what we charged, in USD cents
+  inrToUsdRate      Float // rate used, for the record
+  // Cart snapshot: JSON array of { variantId (gid), quantity, inrBasePaise, title? }.
+  lineItemsJson     String   @default("[]")
+  status            String   @default("created") // created | paid | shopify_written | failed
+  shopifyOrderId    String? // gid of the order we wrote back
+  shopifyOrderName  String? // e.g. "#1234"
+  errorNote         String? // last error, if any
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([status])
+}
