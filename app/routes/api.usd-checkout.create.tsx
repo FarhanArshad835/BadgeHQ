@@ -24,7 +24,10 @@ const CORS = {
   "Access-Control-Allow-Headers": "Content-Type",
 };
 
-export const loader = async () => json({ error: "POST only" }, { status: 405, headers: CORS });
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
+  return json({ error: "POST only" }, { status: 405, headers: CORS });
+};
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
