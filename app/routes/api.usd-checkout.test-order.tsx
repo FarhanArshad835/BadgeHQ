@@ -55,7 +55,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       },
     ],
     financialStatus: "PAID",
-    currency: "USD",
+    currency: "INR", // shop-facing currency (must be the shop currency)
+    presentmentCurrency: "USD", // what the customer sees / paid
     transactions: [
       {
         kind: "SALE",

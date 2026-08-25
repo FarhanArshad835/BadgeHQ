@@ -311,7 +311,8 @@ export async function writeShopifyOrderForPayment(opts: {
       priceSet: li.priceSet,
     })),
     financialStatus: "PAID",
-    currency: "USD", // presentment currency
+    currency: "INR", // shop-facing currency (must equal the shop currency)
+    presentmentCurrency: "USD", // customer-facing currency (what they paid)
     // PAID sticks only with a matching SALE transaction in the same currency; its
     // amount must equal the sum of the line presentment amounts (Shopify validates).
     transactions: [
