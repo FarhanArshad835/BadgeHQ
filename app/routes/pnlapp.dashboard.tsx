@@ -126,6 +126,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       returnExchangeFees: rupees(monthInput?.returnExchangeFeesMinor),
       adSpendOverride: rupees(monthInput?.adSpendOverrideMinor),
       freightOverride: rupees(monthInput?.freightOverrideMinor),
+      shopifySubscription: rupees(monthInput?.shopifySubscriptionMinor),
+      shopifyBilling: rupees(monthInput?.shopifyBillingMinor),
+      doubleclickFee: rupees(monthInput?.doubleclickFeeMinor),
+      doubleclickSub: rupees(monthInput?.doubleclickSubMinor),
+      stocking: rupees(monthInput?.stockingMinor),
     },
     report: r && {
       publishStatus: r.publishStatus,
@@ -147,6 +152,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       ops: s(r.opsMinor),
       overhead: s(r.overheadMinor),
       overheadProvisional: r.overheadProvisional,
+      shopifySubscription: s(r.shopifySubscriptionMinor),
+      shopifyBilling: s(r.shopifyBillingMinor),
+      doubleclickFee: s(r.doubleclickFeeMinor),
+      doubleclickSub: s(r.doubleclickSubMinor),
+      stocking: s(r.stockingMinor),
       gstOutput: s(r.gstOutputMinor),
       gstInput: s(r.gstInputMinor),
       netGst: s(r.netGstMinor),
@@ -250,10 +260,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const returnExchangeFeesMinor = money("returnExchangeFees") ?? 0n;
     const adSpendOverrideMinor = money("adSpendOverride");
     const freightOverrideMinor = money("freightOverride");
+    const shopifySubscriptionMinor = money("shopifySubscription") ?? 0n;
+    const shopifyBillingMinor = money("shopifyBilling") ?? 0n;
+    const doubleclickFeeMinor = money("doubleclickFee") ?? 0n;
+    const doubleclickSubMinor = money("doubleclickSub") ?? 0n;
+    const stockingMinor = money("stocking") ?? 0n;
+    const fixed = {
+      shopifySubscriptionMinor,
+      shopifyBillingMinor,
+      doubleclickFeeMinor,
+      doubleclickSubMinor,
+      stockingMinor,
+    };
     await prisma.pnlMonthlyInput.upsert({
       where: { shop_month: { shop: app.shopDomain, month } },
-      create: { shop: app.shopDomain, month, overheadMinor, returnExchangeFeesMinor, adSpendOverrideMinor, freightOverrideMinor },
-      update: { overheadMinor, returnExchangeFeesMinor, adSpendOverrideMinor, freightOverrideMinor },
+      create: { shop: app.shopDomain, month, overheadMinor, returnExchangeFeesMinor, adSpendOverrideMinor, freightOverrideMinor, ...fixed },
+      update: { overheadMinor, returnExchangeFeesMinor, adSpendOverrideMinor, freightOverrideMinor, ...fixed },
     });
     return json({ ok: true, message: `Saved inputs for ${month}.` });
   }
@@ -339,6 +361,14 @@ export default function PnlDashboard() {
 
   const NIL = "-";
   const fmt = (m: string | null | undefined, p = NIL) => (m == null ? p : formatMinor(BigInt(m), d.currency));
+  // Signed money for the statement: renders a cost as a negative figure. Optional
+  // `add` sums a second amount into the same line (e.g. Cost Price + stocking).
+  const sfmt = (m: string | null | undefined, add?: string | null, p = "Pending") => {
+    if (m == null) return p;
+    const total = BigInt(m) + (add ? BigInt(add) : 0n);
+    if (total === 0n) return formatMinor(0n, d.currency);
+    return "-" + formatMinor(total, d.currency);
+  };
   const monthLabel = (m: string) => d.monthLabels[m] ?? m;
   const r = d.report;
   const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
@@ -411,25 +441,29 @@ export default function PnlDashboard() {
               <Kpi label="Profit / delivered pair" value={fmt(r.netPnlPerDeliveredPair, "Pending")} />
             </div>
 
-            {/* The waterfall. */}
+            {/* P&L statement — matches the monthly statement layout: income
+                positive, costs negative, P&L and Per Pair at the foot. */}
             <div className="pnl-panel" style={{ marginBottom: 20 }}>
-              <div className="pnl-section-label">The waterfall</div>
+              <div className="pnl-section-label">P&amp;L statement — {monthLabel(d.month)}</div>
               <table className="pnl-table pnl-waterfall">
                 <tbody>
-                  <Row label="Gross sale (pre-discount)" value={fmt(r.grossSale)} />
-                  <Row label="less Discounts" value={fmt(r.discounts)} neg />
-                  <Row label="Net placed revenue" value={fmt(r.netPlaced)} strong />
-                  <Row label="less Cancelled + RTO" value={fmt(r.cancelledRto)} neg />
-                  <Row label="less Refunds" value={fmt(r.refunds)} neg />
-                  <Row label="Net sale (collected)" value={fmt(r.netSale)} strong hl />
-                  <Row label="less COGS (delivered units)" value={fmt(r.cogs, "Pending")} neg pending={r.cogs == null} />
-                  <Row label="less Freight (deduped)" value={fmt(r.freight, "Pending")} neg pending={r.freight == null} />
-                  <Row label={`less Ad spend${r.adSpendSource === "meta" ? " (Meta)" : ""}`} value={fmt(r.adSpend, "Pending")} neg pending={r.adSpend == null} />
-                  <Row label="less Operations (₹/pair)" value={fmt(r.ops)} neg />
-                  <Row label={`less Overhead${r.overheadProvisional ? " (provisional)" : ""}`} value={fmt(r.overhead)} neg />
-                  <Row label="plus Net GST (ITC − output)" value={fmt(r.netGst, "Pending")} pending={r.netGst == null} />
-                  <Row label="plus Return/exchange fees" value={fmt(r.returnExchangeFees)} />
-                  <Row label="NET P&L" value={fmt(r.netPnl, "Pending")} strong hl big />
+                  <Row label="Gross Sale" value={fmt(r.grossSale)} strong />
+                  <Row label="Net Sale" value={fmt(r.netSale)} strong hl />
+                  <Row label="Refund Amount" value={sfmt(r.refunds)} neg />
+                  <Row label="Cost Price + (stocking)" value={sfmt(r.cogs, r.stocking)} neg pending={r.cogs == null} />
+                  <Row label="Shipping Fees" value={sfmt(r.freight)} neg pending={r.freight == null} />
+                  <Row label={`Advertisement${r.adSpendSource === "meta" ? " (Meta)" : ""}`} value={sfmt(r.adSpend)} neg pending={r.adSpend == null} />
+                  <Row label="Shopify Subscription" value={sfmt(r.shopifySubscription)} neg />
+                  <Row label="Shopify Billing" value={sfmt(r.shopifyBilling)} neg />
+                  <Row label="Doubleclick Fee" value={sfmt(r.doubleclickFee)} neg />
+                  <Row label="Doubleclick Subscription" value={sfmt(r.doubleclickSub)} neg />
+                  <Row label="Per Pair Shipping" value={sfmt(r.freightPerDeliveredOrder)} neg pending={r.freightPerDeliveredOrder == null} />
+                  <Row label="Gst 12%" value={sfmt(r.gstOutput)} neg pending={r.gstOutput == null} />
+                  <Row label="Gst 18% Claim" value={fmt(r.gstInput, "Pending")} pending={r.gstInput == null} />
+                  <Row label="Return/Exchange Fees" value={fmt(r.returnExchangeFees)} />
+                  <Row label="Delivered" value={String(r.deliveredOrders)} />
+                  <Row label="P&L" value={fmt(r.netPnl, "Pending")} strong hl big />
+                  <Row label="Per Pair" value={fmt(r.netPnlPerDeliveredPair, "Pending")} pending={r.netPnlPerDeliveredPair == null} />
                 </tbody>
               </table>
             </div>
@@ -612,10 +646,17 @@ export default function PnlDashboard() {
               <input type="hidden" name="intent" value="save-inputs" />
               <input type="hidden" name="month" value={d.month} />
               <div className="pnl-grid2">
-                <MoneyField label="Overhead (Shopify + apps + Doubletick)" name="overhead" defaultValue={d.monthInput.overhead} />
+                <MoneyField label="Shopify Subscription" name="shopifySubscription" defaultValue={d.monthInput.shopifySubscription} />
+                <MoneyField label="Shopify Billing" name="shopifyBilling" defaultValue={d.monthInput.shopifyBilling} />
+                <MoneyField label="Doubleclick Fee" name="doubleclickFee" defaultValue={d.monthInput.doubleclickFee} />
+                <MoneyField label="Doubleclick Subscription" name="doubleclickSub" defaultValue={d.monthInput.doubleclickSub} />
+                <MoneyField label="Stocking (extra inventory bought)" name="stocking" defaultValue={d.monthInput.stocking} />
                 <MoneyField label="Return / exchange fees collected" name="returnExchangeFees" defaultValue={d.monthInput.returnExchangeFees} />
                 <MoneyField label="Ad spend override (blank = use Meta)" name="adSpendOverride" defaultValue={d.monthInput.adSpendOverride} />
                 <MoneyField label="Freight override (blank = use carriers)" name="freightOverride" defaultValue={d.monthInput.freightOverride} />
+              </div>
+              <div className="pnl-help" style={{ marginTop: 8 }}>
+                The four fixed costs sum into the P&amp;L's fixed-cost total and each shows as its own statement row.
               </div>
               <button type="submit" className="pnl-btn" style={{ marginTop: 12, alignSelf: "flex-start" }} disabled={busy}>
                 Save month inputs

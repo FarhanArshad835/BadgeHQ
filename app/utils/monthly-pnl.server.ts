@@ -329,6 +329,12 @@ export type MonthlyPnl = {
   opsMinor: bigint;
   overheadMinor: bigint;
   overheadProvisional: boolean;
+  // Itemized fixed costs (statement rows).
+  shopifySubscriptionMinor: bigint;
+  shopifyBillingMinor: bigint;
+  doubleclickFeeMinor: bigint;
+  doubleclickSubMinor: bigint;
+  stockingMinor: bigint;
   // GST.
   gstOutputMinor: bigint;
   gstInputMinor: bigint | null;
@@ -418,7 +424,17 @@ export async function computeMonth(shop: string, month: string): Promise<Monthly
   // else: the aggregation endpoints are verify-gated; freight stays pending until
   // enabled + a coverage check runs (Phase 4 wiring lands with live accounts).
 
-  const overheadMinor = input?.overheadMinor ?? 0n;
+  // Itemized fixed costs (statement rows). They SUM into the fixed-cost total.
+  const shopifySubscriptionMinor = input?.shopifySubscriptionMinor ?? 0n;
+  const shopifyBillingMinor = input?.shopifyBillingMinor ?? 0n;
+  const doubleclickFeeMinor = input?.doubleclickFeeMinor ?? 0n;
+  const doubleclickSubMinor = input?.doubleclickSubMinor ?? 0n;
+  const stockingMinor = input?.stockingMinor ?? 0n;
+  const itemizedFixed =
+    shopifySubscriptionMinor + shopifyBillingMinor + doubleclickFeeMinor + doubleclickSubMinor;
+  // overheadMinor drives the P&L math. Prefer the itemized sum when any itemized
+  // value is entered; otherwise fall back to the legacy combined overhead field.
+  const overheadMinor = itemizedFixed > 0n ? itemizedFixed : (input?.overheadMinor ?? 0n);
   const overheadProvisional = !input; // inherited/absent overhead is provisional
   const returnExchangeFeesMinor = input?.returnExchangeFeesMinor ?? 0n;
 
@@ -486,6 +502,11 @@ export async function computeMonth(shop: string, month: string): Promise<Monthly
     opsMinor,
     overheadMinor,
     overheadProvisional,
+    shopifySubscriptionMinor,
+    shopifyBillingMinor,
+    doubleclickFeeMinor,
+    doubleclickSubMinor,
+    stockingMinor,
     gstOutputMinor,
     gstInputMinor,
     netGstMinor,

@@ -642,8 +642,17 @@ model PnlMonthlyInput {
   month     String // "YYYY-MM" (IST calendar month)
 
   // Overhead: Shopify subscription + apps + billing + Doubletick fees. A real
-  // invoiced figure the merchant enters; never estimated.
+  // invoiced figure the merchant enters; never estimated. Kept as the combined
+  // total used by the P&L math; itemized below for the statement's named rows.
   overheadMinor           BigInt @default(0)
+  // Itemized fixed costs (real billed figures, entered per month). These SUM into
+  // the fixed-cost total; the statement shows each as its own line.
+  shopifySubscriptionMinor BigInt @default(0)
+  shopifyBillingMinor      BigInt @default(0)
+  doubleclickFeeMinor      BigInt @default(0)
+  doubleclickSubMinor      BigInt @default(0)
+  // Stocking / additional inventory purchase for the month, shown alongside COGS.
+  stockingMinor            BigInt @default(0)
   // Return/exchange fees collected (added back in the assembly).
   returnExchangeFeesMinor BigInt @default(0)
   // Optional overrides for values that are normally auto. Null = use auto.
