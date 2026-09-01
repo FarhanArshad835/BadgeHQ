@@ -55,6 +55,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   for (const m of months) monthLabels[m] = labelFor(m);
 
   const report = shop ? await computeMonth(shop, month) : null;
+
+  // Month-by-month comparison: compute up to the 6 most recent months in PARALLEL
+  // (ad spend is a live Meta call per month, so parallel keeps this ~1 call's time).
+  // Opt-in via ?compare=1 so a normal single-month load stays light.
+  const compareOn = url.searchParams.get("compare") === "1";
+  const compareMonths = compareOn ? months.slice(0, 6) : [];
+  const compareReports = shop && compareMonths.length
+    ? await Promise.all(compareMonths.map((m) => computeMonth(shop, m)))
+    : [];
   // Delivered items missing cost-per-item (what keeps COGS incomplete). Cap the
   // list so the loader stays light; show a total count alongside.
   const unmatchedAll = shop ? await unmatchedCostItems(shop, month) : [];
@@ -192,6 +201,45 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     unmatchedTotal,
     unmatchedUnits,
     returnhq,
+    // Month-by-month comparison columns (compact: statement + funnel lines only).
+    compareOn,
+    compare: compareReports.map((c) => ({
+      month: c.month,
+      label: monthLabels[c.month] ?? c.month,
+      // statement
+      grossSale: s(c.grossSaleMinor),
+      netSale: s(c.netSaleMinor),
+      refunds: s(c.refundsMinor),
+      cogs: s(c.cogsMinor),
+      stocking: s(c.stockingMinor),
+      freight: s(c.freightMinor),
+      adSpend: s(c.adSpendMinor),
+      shopifySubscription: s(c.shopifySubscriptionMinor),
+      shopifyBilling: s(c.shopifyBillingMinor),
+      doubleclickFee: s(c.doubleclickFeeMinor),
+      doubleclickSub: s(c.doubleclickSubMinor),
+      gstOutput: s(c.gstOutputMinor),
+      gstInput: s(c.gstInputMinor),
+      returnExchangeFees: s(c.returnExchangeFeesMinor),
+      netPnl: s(c.netPnlMinor),
+      netPnlPerDeliveredPair: s(c.netPnlPerDeliveredPairMinor),
+      // funnel
+      placedOrders: c.placedOrders,
+      deliveredOrders: c.deliveredOrders,
+      rtoOrders: c.rtoOrders,
+      cancelledOrders: c.cancelledOrders,
+      abandonedOrders: c.abandonedOrders,
+      inTransitOrders: c.inTransitOrders,
+      deliveredPairs: c.deliveredPairs,
+      netPlaced: s(c.netPlacedRevenueMinor),
+      deliveredRevenue: s(c.deliveredRevenueMinor),
+      rtoRevenue: s(c.rtoRevenueMinor),
+      cancelledRevenue: s(c.cancelledRevenueMinor),
+      abandonedRevenue: s(c.abandonedRevenueMinor),
+      inTransitRevenue: s(c.inTransitRevenueMinor),
+      resolutionRate: c.resolutionRate,
+      deliveredShareOfPlaced: c.deliveredShareOfPlaced,
+    })),
   });
 };
 
@@ -408,6 +456,13 @@ export default function PnlDashboard() {
           >
             {d.months.map((m) => <option key={m} value={m}>{monthLabel(m)}</option>)}
           </select>
+          <button
+            type="button"
+            className={`pnl-btn ${d.compareOn ? "pnl-btn-primary" : ""}`}
+            onClick={() => { const p = new URLSearchParams(searchParams); if (d.compareOn) p.delete("compare"); else p.set("compare", "1"); p.delete("status"); setSearchParams(p); }}
+          >
+            {d.compareOn ? "Hide comparison" : "Compare months"}
+          </button>
           <div className="pnl-controls-right">
             {d.lastSyncAt && (
               <span className="pnl-sub" style={{ fontSize: 13 }}>
@@ -429,6 +484,47 @@ export default function PnlDashboard() {
         )}
 
         {r && <StatusBanner report={r} monthLabel={monthLabel(d.month)} />}
+
+        {/* Month-by-month comparison (opt-in). Statement + funnel as columns. */}
+        {d.compareOn && d.compare.length > 0 && (
+          <div className="pnl-panel" style={{ marginBottom: 20, overflowX: "auto" }}>
+            <div className="pnl-section-label">Month comparison</div>
+            <table className="pnl-table pnl-compare">
+              <thead>
+                <tr>
+                  <th></th>
+                  {d.compare.map((c) => (
+                    <th key={c.month} className="pnl-num pnl-strong" style={{ whiteSpace: "nowrap" }}>{c.label}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                <CmpRow label="Gross Sale" cols={d.compare} pick={(c) => fmt(c.grossSale)} strong />
+                <CmpRow label="Net Sale" cols={d.compare} pick={(c) => fmt(c.netSale)} strong />
+                <CmpRow label="Refund Amount" cols={d.compare} pick={(c) => sfmt(c.refunds)} />
+                <CmpRow label="Cost Price + (stocking)" cols={d.compare} pick={(c) => sfmt(c.cogs, c.stocking)} />
+                <CmpRow label="Shipping Fees" cols={d.compare} pick={(c) => sfmt(c.freight)} />
+                <CmpRow label="Advertisement" cols={d.compare} pick={(c) => sfmt(c.adSpend)} />
+                <CmpRow label="Shopify Subscription" cols={d.compare} pick={(c) => sfmt(c.shopifySubscription)} />
+                <CmpRow label="Shopify Billing" cols={d.compare} pick={(c) => sfmt(c.shopifyBilling)} />
+                <CmpRow label="Doubleclick Fee" cols={d.compare} pick={(c) => sfmt(c.doubleclickFee)} />
+                <CmpRow label="Doubleclick Subscription" cols={d.compare} pick={(c) => sfmt(c.doubleclickSub)} />
+                <CmpRow label="Gst 12%" cols={d.compare} pick={(c) => sfmt(c.gstOutput)} />
+                <CmpRow label="Gst 18% Claim" cols={d.compare} pick={(c) => fmt(c.gstInput, "Pending")} />
+                <CmpRow label="Return/Exchange Fees" cols={d.compare} pick={(c) => fmt(c.returnExchangeFees)} />
+                <CmpRow label="P&L" cols={d.compare} pick={(c) => fmt(c.netPnl, "Pending")} strong hl />
+                <CmpRow label="Per Pair" cols={d.compare} pick={(c) => fmt(c.netPnlPerDeliveredPair, "Pending")} />
+                <CmpRow label="—" cols={d.compare} pick={() => ""} />
+                <CmpRow label="Placed orders" cols={d.compare} pick={(c) => String(c.placedOrders)} />
+                <CmpRow label="Delivered" cols={d.compare} pick={(c) => String(c.deliveredOrders)} />
+                <CmpRow label="RTO" cols={d.compare} pick={(c) => `${c.rtoOrders} (${(c.placedOrders ? (c.rtoOrders / c.placedOrders) * 100 : 0).toFixed(1)}%)`} />
+                <CmpRow label="Cancelled" cols={d.compare} pick={(c) => String(c.cancelledOrders)} />
+                <CmpRow label="Delivered items (pairs)" cols={d.compare} pick={(c) => String(c.deliveredPairs)} />
+                <CmpRow label="Resolution rate" cols={d.compare} pick={(c) => pct(c.resolutionRate)} />
+              </tbody>
+            </table>
+          </div>
+        )}
 
         {r && (
           <>
@@ -713,6 +809,24 @@ function Kpi({ label, value, sub, accent, big }: { label: string; value: string;
       <div className="pnl-kpi-value" style={big ? { fontSize: 26 } : undefined}>{value}</div>
       {sub && <div className="pnl-kpi-sub">{sub}</div>}
     </div>
+  );
+}
+
+// One comparison row: a label plus one cell per month column.
+function CmpRow({ label, cols, pick, strong, hl }: {
+  label: string;
+  cols: any[];
+  pick: (c: any) => string;
+  strong?: boolean;
+  hl?: boolean;
+}) {
+  return (
+    <tr className={hl ? "pnl-row-hl" : ""}>
+      <td className={strong ? "pnl-strong" : ""} style={{ whiteSpace: "nowrap" }}>{label === "—" ? " " : label}</td>
+      {cols.map((c, i) => (
+        <td key={i} className={`pnl-num ${strong ? "pnl-strong" : ""}`}>{pick(c)}</td>
+      ))}
+    </tr>
   );
 }
 
