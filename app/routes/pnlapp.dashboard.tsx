@@ -160,6 +160,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       abandonedOrders: r.abandonedOrders,
       inTransitOrders: r.inTransitOrders,
       deliveredPairs: r.deliveredPairs,
+      // Per-bucket order value (for the funnel value column).
+      deliveredRevenue: s(r.deliveredRevenueMinor),
+      rtoRevenue: s(r.rtoRevenueMinor),
+      cancelledRevenue: s(r.cancelledRevenueMinor),
+      abandonedRevenue: s(r.abandonedRevenueMinor),
+      inTransitRevenue: s(r.inTransitRevenueMinor),
+      // Placed value = net placed revenue (already computed above as netPlaced).
       // Per-delivered metrics.
       netPnlPerDeliveredOrder: s(r.netPnlPerDeliveredOrderMinor),
       netPnlPerDeliveredPair: s(r.netPnlPerDeliveredPairMinor),
@@ -432,29 +439,37 @@ export default function PnlDashboard() {
               <div className="pnl-panel">
                 <div className="pnl-section-label">Delivery funnel</div>
                 <table className="pnl-table">
+                  <thead>
+                    <tr>
+                      <th></th>
+                      <th className="pnl-num pnl-muted">Count</th>
+                      <th className="pnl-num pnl-muted">Value</th>
+                    </tr>
+                  </thead>
                   <tbody>
-                    <Row label="Placed orders" value={String(r.placedOrders)} />
-                    <Row label="— Delivered" value={String(r.deliveredOrders)} to={drill("delivered")} active={d.drillStatus === "delivered"} />
-                    <Row label="— RTO" value={String(r.rtoOrders)} to={drill("rto")} active={d.drillStatus === "rto"} />
-                    <Row label="— Cancelled" value={String(r.cancelledOrders)} to={drill("cancelled")} active={d.drillStatus === "cancelled"} />
-                    <Row label="— Abandoned" value={String(r.abandonedOrders)} to={drill("abandoned")} active={d.drillStatus === "abandoned"} />
-                    <Row label="— In transit / unknown" value={String(r.inTransitOrders)} to={drill("intransit")} active={d.drillStatus === "intransit"} />
+                    <Row label="Placed orders" value={String(r.placedOrders)} value2={fmt(r.netPlaced)} />
+                    <Row label="— Delivered" value={String(r.deliveredOrders)} value2={fmt(r.deliveredRevenue)} to={drill("delivered")} active={d.drillStatus === "delivered"} />
+                    <Row label="— RTO" value={String(r.rtoOrders)} value2={fmt(r.rtoRevenue)} to={drill("rto")} active={d.drillStatus === "rto"} />
+                    <Row label="— Cancelled" value={String(r.cancelledOrders)} value2={fmt(r.cancelledRevenue)} to={drill("cancelled")} active={d.drillStatus === "cancelled"} />
+                    <Row label="— Abandoned" value={String(r.abandonedOrders)} value2={fmt(r.abandonedRevenue)} to={drill("abandoned")} active={d.drillStatus === "abandoned"} />
+                    <Row label="— In transit / unknown" value={String(r.inTransitOrders)} value2={fmt(r.inTransitRevenue)} to={drill("intransit")} active={d.drillStatus === "intransit"} />
                     {/* The five outcome lines sum to Placed by construction. */}
                     <Row
                       label="Delivered items (pairs)"
                       value={String(r.deliveredPairs)}
+                      value2=""
                     />
                     {/* Post-delivery: returns/exchanges from ReturnHQ (live). Not
                         part of the placed->outcome sum — a delivered order can be
                         returned later. */}
                     {d.returnhq.available && (
                       <>
-                        <Row label="Returns requested" value={String(d.returnhq.returns)} />
-                        <Row label="Exchanges requested" value={String(d.returnhq.exchanges)} />
+                        <Row label="Returns requested" value={String(d.returnhq.returns)} value2="" />
+                        <Row label="Exchanges requested" value={String(d.returnhq.exchanges)} value2="" />
                       </>
                     )}
-                    <Row label="Resolution rate" value={pct(r.resolutionRate)} />
-                    <Row label="Delivered share of placed" value={pct(r.deliveredShareOfPlaced)} />
+                    <Row label="Resolution rate" value={pct(r.resolutionRate)} value2="" />
+                    <Row label="Delivered share of placed" value={pct(r.deliveredShareOfPlaced)} value2="" />
                   </tbody>
                 </table>
               </div>
@@ -660,8 +675,8 @@ function Kpi({ label, value, sub, accent, big }: { label: string; value: string;
   );
 }
 
-function Row({ label, value, neg, strong, hl, big, pending, to, active }: {
-  label: string; value: string; neg?: boolean; strong?: boolean; hl?: boolean; big?: boolean; pending?: boolean;
+function Row({ label, value, value2, neg, strong, hl, big, pending, to, active }: {
+  label: string; value: string; value2?: string; neg?: boolean; strong?: boolean; hl?: boolean; big?: boolean; pending?: boolean;
   to?: string; active?: boolean;
 }) {
   return (
@@ -679,6 +694,11 @@ function Row({ label, value, neg, strong, hl, big, pending, to, active }: {
         style={big ? { fontSize: 18, fontWeight: 700 } : undefined}>
         {value}
       </td>
+      {value2 !== undefined && (
+        <td className={`pnl-num pnl-muted ${strong ? "pnl-strong" : ""}`}>
+          {value2}
+        </td>
+      )}
     </tr>
   );
 }

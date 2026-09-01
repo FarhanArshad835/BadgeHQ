@@ -57,6 +57,11 @@ export type RevenueDelivered = {
   cancelledOrders: number;
   abandonedOrders: number;
   inTransitOrders: number;
+  // Per-bucket order value (net-of-discount), for the funnel's value column.
+  rtoRevenueMinor: bigint;
+  cancelledRevenueMinor: bigint;
+  abandonedRevenueMinor: bigint;
+  inTransitRevenueMinor: bigint;
   unresolvedOrders: number;
   deliveredPairs: number; // Σ qty on delivered orders
   // Health (spec gates, as signals not hard blocks).
@@ -95,6 +100,12 @@ export async function revenueAndDelivered(shop: string, month: string): Promise<
   let inTransitOrders = 0;
   let unresolvedOrders = 0;
   let resolvedOrders = 0;
+  // Per-bucket order value (net-of-discount), so the funnel can show a value
+  // column next to each count. Delivered value is deliveredRevenueMinor above.
+  let rtoRevenueMinor = 0n;
+  let cancelledRevenueMinor = 0n;
+  let abandonedRevenueMinor = 0n;
+  let inTransitRevenueMinor = 0n;
 
   for (const o of orders) {
     // Shopify currentTotal is post-discount; gross_sale is pre-discount, so add
@@ -110,15 +121,19 @@ export async function revenueAndDelivered(shop: string, month: string): Promise<
       deliveredRevenueMinor += o.grossRevenueMinor; // net-of-discount order value
     } else if (oc === "rto" || oc === "rto_in_transit") {
       rtoOrders++;
+      rtoRevenueMinor += o.grossRevenueMinor;
     } else if (oc === "cancelled") {
       cancelledOrders++;
+      cancelledRevenueMinor += o.grossRevenueMinor;
     } else if (oc === "abandoned") {
       abandonedOrders++;
+      abandonedRevenueMinor += o.grossRevenueMinor;
     } else {
       // Catch-all so the five funnel buckets ALWAYS sum to placed: in_transit,
       // no-awb, unknown, lost, and any future/unmapped status land here rather
       // than vanishing (lost was previously counted nowhere).
       inTransitOrders++;
+      inTransitRevenueMinor += o.grossRevenueMinor;
     }
     if (oc === "unresolved") unresolvedOrders++;
     if (isResolvedOutcome(oc)) resolvedOrders++;
@@ -143,6 +158,11 @@ export async function revenueAndDelivered(shop: string, month: string): Promise<
     cancelledOrders,
     abandonedOrders,
     inTransitOrders,
+    // per-bucket value (net-of-discount)
+    rtoRevenueMinor,
+    cancelledRevenueMinor,
+    abandonedRevenueMinor,
+    inTransitRevenueMinor,
     unresolvedOrders,
     deliveredPairs: 0, // filled by deliveredCogs (needs line rows) — set in computeMonth
     resolvedOrders,
@@ -323,6 +343,12 @@ export type MonthlyPnl = {
   cancelledOrders: number;
   abandonedOrders: number;
   inTransitOrders: number;
+  // Per-bucket order value (net-of-discount) for the funnel's value column.
+  deliveredRevenueMinor: bigint;
+  rtoRevenueMinor: bigint;
+  cancelledRevenueMinor: bigint;
+  abandonedRevenueMinor: bigint;
+  inTransitRevenueMinor: bigint;
   deliveredPairs: number;
   // Per-delivered / per-pair metrics (null when netPnl is suppressed).
   netPnlPerDeliveredOrderMinor: bigint | null;
@@ -471,6 +497,11 @@ export async function computeMonth(shop: string, month: string): Promise<Monthly
     cancelledOrders: rev.cancelledOrders,
     abandonedOrders: rev.abandonedOrders,
     inTransitOrders: rev.inTransitOrders,
+    deliveredRevenueMinor: rev.deliveredRevenueMinor,
+    rtoRevenueMinor: rev.rtoRevenueMinor,
+    cancelledRevenueMinor: rev.cancelledRevenueMinor,
+    abandonedRevenueMinor: rev.abandonedRevenueMinor,
+    inTransitRevenueMinor: rev.inTransitRevenueMinor,
     deliveredPairs: cogs.deliveredPairs,
     netPnlPerDeliveredOrderMinor: perDelOrder(netPnlMinor),
     netPnlPerDeliveredPairMinor: perPair(netPnlMinor),
