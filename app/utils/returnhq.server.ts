@@ -50,6 +50,8 @@ function orderMonthIst(orderCreatedAt: Date): string {
 export type ReturnHqMonth = {
   returns: number;
   exchanges: number;
+  returnsValueMinor: bigint;
+  exchangesValueMinor: bigint;
   available: boolean; // false when RETURNHQ_DATABASE_URL isn't set / shop not found
 };
 
@@ -83,29 +85,39 @@ export async function refreshReturnHqCache(): Promise<{ ok: boolean; months: num
     const orderNames = Array.from(new Set(reqs.map((r) => String(r.shopify_order_number || "").trim()).filter(Boolean)));
     const orders = await bhq.orderFinancials.findMany({
       where: { shop: SHOP, orderName: { in: orderNames } },
-      select: { orderName: true, orderCreatedAt: true },
+      select: { orderName: true, orderCreatedAt: true, grossRevenueMinor: true },
     });
     const monthByOrder = new Map(orders.map((o) => [o.orderName, orderMonthIst(o.orderCreatedAt)]));
+    const revByOrder = new Map(orders.map((o) => [o.orderName, o.grossRevenueMinor]));
 
-    // Bucket returns/exchanges by the order's month.
-    const counts = new Map<string, { returns: number; exchanges: number }>();
+    // Bucket returns/exchanges by the order's month, and sum the order's revenue.
+    const counts = new Map<string, { returns: number; exchanges: number; returnsValueMinor: bigint; exchangesValueMinor: bigint }>();
     for (const r of reqs) {
-      const month = monthByOrder.get(String(r.shopify_order_number || "").trim());
+      const orderName = String(r.shopify_order_number || "").trim();
+      const month = monthByOrder.get(orderName);
       if (!month) continue; // order not synced yet
-      const e = counts.get(month) || { returns: 0, exchanges: 0 };
-      if (r.type === "return") e.returns += 1;
-      else if (r.type === "exchange") e.exchanges += 1;
-      else if (r.type === "mixed") { e.returns += 1; e.exchanges += 1; }
+      const rev = revByOrder.get(orderName) ?? 0n;
+      const e = counts.get(month) || { returns: 0, exchanges: 0, returnsValueMinor: 0n, exchangesValueMinor: 0n };
+      if (r.type === "return") { e.returns += 1; e.returnsValueMinor += rev; }
+      else if (r.type === "exchange") { e.exchanges += 1; e.exchangesValueMinor += rev; }
+      else if (r.type === "mixed") { e.returns += 1; e.exchanges += 1; e.returnsValueMinor += rev; e.exchangesValueMinor += rev; }
       counts.set(month, e);
     }
 
     // Upsert each month's cache row.
     const now = new Date();
     for (const [month, c] of counts) {
+      const row = {
+        returns: c.returns,
+        exchanges: c.exchanges,
+        returnsValueMinor: c.returnsValueMinor,
+        exchangesValueMinor: c.exchangesValueMinor,
+        syncedAt: now,
+      };
       await bhq.returnHqCache.upsert({
         where: { shop_month: { shop: SHOP, month } },
-        create: { shop: SHOP, month, returns: c.returns, exchanges: c.exchanges, syncedAt: now },
-        update: { returns: c.returns, exchanges: c.exchanges, syncedAt: now },
+        create: { shop: SHOP, month, ...row },
+        update: row,
       });
     }
     return { ok: true, months: counts.size };
@@ -122,8 +134,14 @@ export async function refreshReturnHqCache(): Promise<{ ok: boolean; months: num
 export async function returnHqCountsForMonth(month: string): Promise<ReturnHqMonth> {
   const row = await bhq.returnHqCache.findUnique({
     where: { shop_month: { shop: SHOP, month } },
-    select: { returns: true, exchanges: true },
+    select: { returns: true, exchanges: true, returnsValueMinor: true, exchangesValueMinor: true },
   });
-  if (!row) return { returns: 0, exchanges: 0, available: false };
-  return { returns: row.returns, exchanges: row.exchanges, available: true };
+  if (!row) return { returns: 0, exchanges: 0, returnsValueMinor: 0n, exchangesValueMinor: 0n, available: false };
+  return {
+    returns: row.returns,
+    exchanges: row.exchanges,
+    returnsValueMinor: row.returnsValueMinor,
+    exchangesValueMinor: row.exchangesValueMinor,
+    available: true,
+  };
 }

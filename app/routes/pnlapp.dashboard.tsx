@@ -73,7 +73,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   // Returns & exchanges, read live from ReturnHQ's own DB (not Shopify tags, so
   // late-created returns are never missed).
-  const returnhq = shop ? await returnHqCountsForMonth(month) : { returns: 0, exchanges: 0, available: false };
+  const returnhqRaw = shop
+    ? await returnHqCountsForMonth(month)
+    : { returns: 0, exchanges: 0, returnsValueMinor: 0n, exchangesValueMinor: 0n, available: false };
   const monthInput = shop
     ? await prisma.pnlMonthlyInput.findUnique({ where: { shop_month: { shop, month } } })
     : null;
@@ -200,7 +202,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     unmatched,
     unmatchedTotal,
     unmatchedUnits,
-    returnhq,
+    returnhq: {
+      returns: returnhqRaw.returns,
+      exchanges: returnhqRaw.exchanges,
+      returnsValue: s(returnhqRaw.returnsValueMinor),
+      exchangesValue: s(returnhqRaw.exchangesValueMinor),
+      available: returnhqRaw.available,
+    },
     // Month-by-month comparison columns (compact: statement + funnel lines only).
     compareOn,
     compare: compareReports.map((c) => ({
@@ -594,8 +602,8 @@ export default function PnlDashboard() {
                         returned later. */}
                     {d.returnhq.available && (
                       <>
-                        <Row label="Returns requested" value={String(d.returnhq.returns)} value2="" />
-                        <Row label="Exchanges requested" value={String(d.returnhq.exchanges)} value2="" />
+                        <Row label="Returns requested" value={String(d.returnhq.returns)} value2={fmt(d.returnhq.returnsValue)} />
+                        <Row label="Exchanges requested" value={String(d.returnhq.exchanges)} value2={fmt(d.returnhq.exchangesValue)} />
                       </>
                     )}
                     <Row label="Resolution rate" value={pct(r.resolutionRate)} value2="" />

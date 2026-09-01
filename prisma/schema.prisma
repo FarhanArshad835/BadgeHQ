@@ -677,6 +677,10 @@ model ReturnHqCache {
   month        String // "YYYY-MM"
   returns      Int      @default(0)
   exchanges    Int      @default(0)
+  // ₹ value (paise) of the orders behind those requests, for the funnel's value
+  // column. Summed from OrderFinancials.grossRevenueMinor of the matched orders.
+  returnsValueMinor   BigInt @default(0)
+  exchangesValueMinor BigInt @default(0)
   syncedAt     DateTime @default(now())
 
   @@unique([shop, month])
