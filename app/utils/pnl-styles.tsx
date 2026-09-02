@@ -36,23 +36,24 @@ export const CSS = `
   color: var(--ink);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
-  padding: 28px 28px 56px;
+  padding: 18px 20px 40px;
+  font-size: 13px;
 }
 /* Use the width the screen actually has: the old 940px cap left most of a
    desktop monitor empty. Capped generously so text lines stay readable. */
 .pnl-wrap { max-width: 1600px; margin: 0 auto; }
 .pnl-wrap.narrow { max-width: 460px; }
 
-.pnl-h1 { margin: 0; font-size: 26px; font-weight: 680; letter-spacing: -0.02em; }
-.pnl-sub { color: var(--ink-soft); font-size: 14px; line-height: 1.55; }
+.pnl-h1 { margin: 0; font-size: 19px; font-weight: 680; letter-spacing: -0.02em; }
+.pnl-sub { color: var(--ink-soft); font-size: 12.5px; line-height: 1.5; }
 
 /* header row */
-.pnl-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 22px; gap: 16px; }
-.pnl-headlinks { display: flex; gap: 20px; align-items: center; }
+.pnl-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; gap: 14px; }
+.pnl-headlinks { display: flex; gap: 14px; align-items: center; }
 
 /* text link */
 .pnl-link {
-  color: var(--accent-ink); text-decoration: none; font-size: 14px; font-weight: 550;
+  color: var(--accent-ink); text-decoration: none; font-size: 13px; font-weight: 550;
   padding: 4px 2px; border-radius: 6px; position: relative;
   transition: color 140ms var(--ease);
 }
@@ -65,14 +66,20 @@ export const CSS = `
 .pnl-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 
 /* buttons */
+/* Secondary is the DEFAULT button: it needs a real resting surface and its own
+   hover/active, or every non-primary action reads as dead text. */
 .pnl-btn {
-  font: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
-  padding: 10px 18px; border-radius: 9px; border: 1px solid transparent;
-  transition: transform 120ms var(--ease), box-shadow 160ms var(--ease), background 140ms var(--ease), opacity 120ms var(--ease);
+  font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+  padding: 7px 13px; border-radius: 8px;
+  background: var(--panel); color: var(--ink); border: 1px solid var(--line);
+  transition: transform 120ms var(--ease), box-shadow 160ms var(--ease),
+              background 140ms var(--ease), border-color 140ms var(--ease), opacity 120ms var(--ease);
 }
-.pnl-btn-primary { background: var(--ink); color: oklch(0.99 0.003 275); box-shadow: var(--shadow); }
-.pnl-btn-primary:hover { background: var(--accent-ink); box-shadow: 0 2px 6px oklch(0.42 0.16 275 / 0.28), 0 8px 22px oklch(0.42 0.16 275 / 0.18); }
-.pnl-btn-primary:active { transform: translateY(1px); box-shadow: 0 1px 2px oklch(0.42 0.16 275 / 0.3); }
+.pnl-btn:hover:not(:disabled) { background: var(--surface); border-color: var(--ink-faint); box-shadow: var(--shadow); }
+.pnl-btn:active:not(:disabled) { transform: translateY(1px); background: var(--accent-wash); border-color: var(--accent); box-shadow: none; }
+.pnl-btn-primary { background: var(--ink); color: oklch(0.99 0.003 275); border-color: transparent; box-shadow: var(--shadow); }
+.pnl-btn-primary:hover:not(:disabled) { background: var(--accent-ink); border-color: transparent; box-shadow: 0 2px 6px oklch(0.42 0.16 275 / 0.28), 0 8px 22px oklch(0.42 0.16 275 / 0.18); }
+.pnl-btn-primary:active:not(:disabled) { transform: translateY(1px); background: var(--accent-ink); box-shadow: 0 1px 2px oklch(0.42 0.16 275 / 0.3); }
 .pnl-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .pnl-btn:disabled { opacity: 0.6; cursor: default; }
 .pnl-btn-primary:disabled { opacity: 1; } /* stays solid while syncing so the count reads clearly */
@@ -87,21 +94,22 @@ export const CSS = `
 
 /* select */
 .pnl-select {
-  font: inherit; font-size: 14px; color: var(--ink); background: var(--panel);
-  padding: 9px 34px 9px 13px; border: 1px solid var(--line); border-radius: 9px;
+  font: inherit; font-size: 13px; color: var(--ink); background: var(--panel);
+  padding: 6px 28px 6px 10px; border: 1px solid var(--line); border-radius: 8px;
   cursor: pointer; appearance: none;
   background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%236b6b80' stroke-width='1.4' stroke-linecap='round'/%3E%3C/svg%3E");
-  background-repeat: no-repeat; background-position: right 13px center;
+  background-repeat: no-repeat; background-position: right 10px center;
   transition: border-color 140ms var(--ease), box-shadow 140ms var(--ease);
 }
 .pnl-select:hover { border-color: var(--ink-faint); }
 .pnl-select:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-wash); }
+.pnl-select:active { border-color: var(--accent); }
 
 /* text input */
 .pnl-input {
-  font: inherit; font-size: 14px; color: var(--ink); background: var(--panel);
+  font: inherit; font-size: 13px; color: var(--ink); background: var(--panel);
   width: 100%; box-sizing: border-box;
-  padding: 10px 13px; border: 1px solid var(--line); border-radius: 9px;
+  padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px;
   transition: border-color 140ms var(--ease), box-shadow 140ms var(--ease);
 }
 .pnl-input::placeholder { color: var(--ink-faint); }
@@ -109,11 +117,11 @@ export const CSS = `
 .pnl-input:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-wash); }
 
 /* tabs */
-.pnl-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin-bottom: 22px; }
+.pnl-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin-bottom: 14px; }
 .pnl-tab {
-  font: inherit; font-size: 14px; font-weight: 550; cursor: pointer;
+  font: inherit; font-size: 13px; font-weight: 550; cursor: pointer;
   background: none; border: none; color: var(--ink-soft);
-  padding: 10px 16px; position: relative;
+  padding: 7px 12px; position: relative;
   transition: color 140ms var(--ease);
 }
 .pnl-tab::after {
@@ -122,39 +130,40 @@ export const CSS = `
   transform: scaleX(0); transition: transform 200ms var(--ease);
 }
 .pnl-tab:hover { color: var(--ink); }
+.pnl-tab:active { color: var(--accent-ink); }
 .pnl-tab[data-active="true"] { color: var(--ink); font-weight: 640; }
 .pnl-tab[data-active="true"]::after { transform: scaleX(1); }
 .pnl-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 6px; }
 
 /* banner */
-.pnl-banner { padding: 12px 15px; border-radius: 10px; font-size: 13.5px; line-height: 1.5; border: 1px solid transparent; }
+.pnl-banner { padding: 8px 11px; border-radius: 8px; font-size: 12.5px; line-height: 1.45; border: 1px solid transparent; }
 .pnl-banner.info { background: var(--surface); border-color: var(--line); color: var(--ink-soft); }
 .pnl-banner.ok   { background: var(--ok-bg); border-color: oklch(0.86 0.07 155); color: oklch(0.34 0.09 155); }
 .pnl-banner.warn { background: var(--warn-bg); border-color: var(--warn-line); color: oklch(0.42 0.09 75); }
 .pnl-banner.bad  { background: oklch(0.96 0.04 35); border-color: oklch(0.86 0.08 35); color: oklch(0.42 0.12 35); }
 
 /* KPI tiles */
-.pnl-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(158px, 1fr)); gap: 12px; margin-bottom: 14px; }
+.pnl-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 9px; margin-bottom: 10px; }
 .pnl-kpi {
-  background: var(--panel); border: 1px solid var(--line-soft); border-radius: var(--radius);
-  padding: 16px 18px; box-shadow: var(--shadow);
-  transition: border-color 160ms var(--ease), transform 160ms var(--ease);
+  background: var(--panel); border: 1px solid var(--line-soft); border-radius: 10px;
+  padding: 10px 12px; box-shadow: var(--shadow);
+  transition: border-color 160ms var(--ease);
 }
-.pnl-kpi:hover { border-color: var(--line); transform: translateY(-1px); }
-.pnl-kpi-label { font-size: 12.5px; color: var(--ink-faint); margin-bottom: 6px; letter-spacing: 0.01em; }
-.pnl-kpi-value { font-size: 19px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.pnl-kpi:hover { border-color: var(--line); }
+.pnl-kpi-label { font-size: 11px; color: var(--ink-faint); margin-bottom: 3px; letter-spacing: 0.01em; }
+.pnl-kpi-value { font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
 .pnl-kpi-value.neg { color: var(--neg); }
 .pnl-kpi.headline, .pnl-kpi.accent { background: var(--accent-wash); border-color: oklch(0.88 0.04 275); }
 .pnl-kpi.headline .pnl-kpi-value, .pnl-kpi.accent .pnl-kpi-value { color: var(--accent-ink); }
-.pnl-kpi-sub { font-size: 12px; color: var(--ink-faint); margin-top: 5px; }
+.pnl-kpi-sub { font-size: 11px; color: var(--ink-faint); margin-top: 3px; }
 
 /* Monthly-P&L waterfall + two-up panels */
-.pnl-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.pnl-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 @media (max-width: 720px) { .pnl-grid2 { grid-template-columns: 1fr; } }
 
 /* Wide-screen main layout: the statement sits beside the funnel/per-unit panels
    instead of each stretching the full width with a lone figure on the right. */
-.pnl-main { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.pnl-main { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 10px; align-items: start; }
 @media (max-width: 1100px) { .pnl-main { grid-template-columns: 1fr; } }
 .pnl-main .pnl-grid2 { grid-template-columns: 1fr; }
 @media (min-width: 1400px) { .pnl-main .pnl-grid2 { grid-template-columns: 1fr 1fr; } }
@@ -168,21 +177,57 @@ export const CSS = `
 
 /* table */
 .pnl-table-wrap { background: var(--panel); border: 1px solid var(--line-soft); border-radius: var(--radius); overflow: auto; box-shadow: var(--shadow); }
-.pnl-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.pnl-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .pnl-table th {
-  text-align: left; padding: 11px 16px; border-bottom: 1px solid var(--line);
-  color: var(--ink-faint); font-weight: 600; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.04em;
+  text-align: left; padding: 7px 11px; border-bottom: 1px solid var(--line);
+  color: var(--ink-faint); font-weight: 600; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em;
   position: sticky; top: 0; background: var(--panel);
 }
-.pnl-table td { padding: 12px 16px; border-bottom: 1px solid var(--line-soft); font-variant-numeric: tabular-nums; }
+.pnl-table td { padding: 6px 11px; border-bottom: 1px solid var(--line-soft); font-variant-numeric: tabular-nums; }
 .pnl-table tbody tr { transition: background 120ms var(--ease); }
-.pnl-table tbody tr:hover { background: var(--surface); }
 .pnl-table tbody tr:last-child td { border-bottom: none; }
+
+/* Only rows that actually drill in respond to the pointer. Hovering every row
+   (including static ones) promised a click that wasn't there. */
+.pnl-row-click { cursor: pointer; }
+.pnl-row-click:hover { background: var(--surface); }
+.pnl-row-click:active { background: var(--accent-wash); }
+.pnl-row-click td:first-child { position: relative; padding-left: 21px; }
+/* A caret marks the row as expandable, and turns when it's open. */
+.pnl-row-click td:first-child::before {
+  content: ""; position: absolute; left: 8px; top: 50%;
+  width: 5px; height: 5px; margin-top: -3px;
+  border-right: 1.5px solid var(--ink-faint); border-bottom: 1.5px solid var(--ink-faint);
+  transform: rotate(-45deg); transform-origin: center;
+  transition: transform 160ms var(--ease), border-color 160ms var(--ease);
+}
+.pnl-row-click:hover td:first-child::before { border-color: var(--accent); }
+.pnl-row-active td:first-child::before { transform: rotate(45deg); border-color: var(--accent); }
+.pnl-row-active { background: var(--accent-wash); }
+.pnl-row-active:hover { background: var(--accent-wash); }
+/* The whole cell is the hit target, not just the text. */
+.pnl-row-click td:first-child a { display: block; margin: -6px -11px; padding: 6px 11px 6px 0; }
 .pnl-num { text-align: right; }
 .pnl-strong { font-weight: 640; }
 .pnl-muted { color: var(--ink-faint); }
 .pnl-pos { color: var(--pos); font-weight: 600; }
 .pnl-negv { color: var(--neg); font-weight: 600; }
+
+/* Navigation progress: any click that goes to the server (drill-in, month
+   change, compare toggle) shows work is happening instead of appearing dead. */
+.pnl-progress {
+  position: fixed; inset-block-start: 0; inset-inline: 0; height: 2px; z-index: 50;
+  background: var(--accent); transform-origin: left center;
+  animation: pnl-progress-in 900ms var(--ease) forwards;
+  box-shadow: 0 0 8px oklch(0.52 0.15 275 / 0.5);
+}
+@keyframes pnl-progress-in {
+  0%   { transform: scaleX(0); }
+  60%  { transform: scaleX(0.7); }
+  100% { transform: scaleX(0.92); }
+}
+/* Content dims slightly while a navigation is in flight. */
+.pnl-busy { opacity: 0.6; transition: opacity 160ms var(--ease); pointer-events: none; }
 
 /* pill for pending/status */
 .pnl-pill { display: inline-block; padding: 2px 9px; border-radius: 20px; font-size: 12px; font-weight: 550; }
@@ -191,28 +236,32 @@ export const CSS = `
 .pnl-pill.attn    { background: var(--warn-bg); color: oklch(0.42 0.09 75); }
 
 /* controls row */
-.pnl-controls { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 14px; flex-wrap: wrap; }
-.pnl-controls-right { display: flex; align-items: center; gap: 14px; }
+.pnl-controls { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+.pnl-controls-right { display: flex; align-items: center; gap: 10px; }
 
 /* panels / cards for login+settings */
-.pnl-panel { background: var(--panel); border: 1px solid var(--line-soft); border-radius: 16px; padding: 30px; box-shadow: var(--shadow); }
+.pnl-panel { background: var(--panel); border: 1px solid var(--line-soft); border-radius: 11px; padding: 13px 14px; box-shadow: var(--shadow); }
 .pnl-field { display: flex; flex-direction: column; gap: 5px; }
 .pnl-field-label { font-size: 13px; font-weight: 600; color: var(--ink); }
 .pnl-form { display: flex; flex-direction: column; gap: 15px; }
 .pnl-err { color: var(--neg); font-size: 13px; }
 .pnl-note { font-size: 13px; color: var(--ink-soft); line-height: 1.6; }
 .pnl-rule { border: none; border-top: 1px solid var(--line); margin: 6px 0; }
-.pnl-section-label { font-size: 11.5px; font-weight: 680; color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.05em; }
-.pnl-empty { background: var(--panel); border: 1px dashed var(--line); border-radius: var(--radius); padding: 30px; text-align: center; color: var(--ink-soft); margin-top: 14px; }
+.pnl-section-label { font-size: 10.5px; font-weight: 680; color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.05em; }
+.pnl-empty { background: var(--panel); border: 1px dashed var(--line); border-radius: 10px; padding: 20px; text-align: center; color: var(--ink-soft); margin-top: 10px; }
 
-.pnl-help { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; font-size: 13px; color: var(--ink-soft); line-height: 1.6; }
+.pnl-help { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 12px; color: var(--ink-soft); line-height: 1.5; }
 .pnl-help code { background: var(--accent-wash); color: var(--accent-ink); padding: 1px 6px; border-radius: 5px; font-size: 12.5px; }
 .pnl-help ol { margin: 8px 0 6px; padding-left: 20px; }
 .pnl-help li { margin: 3px 0; }
 
 @media (prefers-reduced-motion: reduce) {
-  .pnl *, .pnl *::after { transition: none !important; }
+  .pnl *, .pnl *::after, .pnl *::before { transition: none !important; }
   .pnl-spinner { animation: none !important; }
+  /* Keep the progress bar as a static indicator rather than a moving one. */
+  .pnl-progress { animation: none !important; transform: scaleX(1); }
+  .pnl-btn:active:not(:disabled),
+  .pnl-btn-primary:active:not(:disabled) { transform: none; }
 }
 `;
 

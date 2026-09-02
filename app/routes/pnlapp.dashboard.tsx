@@ -395,6 +395,9 @@ export default function PnlDashboard() {
     submittingIntent !== "fetch-delivery";
   const fetchingDelivery = nav.state === "submitting" && submittingIntent === "fetch-delivery";
   const busy = nav.state !== "idle";
+  // A GET navigation (drill-in / month change / compare toggle), as opposed to a
+  // form POST which has its own in-button spinner.
+  const navigating = nav.state === "loading" && Boolean(nav.location);
 
   // Live progress while a sync runs (client-side, no polling). Eases toward last
   // run's order count, snaps to the real figure when the action returns.
@@ -441,6 +444,8 @@ export default function PnlDashboard() {
   return (
     <div className="pnl">
       <PnlStyles />
+      {/* Navigation in flight (drill-in, month change, compare): show it. */}
+      {navigating && <div className="pnl-progress" key={nav.location?.key} />}
       <div className="pnl-wrap">
         <div className="pnl-head">
           <h1 className="pnl-h1">Profit &amp; Loss</h1>
@@ -847,10 +852,10 @@ function Row({ label, value, value2, neg, strong, hl, big, pending, to, active }
   to?: string; active?: boolean;
 }) {
   return (
-    <tr className={`${hl ? "pnl-row-hl" : ""} ${active ? "pnl-row-active" : ""}`}>
+    <tr className={`${hl ? "pnl-row-hl" : ""} ${active ? "pnl-row-active" : ""} ${to ? "pnl-row-click" : ""}`}>
       <td className={strong ? "pnl-strong" : ""}>
         {to ? (
-          <Link to={to} prefetch="intent" style={{ color: "inherit", textDecoration: active ? "underline" : "none" }}>
+          <Link to={to} prefetch="intent" style={{ color: "inherit", textDecoration: "none" }}>
             {label}
           </Link>
         ) : (
