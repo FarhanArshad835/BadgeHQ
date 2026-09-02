@@ -146,7 +146,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       returnExchangeFees: rupees(monthInput?.returnExchangeFeesMinor),
       adSpendOverride: rupees(monthInput?.adSpendOverrideMinor),
       freightOverride: rupees(monthInput?.freightOverrideMinor),
-      shopifySubscription: rupees(monthInput?.shopifySubscriptionMinor),
       shopifyBilling: rupees(monthInput?.shopifyBillingMinor),
       doubleclickFee: rupees(monthInput?.doubleclickFeeMinor),
       doubleclickSub: rupees(monthInput?.doubleclickSubMinor),
@@ -172,7 +171,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       ops: s(r.opsMinor),
       overhead: s(r.overheadMinor),
       overheadProvisional: r.overheadProvisional,
-      shopifySubscription: s(r.shopifySubscriptionMinor),
       shopifyBilling: s(r.shopifyBillingMinor),
       doubleclickFee: s(r.doubleclickFeeMinor),
       doubleclickSub: s(r.doubleclickSubMinor),
@@ -253,7 +251,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       stocking: s(c.stockingMinor),
       freight: s(c.freightMinor),
       adSpend: s(c.adSpendMinor),
-      shopifySubscription: s(c.shopifySubscriptionMinor),
       shopifyBilling: s(c.shopifyBillingMinor),
       doubleclickFee: s(c.doubleclickFeeMinor),
       doubleclickSub: s(c.doubleclickSubMinor),
@@ -347,13 +344,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const returnExchangeFeesMinor = money("returnExchangeFees") ?? 0n;
     const adSpendOverrideMinor = money("adSpendOverride");
     const freightOverrideMinor = money("freightOverride");
-    const shopifySubscriptionMinor = money("shopifySubscription") ?? 0n;
     const shopifyBillingMinor = money("shopifyBilling") ?? 0n;
     const doubleclickFeeMinor = money("doubleclickFee") ?? 0n;
     const doubleclickSubMinor = money("doubleclickSub") ?? 0n;
     const stockingMinor = money("stocking") ?? 0n;
     const fixed = {
-      shopifySubscriptionMinor,
       shopifyBillingMinor,
       doubleclickFeeMinor,
       doubleclickSubMinor,
@@ -550,8 +545,7 @@ export default function PnlDashboard() {
                 <CmpRow label="Cost Price + (stocking)" cols={d.compare} pick={(c) => sfmt(c.cogs, c.stocking)} />
                 <CmpRow label="Shipping Fees" cols={d.compare} pick={(c) => sfmt(c.freight)} />
                 <CmpRow label="Advertisement" cols={d.compare} pick={(c) => sfmt(c.adSpend)} />
-                <CmpRow label="Shopify Subscription" cols={d.compare} pick={(c) => sfmt(c.shopifySubscription)} />
-                <CmpRow label="Shopify Billing" cols={d.compare} pick={(c) => sfmt(c.shopifyBilling)} />
+                <CmpRow label="Shopify" cols={d.compare} pick={(c) => sfmt(c.shopifyBilling)} />
                 <CmpRow label="Doubleclick Fee" cols={d.compare} pick={(c) => sfmt(c.doubleclickFee)} />
                 <CmpRow label="Doubleclick Subscription" cols={d.compare} pick={(c) => sfmt(c.doubleclickSub)} />
                 <CmpRow label="Gst 12%" cols={d.compare} pick={(c) => sfmt(c.gstOutput)} />
@@ -642,8 +636,7 @@ export default function PnlDashboard() {
                     <Row label={`Advertising${r.adSpendSource === "meta" ? " (Meta)" : ""}`} value={sfmt(r.adSpend)} neg
                       delta={<Delta now={r.adSpend} was={d.prev?.adSpend} fmt={fmt} label={d.prevLabel} goodWhenUp={false} />} />
                   )}
-                  <EditRow label="Shopify subscription" name="shopifySubscription" value={d.monthInput.shopifySubscription} />
-                  <EditRow label="Shopify billing" name="shopifyBilling" value={d.monthInput.shopifyBilling} />
+                  <EditRow label="Shopify (subscription + billing)" name="shopifyBilling" value={d.monthInput.shopifyBilling} />
                   <EditRow label="Doubleclick fee" name="doubleclickFee" value={d.monthInput.doubleclickFee} />
                   <EditRow label="Doubleclick subscription" name="doubleclickSub" value={d.monthInput.doubleclickSub} />
                   <Row label="Shipping per pair" value={sfmt(r.freightPerDeliveredOrder)} neg pending={r.freightPerDeliveredOrder == null} />

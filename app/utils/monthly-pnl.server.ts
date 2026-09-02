@@ -362,8 +362,7 @@ export type MonthlyPnl = {
   overheadMinor: bigint;
   overheadProvisional: boolean;
   // Itemized fixed costs (statement rows).
-  shopifySubscriptionMinor: bigint;
-  shopifyBillingMinor: bigint;
+  shopifyBillingMinor: bigint; // combined Shopify subscription + billing
   doubleclickFeeMinor: bigint;
   doubleclickSubMinor: bigint;
   stockingMinor: bigint;
@@ -460,7 +459,6 @@ export async function computeMonth(shop: string, month: string): Promise<Monthly
   // enabled + a coverage check runs (Phase 4 wiring lands with live accounts).
 
   // Itemized fixed costs (statement rows). They SUM into the fixed-cost total.
-  const shopifySubscriptionMinor = input?.shopifySubscriptionMinor ?? 0n;
   const shopifyBillingMinor = input?.shopifyBillingMinor ?? 0n;
   const doubleclickFeeMinor = input?.doubleclickFeeMinor ?? 0n;
   const doubleclickSubMinor = input?.doubleclickSubMinor ?? 0n;
@@ -472,7 +470,7 @@ export async function computeMonth(shop: string, month: string): Promise<Monthly
   const stockingMinor = manualStockingMinor > 0n ? manualStockingMinor : autoStockingMinor;
   const stockingSource = manualStockingMinor > 0n ? "manual" : "auto";
   const itemizedFixed =
-    shopifySubscriptionMinor + shopifyBillingMinor + doubleclickFeeMinor + doubleclickSubMinor;
+    shopifyBillingMinor + doubleclickFeeMinor + doubleclickSubMinor;
   // overheadMinor drives the P&L math. Prefer the itemized sum when any itemized
   // value is entered; otherwise fall back to the legacy combined overhead field.
   const overheadMinor = itemizedFixed > 0n ? itemizedFixed : (input?.overheadMinor ?? 0n);
@@ -556,7 +554,6 @@ export async function computeMonth(shop: string, month: string): Promise<Monthly
     opsMinor,
     overheadMinor,
     overheadProvisional,
-    shopifySubscriptionMinor,
     shopifyBillingMinor,
     doubleclickFeeMinor,
     doubleclickSubMinor,
