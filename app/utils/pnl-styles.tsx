@@ -193,9 +193,11 @@ export const CSS = `
 .pnl-row-click:hover { background: var(--surface); }
 .pnl-row-click:active { background: var(--accent-wash); }
 .pnl-row-click td:first-child { position: relative; padding-left: 21px; }
-/* A caret marks the row as expandable, and turns when it's open. */
+/* A caret marks the row as expandable, and turns when it's open. It also serves
+   as the indent marker for these sub-rows, so the label carries no dash prefix
+   (two markers in one gutter overlapped into an unreadable glyph). */
 .pnl-row-click td:first-child::before {
-  content: ""; position: absolute; left: 8px; top: 50%;
+  content: ""; position: absolute; left: 9px; top: 50%;
   width: 5px; height: 5px; margin-top: -3px;
   border-right: 1.5px solid var(--ink-faint); border-bottom: 1.5px solid var(--ink-faint);
   transform: rotate(-45deg); transform-origin: center;

@@ -678,11 +678,13 @@ export default function PnlDashboard() {
                   </thead>
                   <tbody>
                     <Row label="Placed orders" value={String(r.placedOrders)} value2={fmt(r.netPlaced)} />
-                    <Row label="— Delivered" value={String(r.deliveredOrders)} value2={fmt(r.deliveredRevenue)} to={drill("delivered")} active={d.drillStatus === "delivered"} />
-                    <Row label="— RTO" value={String(r.rtoOrders)} value2={fmt(r.rtoRevenue)} to={drill("rto")} active={d.drillStatus === "rto"} />
-                    <Row label="— Cancelled" value={String(r.cancelledOrders)} value2={fmt(r.cancelledRevenue)} to={drill("cancelled")} active={d.drillStatus === "cancelled"} />
-                    <Row label="— Abandoned" value={String(r.abandonedOrders)} value2={fmt(r.abandonedRevenue)} to={drill("abandoned")} active={d.drillStatus === "abandoned"} />
-                    <Row label="— In transit / unknown" value={String(r.inTransitOrders)} value2={fmt(r.inTransitRevenue)} to={drill("intransit")} active={d.drillStatus === "intransit"} />
+                    {/* No em-dash prefix: the caret is the indent marker AND shows
+                        open/closed. Two markers in one gutter collided. */}
+                    <Row label="Delivered" value={String(r.deliveredOrders)} value2={fmt(r.deliveredRevenue)} to={drill("delivered")} active={d.drillStatus === "delivered"} />
+                    <Row label="RTO" value={String(r.rtoOrders)} value2={fmt(r.rtoRevenue)} to={drill("rto")} active={d.drillStatus === "rto"} />
+                    <Row label="Cancelled" value={String(r.cancelledOrders)} value2={fmt(r.cancelledRevenue)} to={drill("cancelled")} active={d.drillStatus === "cancelled"} />
+                    <Row label="Abandoned" value={String(r.abandonedOrders)} value2={fmt(r.abandonedRevenue)} to={drill("abandoned")} active={d.drillStatus === "abandoned"} />
+                    <Row label="In transit / unknown" value={String(r.inTransitOrders)} value2={fmt(r.inTransitRevenue)} to={drill("intransit")} active={d.drillStatus === "intransit"} />
                     {/* The five outcome lines sum to Placed by construction. */}
                     <Row
                       label="Delivered items (pairs)"
