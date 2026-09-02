@@ -238,6 +238,38 @@ export async function deliveredCogs(shop: string, month: string): Promise<Delive
   };
 }
 
+/**
+ * Stocking: a free product added to orders that still costs us to supply, so it
+ * carries no line revenue and no Shopify cost-per-item and would otherwise be
+ * invisible in the P&L. Counts the units on DELIVERED orders whose product title
+ * contains `match` (same delivered basis as COGS — an RTO'd order's stocking
+ * comes back with it), and prices them at a flat unit cost.
+ *
+ * Not an estimate: the unit count is real order data and the unit cost is a
+ * figure the merchant enters in Settings.
+ */
+export async function deliveredStockingUnits(shop: string, month: string, match: string): Promise<number> {
+  const term = match.trim();
+  if (!term) return 0; // feature off until a match term is configured
+  const { start, end } = monthWindowIst(month);
+
+  const delivered = await prisma.orderFinancials.findMany({
+    where: { shop, orderCreatedAt: { gte: start, lt: end }, deliveryStatus: "delivered" },
+    select: { orderId: true },
+  });
+  if (!delivered.length) return 0;
+
+  const lines = await prisma.orderLineFinancials.findMany({
+    where: {
+      shop,
+      orderId: { in: delivered.map((d) => d.orderId) },
+      productTitle: { contains: term, mode: "insensitive" },
+    },
+    select: { quantity: true },
+  });
+  return lines.reduce((sum, l) => sum + l.quantity, 0);
+}
+
 export type UnmatchedCostItem = {
   productId: string;
   variantId: string;
@@ -335,6 +367,8 @@ export type MonthlyPnl = {
   doubleclickFeeMinor: bigint;
   doubleclickSubMinor: bigint;
   stockingMinor: bigint;
+  stockingUnits: number; // free stocking units on delivered orders
+  stockingSource: string; // "auto" (units × unit cost) | "manual" (entered)
   // GST.
   gstOutputMinor: bigint;
   gstInputMinor: bigint | null;
@@ -430,7 +464,13 @@ export async function computeMonth(shop: string, month: string): Promise<Monthly
   const shopifyBillingMinor = input?.shopifyBillingMinor ?? 0n;
   const doubleclickFeeMinor = input?.doubleclickFeeMinor ?? 0n;
   const doubleclickSubMinor = input?.doubleclickSubMinor ?? 0n;
-  const stockingMinor = input?.stockingMinor ?? 0n;
+  // Stocking is counted from the delivered lines × the configured unit cost.
+  // A typed figure still wins, so a month can be corrected by hand.
+  const stockingUnits = await deliveredStockingUnits(shop, month, app.stockingMatch);
+  const autoStockingMinor = BigInt(stockingUnits) * app.stockingUnitCostMinor;
+  const manualStockingMinor = input?.stockingMinor ?? 0n;
+  const stockingMinor = manualStockingMinor > 0n ? manualStockingMinor : autoStockingMinor;
+  const stockingSource = manualStockingMinor > 0n ? "manual" : "auto";
   const itemizedFixed =
     shopifySubscriptionMinor + shopifyBillingMinor + doubleclickFeeMinor + doubleclickSubMinor;
   // overheadMinor drives the P&L math. Prefer the itemized sum when any itemized
@@ -482,6 +522,7 @@ export async function computeMonth(shop: string, month: string): Promise<Monthly
     netPnlMinor =
       rev.netSaleMinor -
       cogs.cogsMinor -
+      stockingMinor - // was shown on the statement but never deducted: profit read high
       freightMinor -
       adSpendMinor -
       opsMinor -
@@ -520,6 +561,8 @@ export async function computeMonth(shop: string, month: string): Promise<Monthly
     doubleclickFeeMinor,
     doubleclickSubMinor,
     stockingMinor,
+    stockingUnits,
+    stockingSource,
     gstOutputMinor,
     gstInputMinor,
     netGstMinor,

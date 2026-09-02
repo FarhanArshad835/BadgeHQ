@@ -17,6 +17,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     metaAdAccountId: app.metaAdAccountId,
     hasMetaToken: Boolean(app.metaAccessToken),
     deliverySheetUrl: app.deliverySheetUrl,
+    stockingMatch: app.stockingMatch,
+    stockingUnitCost: (Number(app.stockingUnitCostMinor) / 100).toString(),
   });
 };
 
@@ -35,6 +37,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const metaAdAccountId = String(form.get("metaAdAccountId") || "").trim();
   const metaAccessToken = String(form.get("metaAccessToken") || "").trim();
   const deliverySheetUrl = String(form.get("deliverySheetUrl") || "").trim();
+  const stockingMatch = String(form.get("stockingMatch") || "").trim();
+  // Rupees in the field, paise in the column. Blank keeps the current value.
+  const stockingUnitCostRaw = String(form.get("stockingUnitCost") || "").trim();
+  const stockingUnitCostNum = Number(stockingUnitCostRaw);
+  const stockingUnitCostMinor =
+    stockingUnitCostRaw === "" || !isFinite(stockingUnitCostNum) || stockingUnitCostNum < 0
+      ? null // blank or unparseable: keep whatever is stored rather than zeroing it
+      : BigInt(Math.round(stockingUnitCostNum * 100));
 
   const existing = await getPnlApp();
   const effectiveToken = adminToken || existing.adminToken;
@@ -52,6 +62,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       shiprocketEmail,
       metaAdAccountId,
       deliverySheetUrl,
+      stockingMatch,
+      ...(stockingUnitCostMinor != null ? { stockingUnitCostMinor } : {}),
       ...(adminToken ? { adminToken } : {}),
       ...(shiprocketPassword ? { shiprocketPassword } : {}),
       ...(delhiveryApiKey ? { delhiveryApiKey } : {}),
@@ -126,6 +138,16 @@ export default function PnlSettings() {
             type="password"
             placeholder={d.hasMetaToken ? "•••••••• saved" : "EAAG… (ads_read token)"}
           />
+          <hr className="pnl-rule" />
+          <div className="pnl-section-label">Stocking (free product added to orders)</div>
+          <div className="pnl-help" style={{ marginBottom: 12 }}>
+            The stocking product is free to the customer, so it carries no revenue and no cost-per-item,
+            and would otherwise never show up as a cost. Enter a word from its product title and what one
+            unit costs you; the P&amp;L counts the units on delivered orders and multiplies. Leave the word
+            blank to switch this off.
+          </div>
+          <Field label="Product title contains" name="stockingMatch" defaultValue={d.stockingMatch} placeholder="stocking" />
+          <Field label="Cost per unit (₹)" name="stockingUnitCost" defaultValue={d.stockingUnitCost} placeholder="60" />
           <hr className="pnl-rule" />
           <div className="pnl-section-label">Delivery status sheet (auto-fetch)</div>
           <div className="pnl-help" style={{ marginBottom: 12 }}>

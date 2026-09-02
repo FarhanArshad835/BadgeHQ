@@ -606,6 +606,11 @@ model PnlApp {
   // Monthly-P&L config knobs (the method's fixed rates; editable in Settings so
   // they're never hard-coded estimates the merchant can't see or change).
   opsPerPairMinor     BigInt @default(2500)  // Operations cost per delivered pair (₹25)
+  // Stocking: a free product added to orders that still costs us to supply.
+  // Counted from the delivered order lines whose product title contains
+  // stockingMatch, times stockingUnitCostMinor. Blank match = feature off.
+  stockingMatch          String @default("")
+  stockingUnitCostMinor  BigInt @default(6000) // ₹60 per stocking unit
   gstOutputRateBp     Int    @default(487)   // Output GST on delivered revenue, basis points (4.87%)
   gstInputRateNumer   Int    @default(18)    // ITC on (freight+ads+overhead): ×18/118
   gstInputRateDenom   Int    @default(118)

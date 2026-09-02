@@ -177,6 +177,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       doubleclickFee: s(r.doubleclickFeeMinor),
       doubleclickSub: s(r.doubleclickSubMinor),
       stocking: s(r.stockingMinor),
+      stockingUnits: r.stockingUnits,
+      stockingSource: r.stockingSource,
       gstOutput: s(r.gstOutputMinor),
       gstInput: s(r.gstInputMinor),
       netGst: s(r.netGstMinor),
@@ -619,7 +621,15 @@ export default function PnlDashboard() {
                     delta={<Delta now={r.refunds} was={d.prev?.refunds} fmt={fmt} label={d.prevLabel} goodWhenUp={false} />} />
                   <Row label="Cost of goods (delivered)" value={sfmt(r.cogs)} neg pending={r.cogs == null}
                     delta={<Delta now={r.cogs} was={d.prev?.cogs} fmt={fmt} label={d.prevLabel} goodWhenUp={false} />} />
-                  <EditRow label="Stocking (inventory bought)" name="stocking" value={d.monthInput.stocking} />
+                  {/* Counted from the delivered lines × the unit cost in Settings.
+                      Still typeable, to correct a month by hand. */}
+                  <EditRow
+                    label={`Stocking${r.stockingUnits > 0 ? ` (${r.stockingUnits.toLocaleString("en-IN")} units)` : ""}`}
+                    name="stocking"
+                    value={d.monthInput.stocking}
+                    auto={r.stockingSource === "auto" ? fmt(r.stocking) : undefined}
+                    hint={r.stockingSource === "manual" ? "entered" : undefined}
+                  />
                   {r.freight == null ? (
                     <EditRow label="Shipping" name="freightOverride" value={d.monthInput.freightOverride} hint="carriers unresolved" />
                   ) : (
