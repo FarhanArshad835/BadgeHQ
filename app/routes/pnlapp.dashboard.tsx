@@ -172,6 +172,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       gstInput: s(r.gstInputMinor),
       netGst: s(r.netGstMinor),
       returnExchangeFees: s(r.returnExchangeFeesMinor),
+      returnExchangeFeesSource: r.returnExchangeFeesSource,
       netPnl: s(r.netPnlMinor),
       // Counts + basis.
       placedOrders: r.placedOrders,
@@ -564,7 +565,7 @@ export default function PnlDashboard() {
                   <Row label="Per Pair Shipping" value={sfmt(r.freightPerDeliveredOrder)} neg pending={r.freightPerDeliveredOrder == null} />
                   <Row label="Gst 12%" value={sfmt(r.gstOutput)} neg pending={r.gstOutput == null} />
                   <Row label="Gst 18% Claim" value={fmt(r.gstInput, "Pending")} pending={r.gstInput == null} />
-                  <Row label="Return/Exchange Fees" value={fmt(r.returnExchangeFees)} />
+                  <Row label={`Return/Exchange Fees${r.returnExchangeFeesSource === "manual" ? " (manual)" : ""}`} value={fmt(r.returnExchangeFees)} />
                   <Row label="Delivered" value={String(r.deliveredOrders)} />
                   <Row label="P&L" value={fmt(r.netPnl, "Pending")} strong hl big />
                   <Row label="Per Pair" value={fmt(r.netPnlPerDeliveredPair, "Pending")} pending={r.netPnlPerDeliveredPair == null} />
@@ -755,7 +756,7 @@ export default function PnlDashboard() {
                 <MoneyField label="Doubleclick Fee" name="doubleclickFee" defaultValue={d.monthInput.doubleclickFee} />
                 <MoneyField label="Doubleclick Subscription" name="doubleclickSub" defaultValue={d.monthInput.doubleclickSub} />
                 <MoneyField label="Stocking (extra inventory bought)" name="stocking" defaultValue={d.monthInput.stocking} />
-                <MoneyField label="Return / exchange fees collected" name="returnExchangeFees" defaultValue={d.monthInput.returnExchangeFees} />
+                <MoneyField label="Return / exchange fees override (blank = auto)" name="returnExchangeFees" defaultValue={d.monthInput.returnExchangeFees} />
                 <MoneyField label="Ad spend override (blank = use Meta)" name="adSpendOverride" defaultValue={d.monthInput.adSpendOverride} />
                 <MoneyField label="Freight override (blank = use carriers)" name="freightOverride" defaultValue={d.monthInput.freightOverride} />
               </div>

@@ -340,6 +340,7 @@ export type MonthlyPnl = {
   gstInputMinor: bigint | null;
   netGstMinor: bigint | null;
   returnExchangeFeesMinor: bigint;
+  returnExchangeFeesSource: string; // "auto" (summed fee orders) | "manual" (override)
   // Bottom line — null when any required cost is pending (suppressed).
   netPnlMinor: bigint | null;
   // Counts + basis.
@@ -436,7 +437,19 @@ export async function computeMonth(shop: string, month: string): Promise<Monthly
   // value is entered; otherwise fall back to the legacy combined overhead field.
   const overheadMinor = itemizedFixed > 0n ? itemizedFixed : (input?.overheadMinor ?? 0n);
   const overheadProvisional = !input; // inherited/absent overhead is provisional
-  const returnExchangeFeesMinor = input?.returnExchangeFeesMinor ?? 0n;
+
+  // Return/exchange fees are ALREADY in the data: ReturnHQ collects them as real
+  // Shopify orders tagged "returnhq-fee" (+ "do-not-ship"), which the funnel
+  // excludes as non-sales. Sum their revenue instead of asking for a manual
+  // figure. A manual entry still wins if one was explicitly set (override).
+  const feeAgg = await prisma.orderFinancials.aggregate({
+    where: { shop, orderCreatedAt: { gte: start, lt: end }, deliveryStatus: "returnhq-fee" },
+    _sum: { grossRevenueMinor: true },
+  });
+  const autoFeesMinor = feeAgg._sum.grossRevenueMinor ?? 0n;
+  const manualFeesMinor = input?.returnExchangeFeesMinor ?? 0n;
+  const returnExchangeFeesMinor = manualFeesMinor > 0n ? manualFeesMinor : autoFeesMinor;
+  const returnExchangeFeesSource = manualFeesMinor > 0n ? "manual" : "auto";
 
   // ── Ops / GST ─────────────────────────────────────────────────────────────
   const opsMinor = app.opsPerPairMinor * BigInt(cogs.deliveredPairs);
@@ -511,6 +524,7 @@ export async function computeMonth(shop: string, month: string): Promise<Monthly
     gstInputMinor,
     netGstMinor,
     returnExchangeFeesMinor,
+    returnExchangeFeesSource,
     netPnlMinor,
     placedOrders: rev.placedOrders,
     deliveredOrders: rev.deliveredOrders,
