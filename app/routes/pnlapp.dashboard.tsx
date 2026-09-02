@@ -643,10 +643,14 @@ export default function PnlDashboard() {
                   <Row label="Shipping per pair" value={sfmt(r.freightPerDeliveredOrder)} neg pending={r.freightPerDeliveredOrder == null} />
                   <Row label="GST charged (12%)" value={sfmt(r.gstOutput)} neg pending={r.gstOutput == null} />
                   <Row label="GST reclaimed (18%)" value={fmt(r.gstInput, "Pending")} pending={r.gstInput == null} />
-                  <Row label={`Return and exchange fees${r.returnExchangeFeesSource === "manual" ? " (entered)" : " (from fee orders)"}`} value={fmt(r.returnExchangeFees)} />
-                  {/* Kept editable so a disputed auto figure can be corrected;
-                      blank falls back to the summed fee orders. */}
-                  <EditRow label="Override fees" name="returnExchangeFees" value={d.monthInput.returnExchangeFees} hint="blank = auto" />
+                  {/* Auto-summed from the fee orders; editable in place only if
+                      that figure is disputed, rather than as its own junk row. */}
+                  <EditRow
+                    label="Return and exchange fees"
+                    name="returnExchangeFees"
+                    value={d.monthInput.returnExchangeFees}
+                    auto={r.returnExchangeFeesSource !== "manual" ? fmt(r.returnExchangeFees) : undefined}
+                  />
                   <Row label="Orders delivered" value={String(r.deliveredOrders)}
                     delta={<Delta now={String(r.deliveredOrders)} was={d.prev ? String(d.prev.deliveredOrders) : null} fmt={(v: any) => String(v)} label={d.prevLabel} />} />
                   <Row label="Profit" value={fmt(r.netPnl, "Pending")} strong hl big
@@ -876,8 +880,10 @@ function StatusBanner({ report, monthLabel }: { report: any; monthLabel: string 
  * separate form: the figure sits where you read it, so there's no hunting for
  * which row was blank. Posts with the enclosing save form.
  */
-function EditRow({ label, name, value, share, hint }: {
+function EditRow({ label, name, value, share, hint, auto }: {
   label: string; name: string; value: string; share?: number; hint?: string;
+  /** Computed figure shown as the placeholder: leaving the field blank keeps it. */
+  auto?: string;
 }) {
   return (
     <tr className="pnl-row-edit">
@@ -897,9 +903,10 @@ function EditRow({ label, name, value, share, hint }: {
             inputMode="decimal"
             name={name}
             defaultValue={value}
-            placeholder="0.00"
+            placeholder={auto ? auto.replace(/^₹/, "") : "0.00"}
             autoComplete="off"
             aria-label={label}
+            title={auto ? `Computed: ${auto}. Type only to override.` : undefined}
           />
         </span>
       </td>

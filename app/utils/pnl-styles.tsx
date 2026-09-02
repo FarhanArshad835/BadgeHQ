@@ -192,7 +192,7 @@ export const CSS = `
 .pnl-row-click { cursor: pointer; }
 .pnl-row-click:hover { background: var(--surface); }
 .pnl-row-click:active { background: var(--accent-wash); }
-.pnl-row-click td:first-child { position: relative; padding-left: 21px; }
+.pnl-row-click td:first-child { position: relative; padding-left: 24px; }
 /* A caret marks the row as expandable, and turns when it's open. It also serves
    as the indent marker for these sub-rows, so the label carries no dash prefix
    (two markers in one gutter overlapped into an unreadable glyph). */
@@ -207,8 +207,10 @@ export const CSS = `
 .pnl-row-active td:first-child::before { transform: rotate(45deg); border-color: var(--accent); }
 .pnl-row-active { background: var(--accent-wash); }
 .pnl-row-active:hover { background: var(--accent-wash); }
-/* The whole cell is the hit target, not just the text. */
-.pnl-row-click td:first-child a { display: block; margin: -6px -11px; padding: 6px 11px 6px 0; }
+/* The whole cell is the hit target, not just the text. The negative margin only
+   reclaims the cell's own padding on the RIGHT and vertically: pulling it left
+   too would cancel the indent and drop the label under the caret. */
+.pnl-row-click td:first-child a { display: block; margin: -6px -11px -6px 0; padding: 6px 11px 6px 0; }
 .pnl-num { text-align: right; }
 .pnl-strong { font-weight: 640; }
 .pnl-muted { color: var(--ink-faint); }
@@ -247,34 +249,45 @@ export const CSS = `
 .pnl-delta.down { color: var(--neg); }
 .pnl-delta.flat { color: var(--ink-faint); }
 .pnl-delta-cell { padding-left: 8px; }
-/* Rank marker: how big a slice of the month's cost this line is. Sits behind the
-   label so scanning "what is eating the profit" is a glance, not arithmetic. */
+/* Rank marker: how big a slice of the month's cost this line is. A hairline at
+   the base of the row, not a filled block behind the label - a block read as a
+   selection highlight and fought with the text it sat under. */
 .pnl-bar { position: relative; }
-.pnl-bar::before {
-  content: ""; position: absolute; left: 0; top: 2px; bottom: 2px;
-  width: var(--w, 0%); background: var(--accent-wash); border-radius: 3px; z-index: 0;
+.pnl-bar::after {
+  content: ""; position: absolute; left: 11px; bottom: 0; height: 2px;
+  width: var(--w, 0%); max-width: calc(100% - 22px);
+  background: var(--accent); opacity: 0.3; border-radius: 1px;
 }
-.pnl-bar > * { position: relative; z-index: 1; }
 
-/* Rows the merchant fills in, edited in place. Tinted so "what do I still owe
-   this report" is answerable by scanning, without shouting over the figures. */
-.pnl-row-edit td { background: oklch(0.985 0.008 275); }
-.pnl-row-edit td:first-child { color: var(--ink-soft); }
+/* Rows the merchant fills in. These read as FIGURES that happen to be editable,
+   not as a form: no box at rest (seven boxed inputs made the inputs look like
+   the point of the statement), a dotted underline to invite the click, a real
+   field only on hover/focus. Marked by a left rule rather than a row tint,
+   because tinting most of the rows made the tint meaningless. */
+.pnl-row-edit td:first-child { color: var(--ink-soft); box-shadow: inset 2px 0 0 var(--accent-wash); }
 .pnl-edit-hint { color: var(--ink-faint); font-size: 11px; }
 .pnl-edit-wrap {
-  display: inline-flex; align-items: center; gap: 1px;
-  border: 1px solid var(--line); border-radius: 4px; background: var(--panel);
-  padding: 0 6px 0 7px;
-  transition: border-color 140ms var(--ease), box-shadow 140ms var(--ease);
+  display: inline-flex; align-items: baseline; gap: 3px;
+  border: 1px solid transparent; border-radius: 4px; background: transparent;
+  padding: 1px 5px;
+  transition: border-color 140ms var(--ease), background 140ms var(--ease), box-shadow 140ms var(--ease);
 }
-.pnl-edit-wrap:hover { border-color: var(--ink-faint); }
-.pnl-edit-wrap:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-wash); }
-.pnl-edit-cur { color: var(--ink-faint); font-size: 12px; }
+.pnl-edit-wrap:hover { border-color: var(--line); background: var(--panel); }
+.pnl-edit-wrap:focus-within {
+  border-color: var(--accent); background: var(--panel);
+  box-shadow: 0 0 0 3px var(--accent-wash);
+}
+.pnl-edit-cur { color: var(--ink-faint); font-size: 11.5px; }
 .pnl-edit-input {
   font: inherit; font-size: 13px; font-variant-numeric: tabular-nums;
-  text-align: right; width: 92px; padding: 4px 2px;
+  text-align: right; width: 86px; padding: 2px 0;
   border: none; outline: none; background: transparent; color: var(--ink);
+  border-bottom: 1px dotted var(--line);
+  transition: border-color 140ms var(--ease);
 }
+.pnl-edit-wrap:hover .pnl-edit-input,
+.pnl-edit-wrap:focus-within .pnl-edit-input { border-bottom-color: transparent; }
+/* An unfilled figure shouldn't shout, but shouldn't hide either. */
 .pnl-edit-input::placeholder { color: var(--ink-faint); }
 
 /* Save affordance for the in-place statement edits. */
