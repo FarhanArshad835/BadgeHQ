@@ -54,16 +54,21 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const monthLabels: Record<string, string> = {};
   for (const m of months) monthLabels[m] = labelFor(m);
 
-  const report = shop ? await computeMonth(shop, month) : null;
+  // The month before the selected one, so every figure can carry its change.
+  // Comparison shouldn't be a separate mode you have to know to switch on.
+  const prevMonth = months[months.indexOf(month) + 1] ?? null;
 
   // Month-by-month comparison: compute up to the 6 most recent months in PARALLEL
   // (ad spend is a live Meta call per month, so parallel keeps this ~1 call's time).
   // Opt-in via ?compare=1 so a normal single-month load stays light.
   const compareOn = url.searchParams.get("compare") === "1";
   const compareMonths = compareOn ? months.slice(0, 6) : [];
-  const compareReports = shop && compareMonths.length
-    ? await Promise.all(compareMonths.map((m) => computeMonth(shop, m)))
-    : [];
+
+  const [report, prevReport, compareReports] = await Promise.all([
+    shop ? computeMonth(shop, month) : null,
+    shop && prevMonth ? computeMonth(shop, prevMonth) : null,
+    shop && compareMonths.length ? Promise.all(compareMonths.map((m) => computeMonth(shop, m))) : [],
+  ]);
   // Delivered items missing cost-per-item (what keeps COGS incomplete). Cap the
   // list so the loader stays light; show a total count alongside.
   const unmatchedAll = shop ? await unmatchedCostItems(shop, month) : [];
@@ -199,6 +204,25 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       resolutionRate: r.resolutionRate,
       deliveredShareOfPlaced: r.deliveredShareOfPlaced,
       cogsMatchRate: r.cogsMatchRate,
+    },
+    // Previous month, for the change shown against each figure.
+    prevMonth,
+    prevLabel: prevMonth ? (monthLabels[prevMonth] ?? prevMonth) : null,
+    prev: prevReport && {
+      grossSale: s(prevReport.grossSaleMinor),
+      netSale: s(prevReport.netSaleMinor),
+      refunds: s(prevReport.refundsMinor),
+      cogs: s(prevReport.cogsMinor),
+      freight: s(prevReport.freightMinor),
+      adSpend: s(prevReport.adSpendMinor),
+      netPnl: s(prevReport.netPnlMinor),
+      netPnlPerDeliveredPair: s(prevReport.netPnlPerDeliveredPairMinor),
+      netPnlPerDeliveredOrder: s(prevReport.netPnlPerDeliveredOrderMinor),
+      placedOrders: prevReport.placedOrders,
+      deliveredOrders: prevReport.deliveredOrders,
+      rtoOrders: prevReport.rtoOrders,
+      cancelledOrders: prevReport.cancelledOrders,
+      deliveredPairs: prevReport.deliveredPairs,
     },
     unmatched,
     unmatchedTotal,
@@ -432,6 +456,14 @@ export default function PnlDashboard() {
   const monthLabel = (m: string) => d.monthLabels[m] ?? m;
   const r = d.report;
   const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
+  // Each cost line as a share of the month's total cost, so the biggest drains
+  // are obvious at a glance instead of needing to compare 8 similar figures.
+  const totalCost = r
+    ? ["cogs", "freight", "adSpend", "refunds", "shopifySubscription", "shopifyBilling", "doubleclickFee", "doubleclickSub"]
+        .reduce((sum, k) => sum + Number(BigInt((r as any)[k] ?? 0)), 0)
+    : 0;
+  const costShare = (v: string | null | undefined) =>
+    v == null || totalCost <= 0 ? undefined : Math.min(1, Number(BigInt(v)) / totalCost);
   // Funnel drill-in link: same month, toggles the status list open/closed.
   // ABSOLUTE path — this route is explicitly mapped, and a bare "?query" Link
   // resolves its .data fetch wrong here (see the prefix-route note in routes.ts),
@@ -542,13 +574,26 @@ export default function PnlDashboard() {
 
         {r && (
           <>
-            {/* Headline: net P&L (suppressed if any cost is pending) + per-delivered. */}
-            <div className="pnl-kpis" style={{ marginBottom: 20 }}>
-              <Kpi label="Net P&L" value={fmt(r.netPnl, "Pending")} accent big
-                sub={r.netPnl == null ? "Suppressed until all costs are known" : `${pct(contributionPct(r))} contribution margin`} />
-              <Kpi label="Net sale (collected)" value={fmt(r.netSale)} sub={`${r.deliveredOrders} delivered orders`} />
-              <Kpi label="Profit / delivered order" value={fmt(r.netPnlPerDeliveredOrder, "Pending")} />
-              <Kpi label="Profit / delivered pair" value={fmt(r.netPnlPerDeliveredPair, "Pending")} />
+            {/* One number leads; the rest are explicitly subordinate and each
+                carries its change against the previous month. */}
+            <div className="pnl-headline">
+              <div className="pnl-headline-figure">
+                <span className="pnl-headline-label">Net P&amp;L · {monthLabel(d.month)}</span>
+                <span className={`pnl-headline-value ${r.netPnl == null ? "pending" : ""}`}>
+                  {fmt(r.netPnl, "Pending")}
+                </span>
+                <span className="pnl-headline-note">
+                  {r.netPnl == null
+                    ? "Suppressed until every cost is known"
+                    : <>{pct(contributionPct(r))} margin{d.prev?.netPnl != null && <> · <Delta now={r.netPnl} was={d.prev.netPnl} fmt={fmt} label={d.prevLabel} /></>}</>}
+                </span>
+              </div>
+              <div className="pnl-supports">
+                <Support label="Net sale" value={fmt(r.netSale)} now={r.netSale} was={d.prev?.netSale} fmt={fmt} label2={d.prevLabel} />
+                <Support label="Delivered" value={String(r.deliveredOrders)} now={String(r.deliveredOrders)} was={d.prev ? String(d.prev.deliveredOrders) : null} fmt={(v: any) => String(v)} label2={d.prevLabel} plain />
+                <Support label="Profit / order" value={fmt(r.netPnlPerDeliveredOrder, "Pending")} now={r.netPnlPerDeliveredOrder} was={d.prev?.netPnlPerDeliveredOrder} fmt={fmt} label2={d.prevLabel} />
+                <Support label="Profit / pair" value={fmt(r.netPnlPerDeliveredPair, "Pending")} now={r.netPnlPerDeliveredPair} was={d.prev?.netPnlPerDeliveredPair} fmt={fmt} label2={d.prevLabel} />
+              </div>
             </div>
 
             {/* Wide layout: statement beside the funnel / per-unit panels. */}
@@ -556,26 +601,37 @@ export default function PnlDashboard() {
             {/* P&L statement — matches the monthly statement layout: income
                 positive, costs negative, P&L and Per Pair at the foot. */}
             <div className="pnl-panel">
-              <div className="pnl-section-label">P&amp;L statement — {monthLabel(d.month)}</div>
+              <div className="pnl-section-label">
+                {monthLabel(d.month)}{d.prevLabel ? ` · change vs ${d.prevLabel}` : ""}
+              </div>
               <table className="pnl-table pnl-waterfall">
                 <tbody>
-                  <Row label="Gross Sale" value={fmt(r.grossSale)} strong />
-                  <Row label="Net Sale" value={fmt(r.netSale)} strong hl />
-                  <Row label="Refund Amount" value={sfmt(r.refunds)} neg />
-                  <Row label="Cost Price + (stocking)" value={sfmt(r.cogs, r.stocking)} neg pending={r.cogs == null} />
-                  <Row label="Shipping Fees" value={sfmt(r.freight)} neg pending={r.freight == null} />
-                  <Row label={`Advertisement${r.adSpendSource === "meta" ? " (Meta)" : ""}`} value={sfmt(r.adSpend)} neg pending={r.adSpend == null} />
-                  <Row label="Shopify Subscription" value={sfmt(r.shopifySubscription)} neg />
-                  <Row label="Shopify Billing" value={sfmt(r.shopifyBilling)} neg />
-                  <Row label="Doubleclick Fee" value={sfmt(r.doubleclickFee)} neg />
-                  <Row label="Doubleclick Subscription" value={sfmt(r.doubleclickSub)} neg />
-                  <Row label="Per Pair Shipping" value={sfmt(r.freightPerDeliveredOrder)} neg pending={r.freightPerDeliveredOrder == null} />
-                  <Row label="Gst 12%" value={sfmt(r.gstOutput)} neg pending={r.gstOutput == null} />
-                  <Row label="Gst 18% Claim" value={fmt(r.gstInput, "Pending")} pending={r.gstInput == null} />
-                  <Row label={`Return/Exchange Fees${r.returnExchangeFeesSource === "manual" ? " (manual)" : ""}`} value={fmt(r.returnExchangeFees)} />
-                  <Row label="Delivered" value={String(r.deliveredOrders)} />
-                  <Row label="P&L" value={fmt(r.netPnl, "Pending")} strong hl big />
-                  <Row label="Per Pair" value={fmt(r.netPnlPerDeliveredPair, "Pending")} pending={r.netPnlPerDeliveredPair == null} />
+                  <Row label="Gross Sale" value={fmt(r.grossSale)} strong
+                    delta={<Delta now={r.grossSale} was={d.prev?.grossSale} fmt={fmt} label={d.prevLabel} />} />
+                  <Row label="Net Sale" value={fmt(r.netSale)} strong hl
+                    delta={<Delta now={r.netSale} was={d.prev?.netSale} fmt={fmt} label={d.prevLabel} />} />
+                  <Row label="Refund Amount" value={sfmt(r.refunds)} neg share={costShare(r.refunds)}
+                    delta={<Delta now={r.refunds} was={d.prev?.refunds} fmt={fmt} label={d.prevLabel} goodWhenUp={false} />} />
+                  <Row label="Cost Price + (stocking)" value={sfmt(r.cogs, r.stocking)} neg pending={r.cogs == null} share={costShare(r.cogs)}
+                    delta={<Delta now={r.cogs} was={d.prev?.cogs} fmt={fmt} label={d.prevLabel} goodWhenUp={false} />} />
+                  <Row label="Shipping Fees" value={sfmt(r.freight)} neg pending={r.freight == null} share={costShare(r.freight)}
+                    delta={<Delta now={r.freight} was={d.prev?.freight} fmt={fmt} label={d.prevLabel} goodWhenUp={false} />} />
+                  <Row label={`Advertisement${r.adSpendSource === "meta" ? " (Meta)" : ""}`} value={sfmt(r.adSpend)} neg pending={r.adSpend == null} share={costShare(r.adSpend)}
+                    delta={<Delta now={r.adSpend} was={d.prev?.adSpend} fmt={fmt} label={d.prevLabel} goodWhenUp={false} />} />
+                  <Row label="Shopify subscription" value={sfmt(r.shopifySubscription)} neg share={costShare(r.shopifySubscription)} />
+                  <Row label="Shopify billing" value={sfmt(r.shopifyBilling)} neg share={costShare(r.shopifyBilling)} />
+                  <Row label="Doubleclick fee" value={sfmt(r.doubleclickFee)} neg share={costShare(r.doubleclickFee)} />
+                  <Row label="Doubleclick subscription" value={sfmt(r.doubleclickSub)} neg share={costShare(r.doubleclickSub)} />
+                  <Row label="Shipping per pair" value={sfmt(r.freightPerDeliveredOrder)} neg pending={r.freightPerDeliveredOrder == null} />
+                  <Row label="GST charged (12%)" value={sfmt(r.gstOutput)} neg pending={r.gstOutput == null} />
+                  <Row label="GST reclaimed (18%)" value={fmt(r.gstInput, "Pending")} pending={r.gstInput == null} />
+                  <Row label={`Return and exchange fees${r.returnExchangeFeesSource === "manual" ? " (entered)" : ""}`} value={fmt(r.returnExchangeFees)} />
+                  <Row label="Orders delivered" value={String(r.deliveredOrders)}
+                    delta={<Delta now={String(r.deliveredOrders)} was={d.prev ? String(d.prev.deliveredOrders) : null} fmt={(v: any) => String(v)} label={d.prevLabel} />} />
+                  <Row label="Profit" value={fmt(r.netPnl, "Pending")} strong hl big
+                    delta={<Delta now={r.netPnl} was={d.prev?.netPnl} fmt={fmt} label={d.prevLabel} />} />
+                  <Row label="Profit per pair" value={fmt(r.netPnlPerDeliveredPair, "Pending")} pending={r.netPnlPerDeliveredPair == null}
+                    delta={<Delta now={r.netPnlPerDeliveredPair} was={d.prev?.netPnlPerDeliveredPair} fmt={fmt} label={d.prevLabel} />} />
                 </tbody>
               </table>
             </div>
@@ -819,12 +875,52 @@ function MoneyField({ label, name, defaultValue }: { label: string; name: string
   );
 }
 
-function Kpi({ label, value, sub, accent, big }: { label: string; value: string; sub?: string; accent?: boolean; big?: boolean }) {
+
+/**
+ * Change against the previous month. `goodWhenUp` decides the colour: a rising
+ * profit is good, a rising cost is not, so the sign alone can't drive it.
+ * Percentages, because the absolute swing means little without the base.
+ */
+function Delta({ now, was, fmt, label, goodWhenUp = true }: {
+  now: string | null | undefined;
+  was: string | null | undefined;
+  fmt: (v: any, p?: string) => string;
+  label?: string | null;
+  goodWhenUp?: boolean;
+}) {
+  if (now == null || was == null) return null;
+  const a = Number(BigInt(now));
+  const b = Number(BigInt(was));
+  if (!isFinite(a) || !isFinite(b) || b === 0) return null;
+  const diff = a - b;
+  const pctChange = (diff / Math.abs(b)) * 100;
+  if (Math.abs(pctChange) < 0.05) {
+    return <span className="pnl-delta flat" title={label ? `vs ${label}` : undefined}>no change</span>;
+  }
+  const rose = diff > 0;
+  const good = rose === goodWhenUp;
   return (
-    <div className={`pnl-kpi${accent ? " accent" : ""}`}>
-      <div className="pnl-kpi-label">{label}</div>
-      <div className="pnl-kpi-value" style={big ? { fontSize: 26 } : undefined}>{value}</div>
-      {sub && <div className="pnl-kpi-sub">{sub}</div>}
+    <span
+      className={`pnl-delta ${good ? "up" : "down"}`}
+      title={label ? `${fmt(was)} in ${label}` : undefined}
+    >
+      {rose ? "▲" : "▼"} {Math.abs(pctChange).toFixed(pctChange >= 100 ? 0 : 1)}%
+    </span>
+  );
+}
+
+/** A supporting figure beside the headline: quieter, with its own change. */
+function Support({ label, value, now, was, fmt, label2, plain, goodWhenUp = true }: {
+  label: string; value: string;
+  now: string | null | undefined; was: string | null | undefined;
+  fmt: (v: any, p?: string) => string;
+  label2?: string | null; plain?: boolean; goodWhenUp?: boolean;
+}) {
+  return (
+    <div>
+      <div className="pnl-support-label">{label}</div>
+      <div className="pnl-support-value">{value}</div>
+      <Delta now={now} was={was} fmt={plain ? ((v: any) => String(v)) : fmt} label={label2} goodWhenUp={goodWhenUp} />
     </div>
   );
 }
@@ -847,25 +943,32 @@ function CmpRow({ label, cols, pick, strong, hl }: {
   );
 }
 
-function Row({ label, value, value2, neg, strong, hl, big, pending, to, active }: {
-  label: string; value: string; value2?: string; neg?: boolean; strong?: boolean; hl?: boolean; big?: boolean; pending?: boolean;
+function Row({ label, value, value2, delta, share, neg, strong, hl, big, pending, to, active }: {
+  label: string; value: string; value2?: string;
+  delta?: React.ReactNode; // change vs the previous month
+  share?: number; // 0-1: this line's share of the month's cost, drawn as a bar
+  neg?: boolean; strong?: boolean; hl?: boolean; big?: boolean; pending?: boolean;
   to?: string; active?: boolean;
 }) {
   return (
     <tr className={`${hl ? "pnl-row-hl" : ""} ${active ? "pnl-row-active" : ""} ${to ? "pnl-row-click" : ""}`}>
-      <td className={strong ? "pnl-strong" : ""}>
+      <td
+        className={`${strong ? "pnl-strong" : ""} ${share ? "pnl-bar" : ""}`}
+        style={share ? ({ ["--w" as any]: `${Math.round(share * 100)}%` } as React.CSSProperties) : undefined}
+      >
         {to ? (
           <Link to={to} prefetch="intent" style={{ color: "inherit", textDecoration: "none" }}>
             {label}
           </Link>
         ) : (
-          label
+          <span>{label}</span>
         )}
       </td>
       <td className={`pnl-num ${strong ? "pnl-strong" : ""} ${neg ? "pnl-neg" : ""} ${pending ? "pnl-pending" : ""}`}
         style={big ? { fontSize: 18, fontWeight: 700 } : undefined}>
         {value}
       </td>
+      {delta !== undefined && <td className="pnl-num pnl-delta-cell">{delta}</td>}
       {value2 !== undefined && (
         <td className={`pnl-num pnl-muted ${strong ? "pnl-strong" : ""}`}>
           {value2}

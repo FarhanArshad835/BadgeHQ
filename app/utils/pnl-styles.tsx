@@ -25,8 +25,8 @@ export const CSS = `
   --warn-bg:    oklch(0.97 0.03 75);
   --warn-line:  oklch(0.88 0.07 75);
   --ok-bg:      oklch(0.96 0.05 155);
-  --shadow:     0 1px 2px oklch(0.28 0.03 275 / 0.06), 0 4px 16px oklch(0.28 0.03 275 / 0.05);
-  --radius:     12px;
+  --shadow:     0 1px 1px oklch(0.28 0.03 275 / 0.04);
+  --radius:     6px;
   --ease:       cubic-bezier(0.22, 1, 0.36, 1);
 }
 
@@ -70,16 +70,16 @@ export const CSS = `
    hover/active, or every non-primary action reads as dead text. */
 .pnl-btn {
   font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
-  padding: 7px 13px; border-radius: 8px;
+  padding: 6px 12px; border-radius: 5px;
   background: var(--panel); color: var(--ink); border: 1px solid var(--line);
   transition: transform 120ms var(--ease), box-shadow 160ms var(--ease),
               background 140ms var(--ease), border-color 140ms var(--ease), opacity 120ms var(--ease);
 }
-.pnl-btn:hover:not(:disabled) { background: var(--surface); border-color: var(--ink-faint); box-shadow: var(--shadow); }
+.pnl-btn:hover:not(:disabled) { background: var(--surface); border-color: var(--ink-faint); }
 .pnl-btn:active:not(:disabled) { transform: translateY(1px); background: var(--accent-wash); border-color: var(--accent); box-shadow: none; }
-.pnl-btn-primary { background: var(--ink); color: oklch(0.99 0.003 275); border-color: transparent; box-shadow: var(--shadow); }
-.pnl-btn-primary:hover:not(:disabled) { background: var(--accent-ink); border-color: transparent; box-shadow: 0 2px 6px oklch(0.42 0.16 275 / 0.28), 0 8px 22px oklch(0.42 0.16 275 / 0.18); }
-.pnl-btn-primary:active:not(:disabled) { transform: translateY(1px); background: var(--accent-ink); box-shadow: 0 1px 2px oklch(0.42 0.16 275 / 0.3); }
+.pnl-btn-primary { background: var(--ink); color: oklch(0.99 0.003 275); border-color: transparent; }
+.pnl-btn-primary:hover:not(:disabled) { background: var(--accent-ink); border-color: transparent; }
+.pnl-btn-primary:active:not(:disabled) { transform: translateY(1px); background: var(--accent-ink); box-shadow: none; }
 .pnl-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .pnl-btn:disabled { opacity: 0.6; cursor: default; }
 .pnl-btn-primary:disabled { opacity: 1; } /* stays solid while syncing so the count reads clearly */
@@ -95,7 +95,7 @@ export const CSS = `
 /* select */
 .pnl-select {
   font: inherit; font-size: 13px; color: var(--ink); background: var(--panel);
-  padding: 6px 28px 6px 10px; border: 1px solid var(--line); border-radius: 8px;
+  padding: 6px 26px 6px 9px; border: 1px solid var(--line); border-radius: 5px;
   cursor: pointer; appearance: none;
   background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%236b6b80' stroke-width='1.4' stroke-linecap='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat; background-position: right 10px center;
@@ -109,7 +109,7 @@ export const CSS = `
 .pnl-input {
   font: inherit; font-size: 13px; color: var(--ink); background: var(--panel);
   width: 100%; box-sizing: border-box;
-  padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px;
+  padding: 6px 9px; border: 1px solid var(--line); border-radius: 5px;
   transition: border-color 140ms var(--ease), box-shadow 140ms var(--ease);
 }
 .pnl-input::placeholder { color: var(--ink-faint); }
@@ -136,7 +136,7 @@ export const CSS = `
 .pnl-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 6px; }
 
 /* banner */
-.pnl-banner { padding: 8px 11px; border-radius: 8px; font-size: 12.5px; line-height: 1.45; border: 1px solid transparent; }
+.pnl-banner { padding: 8px 11px; border-radius: 5px; font-size: 12.5px; line-height: 1.45; border: 1px solid transparent; }
 .pnl-banner.info { background: var(--surface); border-color: var(--line); color: var(--ink-soft); }
 .pnl-banner.ok   { background: var(--ok-bg); border-color: oklch(0.86 0.07 155); color: oklch(0.34 0.09 155); }
 .pnl-banner.warn { background: var(--warn-bg); border-color: var(--warn-line); color: oklch(0.42 0.09 75); }
@@ -145,8 +145,8 @@ export const CSS = `
 /* KPI tiles */
 .pnl-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 9px; margin-bottom: 10px; }
 .pnl-kpi {
-  background: var(--panel); border: 1px solid var(--line-soft); border-radius: 10px;
-  padding: 10px 12px; box-shadow: var(--shadow);
+  background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+  padding: 10px 12px;
   transition: border-color 160ms var(--ease);
 }
 .pnl-kpi:hover { border-color: var(--line); }
@@ -176,7 +176,7 @@ export const CSS = `
 .pnl-panel > .pnl-table { margin-top: 4px; }
 
 /* table */
-.pnl-table-wrap { background: var(--panel); border: 1px solid var(--line-soft); border-radius: var(--radius); overflow: auto; box-shadow: var(--shadow); }
+.pnl-table-wrap { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; overflow: auto; }
 .pnl-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .pnl-table th {
   text-align: left; padding: 7px 11px; border-bottom: 1px solid var(--line);
@@ -213,6 +213,47 @@ export const CSS = `
 .pnl-pos { color: var(--pos); font-weight: 600; }
 .pnl-negv { color: var(--neg); font-weight: 600; }
 
+/* ── Hierarchy ────────────────────────────────────────────────────────────
+   One number leads. Everything else is explicitly subordinate, so the eye has
+   somewhere to land instead of scanning a wall of equal-weight figures. */
+.pnl-headline {
+  display: grid; grid-template-columns: auto 1fr; gap: 22px; align-items: center;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+  padding: 14px 16px; margin-bottom: 10px;
+}
+@media (max-width: 860px) { .pnl-headline { grid-template-columns: 1fr; gap: 12px; } }
+.pnl-headline-figure { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pnl-headline-label {
+  font-size: 10.5px; font-weight: 680; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--ink-faint);
+}
+.pnl-headline-value {
+  font-size: 38px; font-weight: 700; letter-spacing: -0.03em; line-height: 1.05;
+  font-variant-numeric: tabular-nums; color: var(--ink);
+}
+.pnl-headline-value.pending { font-size: 24px; color: var(--warn-line); font-style: italic; }
+.pnl-headline-note { font-size: 11.5px; color: var(--ink-faint); }
+/* Supporting figures: same row, deliberately much quieter than the headline. */
+.pnl-supports { display: grid; grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)); gap: 18px; }
+.pnl-support-label { font-size: 10.5px; color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.05em; }
+.pnl-support-value { font-size: 15px; font-weight: 620; font-variant-numeric: tabular-nums; margin-top: 2px; }
+
+/* Change vs the previous month. Direction is the point, so it's a colour and a
+   glyph, not another neutral figure to decode. */
+.pnl-delta { font-size: 11.5px; font-weight: 620; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pnl-delta.up   { color: var(--pos); }
+.pnl-delta.down { color: var(--neg); }
+.pnl-delta.flat { color: var(--ink-faint); }
+.pnl-delta-cell { padding-left: 8px; }
+/* Rank marker: how big a slice of the month's cost this line is. Sits behind the
+   label so scanning "what is eating the profit" is a glance, not arithmetic. */
+.pnl-bar { position: relative; }
+.pnl-bar::before {
+  content: ""; position: absolute; left: 0; top: 2px; bottom: 2px;
+  width: var(--w, 0%); background: var(--accent-wash); border-radius: 3px; z-index: 0;
+}
+.pnl-bar > * { position: relative; z-index: 1; }
+
 /* Navigation progress: any click that goes to the server (drill-in, month
    change, compare toggle) shows work is happening instead of appearing dead. */
 .pnl-progress {
@@ -240,7 +281,7 @@ export const CSS = `
 .pnl-controls-right { display: flex; align-items: center; gap: 10px; }
 
 /* panels / cards for login+settings */
-.pnl-panel { background: var(--panel); border: 1px solid var(--line-soft); border-radius: 11px; padding: 13px 14px; box-shadow: var(--shadow); }
+.pnl-panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px 13px; box-shadow: none; }
 .pnl-field { display: flex; flex-direction: column; gap: 5px; }
 .pnl-field-label { font-size: 13px; font-weight: 600; color: var(--ink); }
 .pnl-form { display: flex; flex-direction: column; gap: 15px; }
@@ -250,7 +291,7 @@ export const CSS = `
 .pnl-section-label { font-size: 10.5px; font-weight: 680; color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.05em; }
 .pnl-empty { background: var(--panel); border: 1px dashed var(--line); border-radius: 10px; padding: 20px; text-align: center; color: var(--ink-soft); margin-top: 10px; }
 
-.pnl-help { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 12px; color: var(--ink-soft); line-height: 1.5; }
+.pnl-help { background: var(--surface); border: 1px solid var(--line); border-radius: 5px; padding: 10px 12px; font-size: 12px; color: var(--ink-soft); line-height: 1.5; }
 .pnl-help code { background: var(--accent-wash); color: var(--accent-ink); padding: 1px 6px; border-radius: 5px; font-size: 12.5px; }
 .pnl-help ol { margin: 8px 0 6px; padding-left: 20px; }
 .pnl-help li { margin: 3px 0; }
