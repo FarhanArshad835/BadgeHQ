@@ -411,6 +411,7 @@ export default function PnlDashboard() {
   // Distinguish the Sync POST from the save-inputs POST so the progress spinner
   // only shows for an actual sync.
   const submittingIntent = nav.formData?.get("intent");
+  const savingInputs = nav.state === "submitting" && submittingIntent === "save-inputs";
   const syncing =
     nav.state === "submitting" &&
     nav.formMethod === "POST" &&
@@ -601,6 +602,14 @@ export default function PnlDashboard() {
             {/* P&L statement — matches the monthly statement layout: income
                 positive, costs negative, P&L and Per Pair at the foot. */}
             <div className="pnl-panel">
+              <Form method="post" id="statement-inputs">
+              <input type="hidden" name="intent" value="save-inputs" />
+              <input type="hidden" name="month" value={d.month} />
+              {/* The override rows only render while a cost is unresolved. Carry
+                  their stored values so saving from this form can't blank an
+                  override that simply isn't on screen right now. */}
+              {r.freight != null && <input type="hidden" name="freightOverride" value={d.monthInput.freightOverride} />}
+              {r.adSpend != null && <input type="hidden" name="adSpendOverride" value={d.monthInput.adSpendOverride} />}
               <div className="pnl-section-label">
                 {monthLabel(d.month)}{d.prevLabel ? ` · change vs ${d.prevLabel}` : ""}
               </div>
@@ -612,20 +621,32 @@ export default function PnlDashboard() {
                     delta={<Delta now={r.netSale} was={d.prev?.netSale} fmt={fmt} label={d.prevLabel} />} />
                   <Row label="Refund Amount" value={sfmt(r.refunds)} neg share={costShare(r.refunds)}
                     delta={<Delta now={r.refunds} was={d.prev?.refunds} fmt={fmt} label={d.prevLabel} goodWhenUp={false} />} />
-                  <Row label="Cost Price + (stocking)" value={sfmt(r.cogs, r.stocking)} neg pending={r.cogs == null} share={costShare(r.cogs)}
+                  <Row label="Cost of goods (delivered)" value={sfmt(r.cogs)} neg pending={r.cogs == null} share={costShare(r.cogs)}
                     delta={<Delta now={r.cogs} was={d.prev?.cogs} fmt={fmt} label={d.prevLabel} goodWhenUp={false} />} />
-                  <Row label="Shipping Fees" value={sfmt(r.freight)} neg pending={r.freight == null} share={costShare(r.freight)}
-                    delta={<Delta now={r.freight} was={d.prev?.freight} fmt={fmt} label={d.prevLabel} goodWhenUp={false} />} />
-                  <Row label={`Advertisement${r.adSpendSource === "meta" ? " (Meta)" : ""}`} value={sfmt(r.adSpend)} neg pending={r.adSpend == null} share={costShare(r.adSpend)}
-                    delta={<Delta now={r.adSpend} was={d.prev?.adSpend} fmt={fmt} label={d.prevLabel} goodWhenUp={false} />} />
-                  <Row label="Shopify subscription" value={sfmt(r.shopifySubscription)} neg share={costShare(r.shopifySubscription)} />
-                  <Row label="Shopify billing" value={sfmt(r.shopifyBilling)} neg share={costShare(r.shopifyBilling)} />
-                  <Row label="Doubleclick fee" value={sfmt(r.doubleclickFee)} neg share={costShare(r.doubleclickFee)} />
-                  <Row label="Doubleclick subscription" value={sfmt(r.doubleclickSub)} neg share={costShare(r.doubleclickSub)} />
+                  <EditRow label="Stocking (inventory bought)" name="stocking" value={d.monthInput.stocking} />
+                  {r.freight == null ? (
+                    <EditRow label="Shipping" name="freightOverride" value={d.monthInput.freightOverride} hint="carriers unresolved" />
+                  ) : (
+                    <Row label="Shipping" value={sfmt(r.freight)} neg share={costShare(r.freight)}
+                      delta={<Delta now={r.freight} was={d.prev?.freight} fmt={fmt} label={d.prevLabel} goodWhenUp={false} />} />
+                  )}
+                  {r.adSpend == null ? (
+                    <EditRow label="Advertising" name="adSpendOverride" value={d.monthInput.adSpendOverride} hint="Meta not connected" />
+                  ) : (
+                    <Row label={`Advertising${r.adSpendSource === "meta" ? " (Meta)" : ""}`} value={sfmt(r.adSpend)} neg share={costShare(r.adSpend)}
+                      delta={<Delta now={r.adSpend} was={d.prev?.adSpend} fmt={fmt} label={d.prevLabel} goodWhenUp={false} />} />
+                  )}
+                  <EditRow label="Shopify subscription" name="shopifySubscription" value={d.monthInput.shopifySubscription} share={costShare(r.shopifySubscription)} />
+                  <EditRow label="Shopify billing" name="shopifyBilling" value={d.monthInput.shopifyBilling} share={costShare(r.shopifyBilling)} />
+                  <EditRow label="Doubleclick fee" name="doubleclickFee" value={d.monthInput.doubleclickFee} share={costShare(r.doubleclickFee)} />
+                  <EditRow label="Doubleclick subscription" name="doubleclickSub" value={d.monthInput.doubleclickSub} share={costShare(r.doubleclickSub)} />
                   <Row label="Shipping per pair" value={sfmt(r.freightPerDeliveredOrder)} neg pending={r.freightPerDeliveredOrder == null} />
                   <Row label="GST charged (12%)" value={sfmt(r.gstOutput)} neg pending={r.gstOutput == null} />
                   <Row label="GST reclaimed (18%)" value={fmt(r.gstInput, "Pending")} pending={r.gstInput == null} />
-                  <Row label={`Return and exchange fees${r.returnExchangeFeesSource === "manual" ? " (entered)" : ""}`} value={fmt(r.returnExchangeFees)} />
+                  <Row label={`Return and exchange fees${r.returnExchangeFeesSource === "manual" ? " (entered)" : " (from fee orders)"}`} value={fmt(r.returnExchangeFees)} />
+                  {/* Kept editable so a disputed auto figure can be corrected;
+                      blank falls back to the summed fee orders. */}
+                  <EditRow label="Override fees" name="returnExchangeFees" value={d.monthInput.returnExchangeFees} hint="blank = auto" />
                   <Row label="Orders delivered" value={String(r.deliveredOrders)}
                     delta={<Delta now={String(r.deliveredOrders)} was={d.prev ? String(d.prev.deliveredOrders) : null} fmt={(v: any) => String(v)} label={d.prevLabel} />} />
                   <Row label="Profit" value={fmt(r.netPnl, "Pending")} strong hl big
@@ -634,6 +655,13 @@ export default function PnlDashboard() {
                     delta={<Delta now={r.netPnlPerDeliveredPair} was={d.prev?.netPnlPerDeliveredPair} fmt={fmt} label={d.prevLabel} />} />
                 </tbody>
               </table>
+              <div className="pnl-save-row">
+                <span className="pnl-save-note">Highlighted rows are yours to fill.</span>
+                <button type="submit" className="pnl-btn pnl-btn-primary" disabled={busy}>
+                  {savingInputs ? "Saving…" : "Save"}
+                </button>
+              </div>
+              </Form>
             </div>
 
             {/* Delivery funnel + per-unit economics. */}
@@ -807,33 +835,6 @@ export default function PnlDashboard() {
           </div>
         )}
 
-        {/* Per-month manual inputs (the few numbers no API provides). */}
-        {r && (
-          <div className="pnl-panel" style={{ marginTop: 20 }}>
-            <div className="pnl-section-label">Inputs for {monthLabel(d.month)} (₹)</div>
-            <Form method="post" className="pnl-form">
-              <input type="hidden" name="intent" value="save-inputs" />
-              <input type="hidden" name="month" value={d.month} />
-              <div className="pnl-grid2">
-                <MoneyField label="Shopify Subscription" name="shopifySubscription" defaultValue={d.monthInput.shopifySubscription} />
-                <MoneyField label="Shopify Billing" name="shopifyBilling" defaultValue={d.monthInput.shopifyBilling} />
-                <MoneyField label="Doubleclick Fee" name="doubleclickFee" defaultValue={d.monthInput.doubleclickFee} />
-                <MoneyField label="Doubleclick Subscription" name="doubleclickSub" defaultValue={d.monthInput.doubleclickSub} />
-                <MoneyField label="Stocking (extra inventory bought)" name="stocking" defaultValue={d.monthInput.stocking} />
-                <MoneyField label="Return / exchange fees override (blank = auto)" name="returnExchangeFees" defaultValue={d.monthInput.returnExchangeFees} />
-                <MoneyField label="Ad spend override (blank = use Meta)" name="adSpendOverride" defaultValue={d.monthInput.adSpendOverride} />
-                <MoneyField label="Freight override (blank = use carriers)" name="freightOverride" defaultValue={d.monthInput.freightOverride} />
-              </div>
-              <div className="pnl-help" style={{ marginTop: 8 }}>
-                The four fixed costs sum into the P&amp;L's fixed-cost total and each shows as its own statement row.
-              </div>
-              <button type="submit" className="pnl-btn" style={{ marginTop: 12, alignSelf: "flex-start" }} disabled={busy}>
-                Save month inputs
-              </button>
-            </Form>
-          </div>
-        )}
-
         {r && r.placedOrders === 0 && (
           <div className="pnl-empty">No orders synced for {monthLabel(d.month)} yet. Press <strong>Sync now</strong>.</div>
         )}
@@ -866,15 +867,43 @@ function StatusBanner({ report, monthLabel }: { report: any; monthLabel: string 
   );
 }
 
-function MoneyField({ label, name, defaultValue }: { label: string; name: string; defaultValue: string }) {
+
+
+/**
+ * A statement line the merchant fills in, edited in place rather than in a
+ * separate form: the figure sits where you read it, so there's no hunting for
+ * which row was blank. Posts with the enclosing save form.
+ */
+function EditRow({ label, name, value, share, hint }: {
+  label: string; name: string; value: string; share?: number; hint?: string;
+}) {
   return (
-    <label className="pnl-field">
-      <span className="pnl-field-label">{label}</span>
-      <input className="pnl-input" type="text" inputMode="decimal" name={name} defaultValue={defaultValue} placeholder="0.00" autoComplete="off" />
-    </label>
+    <tr className="pnl-row-edit">
+      <td
+        className={share ? "pnl-bar" : undefined}
+        style={share ? ({ ["--w" as any]: `${Math.round(share * 100)}%` } as React.CSSProperties) : undefined}
+      >
+        <span>{label}</span>
+        {hint && <span className="pnl-edit-hint"> {hint}</span>}
+      </td>
+      <td className="pnl-num" colSpan={2}>
+        <span className="pnl-edit-wrap">
+          <span className="pnl-edit-cur">₹</span>
+          <input
+            className="pnl-edit-input"
+            type="text"
+            inputMode="decimal"
+            name={name}
+            defaultValue={value}
+            placeholder="0.00"
+            autoComplete="off"
+            aria-label={label}
+          />
+        </span>
+      </td>
+    </tr>
   );
 }
-
 
 /**
  * Change against the previous month. `goodWhenUp` decides the colour: a rising

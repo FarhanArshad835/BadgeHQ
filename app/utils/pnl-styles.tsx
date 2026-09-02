@@ -254,6 +254,34 @@ export const CSS = `
 }
 .pnl-bar > * { position: relative; z-index: 1; }
 
+/* Rows the merchant fills in, edited in place. Tinted so "what do I still owe
+   this report" is answerable by scanning, without shouting over the figures. */
+.pnl-row-edit td { background: oklch(0.985 0.008 275); }
+.pnl-row-edit td:first-child { color: var(--ink-soft); }
+.pnl-edit-hint { color: var(--ink-faint); font-size: 11px; }
+.pnl-edit-wrap {
+  display: inline-flex; align-items: center; gap: 1px;
+  border: 1px solid var(--line); border-radius: 4px; background: var(--panel);
+  padding: 0 6px 0 7px;
+  transition: border-color 140ms var(--ease), box-shadow 140ms var(--ease);
+}
+.pnl-edit-wrap:hover { border-color: var(--ink-faint); }
+.pnl-edit-wrap:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-wash); }
+.pnl-edit-cur { color: var(--ink-faint); font-size: 12px; }
+.pnl-edit-input {
+  font: inherit; font-size: 13px; font-variant-numeric: tabular-nums;
+  text-align: right; width: 92px; padding: 4px 2px;
+  border: none; outline: none; background: transparent; color: var(--ink);
+}
+.pnl-edit-input::placeholder { color: var(--ink-faint); }
+
+/* Save affordance for the in-place statement edits. */
+.pnl-save-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line-soft);
+}
+.pnl-save-note { font-size: 11.5px; color: var(--ink-faint); }
+
 /* Navigation progress: any click that goes to the server (drill-in, month
    change, compare toggle) shows work is happening instead of appearing dead. */
 .pnl-progress {
