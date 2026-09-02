@@ -36,9 +36,11 @@ export const CSS = `
   color: var(--ink);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
-  padding: 40px 20px 64px;
+  padding: 28px 28px 56px;
 }
-.pnl-wrap { max-width: 940px; margin: 0 auto; }
+/* Use the width the screen actually has: the old 940px cap left most of a
+   desktop monitor empty. Capped generously so text lines stay readable. */
+.pnl-wrap { max-width: 1600px; margin: 0 auto; }
 .pnl-wrap.narrow { max-width: 460px; }
 
 .pnl-h1 { margin: 0; font-size: 26px; font-weight: 680; letter-spacing: -0.02em; }
@@ -149,6 +151,13 @@ export const CSS = `
 /* Monthly-P&L waterfall + two-up panels */
 .pnl-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 @media (max-width: 720px) { .pnl-grid2 { grid-template-columns: 1fr; } }
+
+/* Wide-screen main layout: the statement sits beside the funnel/per-unit panels
+   instead of each stretching the full width with a lone figure on the right. */
+.pnl-main { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 1100px) { .pnl-main { grid-template-columns: 1fr; } }
+.pnl-main .pnl-grid2 { grid-template-columns: 1fr; }
+@media (min-width: 1400px) { .pnl-main .pnl-grid2 { grid-template-columns: 1fr 1fr; } }
 .pnl-waterfall td:first-child { color: var(--ink-soft); }
 .pnl-waterfall .pnl-strong td, .pnl-waterfall td.pnl-strong { color: var(--ink); }
 .pnl-row-hl td { background: var(--surface); border-top: 1px solid var(--line); }

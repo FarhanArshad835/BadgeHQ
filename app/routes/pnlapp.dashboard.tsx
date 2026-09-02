@@ -546,9 +546,11 @@ export default function PnlDashboard() {
               <Kpi label="Profit / delivered pair" value={fmt(r.netPnlPerDeliveredPair, "Pending")} />
             </div>
 
+            {/* Wide layout: statement beside the funnel / per-unit panels. */}
+            <div className="pnl-main" style={{ marginBottom: 20 }}>
             {/* P&L statement — matches the monthly statement layout: income
                 positive, costs negative, P&L and Per Pair at the foot. */}
-            <div className="pnl-panel" style={{ marginBottom: 20 }}>
+            <div className="pnl-panel">
               <div className="pnl-section-label">P&amp;L statement — {monthLabel(d.month)}</div>
               <table className="pnl-table pnl-waterfall">
                 <tbody>
@@ -623,6 +625,7 @@ export default function PnlDashboard() {
                   </tbody>
                 </table>
               </div>
+            </div>
             </div>
 
             {/* Delivered items missing cost-per-item — the fixable COGS gap. */}
