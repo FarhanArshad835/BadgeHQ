@@ -249,15 +249,6 @@ export const CSS = `
 .pnl-delta.down { color: var(--neg); }
 .pnl-delta.flat { color: var(--ink-faint); }
 .pnl-delta-cell { padding-left: 8px; }
-/* Rank marker: how big a slice of the month's cost this line is. A hairline at
-   the base of the row, not a filled block behind the label - a block read as a
-   selection highlight and fought with the text it sat under. */
-.pnl-bar { position: relative; }
-.pnl-bar::after {
-  content: ""; position: absolute; left: 11px; bottom: 0; height: 2px;
-  width: var(--w, 0%); max-width: calc(100% - 22px);
-  background: var(--accent); opacity: 0.3; border-radius: 1px;
-}
 
 /* Rows the merchant fills in. These read as FIGURES that happen to be editable,
    not as a form: no box at rest (seven boxed inputs made the inputs look like

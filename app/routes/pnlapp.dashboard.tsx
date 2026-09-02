@@ -119,7 +119,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   // BigInt → string at the JSON boundary. `s` maps a bigint|null to string|null.
   const s = (v: bigint | null | undefined) => (v == null ? null : v.toString());
   // Rupee string for prefilling inputs (paise → "1234.56").
-  const rupees = (v: bigint | null | undefined) => (v == null ? "" : (Number(v) / 100).toString());
+  // Zero renders as EMPTY, not "0": these columns default to 0 in the database,
+  // and a literal 0 in the field hid the computed figure behind it (the fees row
+  // showed 0 instead of its auto value) and read as "already filled in".
+  const rupees = (v: bigint | null | undefined) =>
+    v == null || v === 0n ? "" : (Number(v) / 100).toString();
   const r = report;
 
   const lastSyncCount = Number((app.lastSyncStatus.match(/synced (\d+)/i) || [])[1] || 0);
@@ -457,14 +461,6 @@ export default function PnlDashboard() {
   const monthLabel = (m: string) => d.monthLabels[m] ?? m;
   const r = d.report;
   const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
-  // Each cost line as a share of the month's total cost, so the biggest drains
-  // are obvious at a glance instead of needing to compare 8 similar figures.
-  const totalCost = r
-    ? ["cogs", "freight", "adSpend", "refunds", "shopifySubscription", "shopifyBilling", "doubleclickFee", "doubleclickSub"]
-        .reduce((sum, k) => sum + Number(BigInt((r as any)[k] ?? 0)), 0)
-    : 0;
-  const costShare = (v: string | null | undefined) =>
-    v == null || totalCost <= 0 ? undefined : Math.min(1, Number(BigInt(v)) / totalCost);
   // Funnel drill-in link: same month, toggles the status list open/closed.
   // ABSOLUTE path — this route is explicitly mapped, and a bare "?query" Link
   // resolves its .data fetch wrong here (see the prefix-route note in routes.ts),
@@ -619,27 +615,27 @@ export default function PnlDashboard() {
                     delta={<Delta now={r.grossSale} was={d.prev?.grossSale} fmt={fmt} label={d.prevLabel} />} />
                   <Row label="Net Sale" value={fmt(r.netSale)} strong hl
                     delta={<Delta now={r.netSale} was={d.prev?.netSale} fmt={fmt} label={d.prevLabel} />} />
-                  <Row label="Refund Amount" value={sfmt(r.refunds)} neg share={costShare(r.refunds)}
+                  <Row label="Refund Amount" value={sfmt(r.refunds)} neg
                     delta={<Delta now={r.refunds} was={d.prev?.refunds} fmt={fmt} label={d.prevLabel} goodWhenUp={false} />} />
-                  <Row label="Cost of goods (delivered)" value={sfmt(r.cogs)} neg pending={r.cogs == null} share={costShare(r.cogs)}
+                  <Row label="Cost of goods (delivered)" value={sfmt(r.cogs)} neg pending={r.cogs == null}
                     delta={<Delta now={r.cogs} was={d.prev?.cogs} fmt={fmt} label={d.prevLabel} goodWhenUp={false} />} />
                   <EditRow label="Stocking (inventory bought)" name="stocking" value={d.monthInput.stocking} />
                   {r.freight == null ? (
                     <EditRow label="Shipping" name="freightOverride" value={d.monthInput.freightOverride} hint="carriers unresolved" />
                   ) : (
-                    <Row label="Shipping" value={sfmt(r.freight)} neg share={costShare(r.freight)}
+                    <Row label="Shipping" value={sfmt(r.freight)} neg
                       delta={<Delta now={r.freight} was={d.prev?.freight} fmt={fmt} label={d.prevLabel} goodWhenUp={false} />} />
                   )}
                   {r.adSpend == null ? (
                     <EditRow label="Advertising" name="adSpendOverride" value={d.monthInput.adSpendOverride} hint="Meta not connected" />
                   ) : (
-                    <Row label={`Advertising${r.adSpendSource === "meta" ? " (Meta)" : ""}`} value={sfmt(r.adSpend)} neg share={costShare(r.adSpend)}
+                    <Row label={`Advertising${r.adSpendSource === "meta" ? " (Meta)" : ""}`} value={sfmt(r.adSpend)} neg
                       delta={<Delta now={r.adSpend} was={d.prev?.adSpend} fmt={fmt} label={d.prevLabel} goodWhenUp={false} />} />
                   )}
-                  <EditRow label="Shopify subscription" name="shopifySubscription" value={d.monthInput.shopifySubscription} share={costShare(r.shopifySubscription)} />
-                  <EditRow label="Shopify billing" name="shopifyBilling" value={d.monthInput.shopifyBilling} share={costShare(r.shopifyBilling)} />
-                  <EditRow label="Doubleclick fee" name="doubleclickFee" value={d.monthInput.doubleclickFee} share={costShare(r.doubleclickFee)} />
-                  <EditRow label="Doubleclick subscription" name="doubleclickSub" value={d.monthInput.doubleclickSub} share={costShare(r.doubleclickSub)} />
+                  <EditRow label="Shopify subscription" name="shopifySubscription" value={d.monthInput.shopifySubscription} />
+                  <EditRow label="Shopify billing" name="shopifyBilling" value={d.monthInput.shopifyBilling} />
+                  <EditRow label="Doubleclick fee" name="doubleclickFee" value={d.monthInput.doubleclickFee} />
+                  <EditRow label="Doubleclick subscription" name="doubleclickSub" value={d.monthInput.doubleclickSub} />
                   <Row label="Shipping per pair" value={sfmt(r.freightPerDeliveredOrder)} neg pending={r.freightPerDeliveredOrder == null} />
                   <Row label="GST charged (12%)" value={sfmt(r.gstOutput)} neg pending={r.gstOutput == null} />
                   <Row label="GST reclaimed (18%)" value={fmt(r.gstInput, "Pending")} pending={r.gstInput == null} />
@@ -880,21 +876,20 @@ function StatusBanner({ report, monthLabel }: { report: any; monthLabel: string 
  * separate form: the figure sits where you read it, so there's no hunting for
  * which row was blank. Posts with the enclosing save form.
  */
-function EditRow({ label, name, value, share, hint, auto }: {
-  label: string; name: string; value: string; share?: number; hint?: string;
+function EditRow({ label, name, value, hint, auto }: {
+  label: string; name: string; value: string; hint?: string;
   /** Computed figure shown as the placeholder: leaving the field blank keeps it. */
   auto?: string;
 }) {
   return (
     <tr className="pnl-row-edit">
-      <td
-        className={share ? "pnl-bar" : undefined}
-        style={share ? ({ ["--w" as any]: `${Math.round(share * 100)}%` } as React.CSSProperties) : undefined}
-      >
+      <td>
         <span>{label}</span>
         {hint && <span className="pnl-edit-hint"> {hint}</span>}
       </td>
-      <td className="pnl-num" colSpan={2}>
+      {/* Same three columns as a static row, so the figures line up down the
+          statement instead of the inputs sitting in their own column. */}
+      <td className="pnl-num">
         <span className="pnl-edit-wrap">
           <span className="pnl-edit-cur">₹</span>
           <input
@@ -910,6 +905,7 @@ function EditRow({ label, name, value, share, hint, auto }: {
           />
         </span>
       </td>
+      <td className="pnl-num pnl-delta-cell" />
     </tr>
   );
 }
@@ -981,19 +977,15 @@ function CmpRow({ label, cols, pick, strong, hl }: {
   );
 }
 
-function Row({ label, value, value2, delta, share, neg, strong, hl, big, pending, to, active }: {
+function Row({ label, value, value2, delta, neg, strong, hl, big, pending, to, active }: {
   label: string; value: string; value2?: string;
   delta?: React.ReactNode; // change vs the previous month
-  share?: number; // 0-1: this line's share of the month's cost, drawn as a bar
   neg?: boolean; strong?: boolean; hl?: boolean; big?: boolean; pending?: boolean;
   to?: string; active?: boolean;
 }) {
   return (
     <tr className={`${hl ? "pnl-row-hl" : ""} ${active ? "pnl-row-active" : ""} ${to ? "pnl-row-click" : ""}`}>
-      <td
-        className={`${strong ? "pnl-strong" : ""} ${share ? "pnl-bar" : ""}`}
-        style={share ? ({ ["--w" as any]: `${Math.round(share * 100)}%` } as React.CSSProperties) : undefined}
-      >
+      <td className={strong ? "pnl-strong" : ""}>
         {to ? (
           <Link to={to} prefetch="intent" style={{ color: "inherit", textDecoration: "none" }}>
             {label}
@@ -1006,11 +998,12 @@ function Row({ label, value, value2, delta, share, neg, strong, hl, big, pending
         style={big ? { fontSize: 18, fontWeight: 700 } : undefined}>
         {value}
       </td>
-      {delta !== undefined && <td className="pnl-num pnl-delta-cell">{delta}</td>}
-      {value2 !== undefined && (
-        <td className={`pnl-num pnl-muted ${strong ? "pnl-strong" : ""}`}>
-          {value2}
-        </td>
+      {/* Always rendered, even when empty: a row with fewer cells than its
+          neighbours breaks the column alignment down the whole table. */}
+      {value2 !== undefined ? (
+        <td className={`pnl-num pnl-muted ${strong ? "pnl-strong" : ""}`}>{value2}</td>
+      ) : (
+        <td className="pnl-num pnl-delta-cell">{delta ?? null}</td>
       )}
     </tr>
   );
