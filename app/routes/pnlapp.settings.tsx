@@ -19,6 +19,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     deliverySheetUrl: app.deliverySheetUrl,
     stockingMatch: app.stockingMatch,
     stockingUnitCost: (Number(app.stockingUnitCostMinor) / 100).toString(),
+    opsPerPair: (Number(app.opsPerPairMinor) / 100).toString(),
   });
 };
 
@@ -39,6 +40,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const deliverySheetUrl = String(form.get("deliverySheetUrl") || "").trim();
   const stockingMatch = String(form.get("stockingMatch") || "").trim();
   // Rupees in the field, paise in the column. Blank keeps the current value.
+  const opsPerPairRaw = String(form.get("opsPerPair") || "").trim();
+  const opsPerPairNum = Number(opsPerPairRaw);
+  const opsPerPairMinor =
+    opsPerPairRaw === "" || !isFinite(opsPerPairNum) || opsPerPairNum < 0
+      ? null
+      : BigInt(Math.round(opsPerPairNum * 100));
   const stockingUnitCostRaw = String(form.get("stockingUnitCost") || "").trim();
   const stockingUnitCostNum = Number(stockingUnitCostRaw);
   const stockingUnitCostMinor =
@@ -64,6 +71,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       deliverySheetUrl,
       stockingMatch,
       ...(stockingUnitCostMinor != null ? { stockingUnitCostMinor } : {}),
+      ...(opsPerPairMinor != null ? { opsPerPairMinor } : {}),
       ...(adminToken ? { adminToken } : {}),
       ...(shiprocketPassword ? { shiprocketPassword } : {}),
       ...(delhiveryApiKey ? { delhiveryApiKey } : {}),
@@ -138,6 +146,14 @@ export default function PnlSettings() {
             type="password"
             placeholder={d.hasMetaToken ? "•••••••• saved" : "EAAG… (ads_read token)"}
           />
+          <hr className="pnl-rule" />
+          <div className="pnl-section-label">Operations</div>
+          <div className="pnl-help" style={{ marginBottom: 12 }}>
+            Your own handling and packing cost per delivered item, charged on the statement as
+            this rate &times; items delivered. Set it to 0 if that cost is already inside your
+            product cost price, or it will be counted twice.
+          </div>
+          <Field label="Operations cost per item (₹)" name="opsPerPair" defaultValue={d.opsPerPair} placeholder="0" />
           <hr className="pnl-rule" />
           <div className="pnl-section-label">Stocking (free product added to orders)</div>
           <div className="pnl-help" style={{ marginBottom: 12 }}>
