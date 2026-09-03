@@ -121,6 +121,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const monthInput = shop
     ? await prisma.pnlMonthlyInput.findUnique({ where: { shop_month: { shop, month } } })
     : null;
+  // The comparison columns are editable too, so they need each month's stored
+  // inputs to prefill — otherwise filling six months means switching month six
+  // times, which is exactly what the comparison view exists to avoid.
+  const compareInputs = shop && compareMonths.length
+    ? await prisma.pnlMonthlyInput.findMany({ where: { shop, month: { in: compareMonths } } })
+    : [];
+  const compareInputByMonth = new Map(compareInputs.map((i) => [i.month, i]));
 
   // Funnel drill-in: ?status=<funnel bucket> lists that month's orders. Each
   // funnel line maps to the underlying deliveryStatus values (some are groups).
@@ -289,6 +296,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       freight: s(c.freightMinor),
       adSpend: s(c.adSpendMinor),
       shopifyBilling: s(c.shopifyBillingMinor),
+      // stored inputs, for the editable cells
+      inShopifyBilling: rupees(compareInputByMonth.get(c.month)?.shopifyBillingMinor),
+      inDoubleclickFee: rupees(compareInputByMonth.get(c.month)?.doubleclickFeeMinor),
+      inDoubleclickSub: rupees(compareInputByMonth.get(c.month)?.doubleclickSubMinor),
+      inStocking: rupees(compareInputByMonth.get(c.month)?.stockingMinor),
+      inFreightOverride: rupees(compareInputByMonth.get(c.month)?.freightOverrideMinor),
+      inAdSpendOverride: rupees(compareInputByMonth.get(c.month)?.adSpendOverrideMinor),
+      inReturnExchangeFees: rupees(compareInputByMonth.get(c.month)?.returnExchangeFeesMinor),
       doubleclickFee: s(c.doubleclickFeeMinor),
       doubleclickSub: s(c.doubleclickSubMinor),
       gstOutput: s(c.gstOutputMinor),
@@ -372,29 +387,33 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     if (!/^\d{4}-\d{2}$/.test(month)) {
       return json({ ok: false, message: "Bad month." }, { status: 400 });
     }
-    // Parse rupee inputs → paise; blank overrides become null (use the auto value).
-    const money = (name: string) => {
+    // Only fields PRESENT in this submission are updated. The comparison view
+    // posts a single cell at a time, and treating an absent field as 0 would
+    // wipe every other figure for that month.
+    const money = (name: string): bigint | null | undefined => {
+      if (!form.has(name)) return undefined; // not submitted → leave as-is
       const v = String(form.get(name) || "").trim();
       return v === "" ? null : toMinor(v);
     };
-    const overheadMinor = money("overhead") ?? 0n;
-    const returnExchangeFeesMinor = money("returnExchangeFees") ?? 0n;
-    const adSpendOverrideMinor = money("adSpendOverride");
-    const freightOverrideMinor = money("freightOverride");
-    const shopifyBillingMinor = money("shopifyBilling") ?? 0n;
-    const doubleclickFeeMinor = money("doubleclickFee") ?? 0n;
-    const doubleclickSubMinor = money("doubleclickSub") ?? 0n;
-    const stockingMinor = money("stocking") ?? 0n;
-    const fixed = {
-      shopifyBillingMinor,
-      doubleclickFeeMinor,
-      doubleclickSubMinor,
-      stockingMinor,
+    const data: Record<string, bigint | null> = {};
+    // Blank clears back to auto: null for the overrides, 0 for the plain figures.
+    const put = (field: string, v: bigint | null | undefined, blankIsNull = false) => {
+      if (v === undefined) return;
+      data[field] = v === null ? (blankIsNull ? null : 0n) : v;
     };
+    put("overheadMinor", money("overhead"));
+    put("returnExchangeFeesMinor", money("returnExchangeFees"));
+    put("adSpendOverrideMinor", money("adSpendOverride"), true);
+    put("freightOverrideMinor", money("freightOverride"), true);
+    put("shopifyBillingMinor", money("shopifyBilling"));
+    put("doubleclickFeeMinor", money("doubleclickFee"));
+    put("doubleclickSubMinor", money("doubleclickSub"));
+    put("stockingMinor", money("stocking"));
+
     await prisma.pnlMonthlyInput.upsert({
       where: { shop_month: { shop: app.shopDomain, month } },
-      create: { shop: app.shopDomain, month, overheadMinor, returnExchangeFeesMinor, adSpendOverrideMinor, freightOverrideMinor, ...fixed },
-      update: { overheadMinor, returnExchangeFeesMinor, adSpendOverrideMinor, freightOverrideMinor, ...fixed },
+      create: { shop: app.shopDomain, month, ...(data as any) },
+      update: data as any,
     });
     return json({ ok: true, message: `Saved inputs for ${month}.` });
   }
@@ -571,7 +590,9 @@ export default function PnlDashboard() {
         {/* Month-by-month comparison (opt-in). Statement + funnel as columns. */}
         {d.compareOn && d.compare.length > 0 && (
           <div className="pnl-panel" style={{ marginBottom: 20, overflowX: "auto" }}>
-            <div className="pnl-section-label">Month comparison</div>
+            <div className="pnl-section-label">
+              Month comparison <span className="pnl-save-note">— highlighted rows are editable; press Enter to save</span>
+            </div>
             <table className="pnl-table pnl-compare">
               <thead>
                 <tr>
@@ -586,11 +607,11 @@ export default function PnlDashboard() {
                 <CmpRow label="Net Sale" cols={d.compare} pick={(c) => fmt(c.netSale)} strong />
                 <CmpRow label="Refund Amount" cols={d.compare} pick={(c) => sfmt(c.refunds)} />
                 <CmpRow label="Cost Price + (stocking)" cols={d.compare} pick={(c) => sfmt(c.cogs, c.stocking)} />
-                <CmpRow label="Shipping Fees" cols={d.compare} pick={(c) => sfmt(c.freight)} />
-                <CmpRow label="Advertisement" cols={d.compare} pick={(c) => sfmt(c.adSpend)} />
-                <CmpRow label="Shopify" cols={d.compare} pick={(c) => sfmt(c.shopifyBilling)} />
-                <CmpRow label="Doubleclick Fee" cols={d.compare} pick={(c) => sfmt(c.doubleclickFee)} />
-                <CmpRow label="Doubleclick Subscription" cols={d.compare} pick={(c) => sfmt(c.doubleclickSub)} />
+                <CmpEditRow label="Shipping Fees" cols={d.compare} name="freightOverride" pick={(c) => c.inFreightOverride} explain={EXPLAIN.shipping} />
+                <CmpEditRow label="Advertisement" cols={d.compare} name="adSpendOverride" pick={(c) => c.inAdSpendOverride} explain={EXPLAIN.advertising} />
+                <CmpEditRow label="Shopify" cols={d.compare} name="shopifyBilling" pick={(c) => c.inShopifyBilling} explain={EXPLAIN.shopify} />
+                <CmpEditRow label="Doubleclick Fee" cols={d.compare} name="doubleclickFee" pick={(c) => c.inDoubleclickFee} />
+                <CmpEditRow label="Doubleclick Subscription" cols={d.compare} name="doubleclickSub" pick={(c) => c.inDoubleclickSub} />
                 <CmpRow label="Gst 12%" cols={d.compare} pick={(c) => sfmt(c.gstOutput)} />
                 <CmpRow label="Gst 18% Claim" cols={d.compare} pick={(c) => fmt(c.gstInput, "Pending")} />
                 <CmpRow label="Return/Exchange Fees" cols={d.compare} pick={(c) => fmt(c.returnExchangeFees)} />
@@ -1018,6 +1039,49 @@ function Support({ label, value, now, was, fmt, label2, plain, goodWhenUp = true
       <div className="pnl-support-value">{value}</div>
       <Delta now={now} was={was} fmt={plain ? ((v: any) => String(v)) : fmt} label={label2} goodWhenUp={goodWhenUp} />
     </div>
+  );
+}
+
+/**
+ * A comparison row whose cells are editable, one month per column. Each cell is
+ * its own form posting that column's month: a table row can't be wrapped in a
+ * single form, and each column saves a different month anyway. Enter submits.
+ */
+function CmpEditRow({ label, cols, name, pick, explain }: {
+  label: string;
+  cols: any[];
+  name: string;
+  pick: (c: any) => string; // the stored input value for this column
+  explain?: string;
+}) {
+  return (
+    <tr className="pnl-row-edit">
+      <td style={{ whiteSpace: "nowrap" }}>
+        {explain ? <span className="pnl-explain" title={explain}>{label}</span> : label}
+      </td>
+      {cols.map((c) => (
+        <td key={c.month} className="pnl-num">
+          <Form method="post" replace>
+            <input type="hidden" name="intent" value="save-inputs" />
+            <input type="hidden" name="month" value={c.month} />
+            <span className="pnl-edit-wrap">
+              <span className="pnl-edit-cur">₹</span>
+              <input
+                key={`${name}:${c.month}:${pick(c)}`}
+                className="pnl-edit-input"
+                type="text"
+                inputMode="decimal"
+                name={name}
+                defaultValue={pick(c)}
+                placeholder="0.00"
+                autoComplete="off"
+                aria-label={`${label}, ${c.label}`}
+              />
+            </span>
+          </Form>
+        </td>
+      ))}
+    </tr>
   );
 }
 

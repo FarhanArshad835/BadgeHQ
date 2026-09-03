@@ -263,6 +263,10 @@ export const CSS = `
    field only on hover/focus. Marked by a left rule rather than a row tint,
    because tinting most of the rows made the tint meaningless. */
 .pnl-row-edit td:first-child { color: var(--ink-soft); box-shadow: inset 2px 0 0 var(--accent-wash); }
+/* In the comparison grid each cell is its own single-field form; it must not
+   add layout of its own or the columns stop lining up. */
+.pnl-compare .pnl-row-edit form { display: inline; margin: 0; }
+.pnl-compare .pnl-edit-input { width: 84px; }
 .pnl-edit-hint { color: var(--ink-faint); font-size: 11px; }
 .pnl-edit-wrap {
   display: inline-flex; align-items: baseline; gap: 3px;
