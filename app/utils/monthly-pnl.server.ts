@@ -373,7 +373,8 @@ export type MonthlyPnl = {
   gstInputMinor: bigint | null;
   netGstMinor: bigint | null;
   returnExchangeFeesMinor: bigint;
-  returnExchangeFeesSource: string; // "auto" (summed fee orders) | "manual" (override)
+  returnExchangeFeesSource: string;
+  feesAlreadyInNetSaleMinor: bigint; // exchange share; shown but not added to profit // "auto" (summed fee orders) | "manual" (override)
   // Bottom line — null when any required cost is pending (suppressed).
   netPnlMinor: bigint | null;
   // Counts + basis.
@@ -498,8 +499,16 @@ export async function computeMonth(shop: string, month: string): Promise<Monthly
   const exchangeFeesMinor = BigInt(exchangeFeeOrders) * app.returnRequestFeeMinor;
   const autoFeesMinor = returnFeesMinor + exchangeFeesMinor;
   const manualFeesMinor = input?.returnExchangeFeesMinor ?? 0n;
+  // SHOWN on the statement: the fee charged on every request, returns and
+  // exchanges alike, so the line matches the request count.
   const returnExchangeFeesMinor = manualFeesMinor > 0n ? manualFeesMinor : autoFeesMinor;
   const returnExchangeFeesSource = manualFeesMinor > 0n ? "manual" : "auto";
+  // The exchange share is already inside Net Sale: an exchange fee order is one
+  // real order worth (replacement product + fee). Adding the whole shown figure
+  // to profit would count that fee twice, so the profit formula deducts it —
+  // display and profit deliberately differ, and the statement says so.
+  // A manual override is taken at face value: we can't know what it includes.
+  const feesAlreadyInNetSaleMinor = manualFeesMinor > 0n ? 0n : exchangeFeesMinor;
 
   // ── Ops / GST ─────────────────────────────────────────────────────────────
   const opsMinor = app.opsPerPairMinor * BigInt(cogs.deliveredPairs);
@@ -538,7 +547,11 @@ export async function computeMonth(shop: string, month: string): Promise<Monthly
       opsMinor -
       overheadMinor +
       netGstMinor +
-      returnExchangeFeesMinor;
+      // Only the portion NOT already inside Net Sale (see above). GST is
+      // deliberately still computed on the full Net Sale: whether the fee is
+      // taxable is a GST question for the merchant's accountant, and
+      // overstating tax owed is the safer way to be wrong.
+      (returnExchangeFeesMinor - feesAlreadyInNetSaleMinor);
   }
 
   let publishStatus: PublishStatus = "final";
@@ -577,6 +590,7 @@ export async function computeMonth(shop: string, month: string): Promise<Monthly
     netGstMinor,
     returnExchangeFeesMinor,
     returnExchangeFeesSource,
+    feesAlreadyInNetSaleMinor,
     netPnlMinor,
     placedOrders: rev.placedOrders,
     deliveredOrders: rev.deliveredOrders,

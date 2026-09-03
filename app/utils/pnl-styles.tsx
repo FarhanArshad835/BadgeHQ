@@ -250,6 +250,13 @@ export const CSS = `
 .pnl-delta.flat { color: var(--ink-faint); }
 .pnl-delta-cell { padding-left: 8px; }
 
+/* A term with an explanation on hover. The dotted underline is the affordance:
+   a native title with no visual cue is a tooltip nobody discovers. */
+.pnl-explain {
+  border-bottom: 1px dotted var(--ink-faint);
+  cursor: help;
+}
+
 /* Rows the merchant fills in. These read as FIGURES that happen to be editable,
    not as a form: no box at rest (seven boxed inputs made the inputs look like
    the point of the statement), a dotted underline to invite the click, a real
