@@ -655,49 +655,6 @@ of which ${fmt(c.deliveredRevenue)} delivered`;
 
         {r && <StatusBanner report={r} monthLabel={monthLabel(d.month)} />}
 
-        {/* Month-by-month comparison (opt-in). Statement + funnel as columns. */}
-        {d.compareOn && d.compare.length > 0 && (
-          <div className="pnl-panel" style={{ marginBottom: 20, overflowX: "auto" }}>
-            <div className="pnl-section-label">
-              Month comparison <span className="pnl-save-note">— highlighted rows are editable; press Enter to save</span>
-            </div>
-            <table className="pnl-table pnl-compare">
-              <thead>
-                <tr>
-                  <th></th>
-                  {d.compare.map((c) => (
-                    <th key={c.month} className="pnl-num pnl-strong" style={{ whiteSpace: "nowrap" }}>{c.label}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                <CmpRow label="Gross Sale" cols={d.compare} pick={(c) => fmt(c.grossSale)} breakdown={colGross} explain={EXPLAIN.grossSale} strong />
-                <CmpRow label="Net Sale" cols={d.compare} pick={(c) => fmt(c.netSale)} breakdown={colNetSale} explain={EXPLAIN.netSale} strong />
-                <CmpRow label="Refund Amount" cols={d.compare} pick={(c) => sfmt(c.refunds)} explain={EXPLAIN.refunds} />
-                <CmpRow label="Cost Price + (stocking)" cols={d.compare} pick={(c) => sfmt(c.cogs, c.stocking)} breakdown={(c) => `${fmt(c.cogs, "?")} cost of goods
-+ ${fmt(c.stocking)} stocking`} explain={EXPLAIN.cogs} />
-                <CmpEditRow label="Shipping Fees" cols={d.compare} name="freightOverride" pick={(c) => c.inFreightOverride} explain={EXPLAIN.shipping} />
-                <CmpEditRow label="Advertisement" cols={d.compare} name="adSpendOverride" pick={(c) => c.inAdSpendOverride} explain={EXPLAIN.advertising} />
-                <CmpEditRow label="Shopify" cols={d.compare} name="shopifyBilling" pick={(c) => c.inShopifyBilling} explain={EXPLAIN.shopify} />
-                <CmpEditRow label="Doubleclick Fee" cols={d.compare} name="doubleclickFee" pick={(c) => c.inDoubleclickFee} />
-                <CmpEditRow label="Doubleclick Subscription" cols={d.compare} name="doubleclickSub" pick={(c) => c.inDoubleclickSub} />
-                <CmpRow label="GST charged" cols={d.compare} pick={(c) => sfmt(c.gstOutput)} breakdown={colGstOut} explain={EXPLAIN.gstOut} />
-                <CmpRow label="GST reclaimed" cols={d.compare} pick={(c) => fmt(c.gstInput, "Pending")} breakdown={colGstIn} explain={EXPLAIN.gstIn} />
-                <CmpRow label="Return/Exchange Fees" cols={d.compare} pick={(c) => fmt(c.returnExchangeFees)} />
-                <CmpRow label="P&L" cols={d.compare} pick={(c) => fmt(c.netPnl, "Pending")} explain={EXPLAIN.profit} strong hl />
-                <CmpRow label="Per Pair" cols={d.compare} pick={(c) => fmt(c.netPnlPerDeliveredPair, "Pending")} breakdown={colPerPair} explain={EXPLAIN.profitPerPair} />
-                <CmpRow label="—" cols={d.compare} pick={() => ""} />
-                <CmpRow label="Placed orders" cols={d.compare} pick={(c) => String(c.placedOrders)} />
-                <CmpRow label="Delivered" cols={d.compare} pick={(c) => String(c.deliveredOrders)} />
-                <CmpRow label="RTO" cols={d.compare} pick={(c) => `${c.rtoOrders} (${(c.placedOrders ? (c.rtoOrders / c.placedOrders) * 100 : 0).toFixed(1)}%)`} />
-                <CmpRow label="Cancelled" cols={d.compare} pick={(c) => String(c.cancelledOrders)} />
-                <CmpRow label="Delivered items (pairs)" cols={d.compare} pick={(c) => String(c.deliveredPairs)} />
-                <CmpRow label="Resolution rate" cols={d.compare} pick={(c) => pct(c.resolutionRate)} />
-              </tbody>
-            </table>
-          </div>
-        )}
-
         {r && (
           <>
             {/* One number leads; the rest are explicitly subordinate and each
@@ -988,6 +945,49 @@ of which ${fmt(r.deliveredRevenue)} delivered`} value={fmt(r.grossSale)} strong
                 </button>
               </Form>
             </details>
+          </div>
+        )}
+
+        {/* Month-by-month comparison (opt-in). Statement + funnel as columns. */}
+        {d.compareOn && d.compare.length > 0 && (
+          <div className="pnl-panel" style={{ marginBottom: 20, overflowX: "auto" }}>
+            <div className="pnl-section-label">
+              Month comparison <span className="pnl-save-note">— highlighted rows are editable; press Enter to save</span>
+            </div>
+            <table className="pnl-table pnl-compare">
+              <thead>
+                <tr>
+                  <th></th>
+                  {d.compare.map((c) => (
+                    <th key={c.month} className="pnl-num pnl-strong" style={{ whiteSpace: "nowrap" }}>{c.label}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                <CmpRow label="Gross Sale" cols={d.compare} pick={(c) => fmt(c.grossSale)} breakdown={colGross} explain={EXPLAIN.grossSale} strong />
+                <CmpRow label="Net Sale" cols={d.compare} pick={(c) => fmt(c.netSale)} breakdown={colNetSale} explain={EXPLAIN.netSale} strong />
+                <CmpRow label="Refund Amount" cols={d.compare} pick={(c) => sfmt(c.refunds)} explain={EXPLAIN.refunds} />
+                <CmpRow label="Cost Price + (stocking)" cols={d.compare} pick={(c) => sfmt(c.cogs, c.stocking)} breakdown={(c) => `${fmt(c.cogs, "?")} cost of goods
++ ${fmt(c.stocking)} stocking`} explain={EXPLAIN.cogs} />
+                <CmpEditRow label="Shipping Fees" cols={d.compare} name="freightOverride" pick={(c) => c.inFreightOverride} explain={EXPLAIN.shipping} />
+                <CmpEditRow label="Advertisement" cols={d.compare} name="adSpendOverride" pick={(c) => c.inAdSpendOverride} explain={EXPLAIN.advertising} />
+                <CmpEditRow label="Shopify" cols={d.compare} name="shopifyBilling" pick={(c) => c.inShopifyBilling} explain={EXPLAIN.shopify} />
+                <CmpEditRow label="Doubleclick Fee" cols={d.compare} name="doubleclickFee" pick={(c) => c.inDoubleclickFee} />
+                <CmpEditRow label="Doubleclick Subscription" cols={d.compare} name="doubleclickSub" pick={(c) => c.inDoubleclickSub} />
+                <CmpRow label="GST charged" cols={d.compare} pick={(c) => sfmt(c.gstOutput)} breakdown={colGstOut} explain={EXPLAIN.gstOut} />
+                <CmpRow label="GST reclaimed" cols={d.compare} pick={(c) => fmt(c.gstInput, "Pending")} breakdown={colGstIn} explain={EXPLAIN.gstIn} />
+                <CmpRow label="Return/Exchange Fees" cols={d.compare} pick={(c) => fmt(c.returnExchangeFees)} />
+                <CmpRow label="P&L" cols={d.compare} pick={(c) => fmt(c.netPnl, "Pending")} explain={EXPLAIN.profit} strong hl />
+                <CmpRow label="Per Pair" cols={d.compare} pick={(c) => fmt(c.netPnlPerDeliveredPair, "Pending")} breakdown={colPerPair} explain={EXPLAIN.profitPerPair} />
+                <CmpRow label="—" cols={d.compare} pick={() => ""} />
+                <CmpRow label="Placed orders" cols={d.compare} pick={(c) => String(c.placedOrders)} />
+                <CmpRow label="Delivered" cols={d.compare} pick={(c) => String(c.deliveredOrders)} />
+                <CmpRow label="RTO" cols={d.compare} pick={(c) => `${c.rtoOrders} (${(c.placedOrders ? (c.rtoOrders / c.placedOrders) * 100 : 0).toFixed(1)}%)`} />
+                <CmpRow label="Cancelled" cols={d.compare} pick={(c) => String(c.cancelledOrders)} />
+                <CmpRow label="Delivered items (pairs)" cols={d.compare} pick={(c) => String(c.deliveredPairs)} />
+                <CmpRow label="Resolution rate" cols={d.compare} pick={(c) => pct(c.resolutionRate)} />
+              </tbody>
+            </table>
           </div>
         )}
 
