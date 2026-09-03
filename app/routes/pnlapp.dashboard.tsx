@@ -27,7 +27,7 @@ const EXPLAIN = {
   shipping: "What the carrier actually billed you for freight. Shows Pending until the carrier bills — never an estimate.",
   advertising: "Ad spend for the month, pulled live from Meta.",
   shopify: "Your Shopify subscription and billing for the month, as invoiced.",
-  gstOut: "GST you collected on sales and owe to the government.",
+  gstOut: "GST you collected on sales and owe to the government, backed out of GST-inclusive delivered revenue at one blended rate set in Settings. If you sell at several rates it is an approximation, not a per-item calculation.",
   gstIn: "GST you paid on expenses (freight, ads, overheads) and can claim back.",
   fees: "The flat fee charged on every return and exchange request. Return-fee orders are pure fee; for exchanges only the fee is counted here, because the replacement product is already in Net Sale.",
   delivered: "Orders that reached the customer. Every per-unit figure is divided by this.",
@@ -185,6 +185,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     lastSyncCount,
     metaConnected: Boolean(app.metaAccessToken && app.metaAdAccountId),
     hasDeliverySheet: Boolean(app.deliverySheetUrl),
+    // The real configured rate, so the label can never claim a rate we do not apply.
+    gstOutputRatePct: app.gstOutputRateBp / 100,
     monthInput: {
       overhead: rupees(monthInput?.overheadMinor),
       returnExchangeFees: rupees(monthInput?.returnExchangeFeesMinor),
@@ -612,8 +614,8 @@ export default function PnlDashboard() {
                 <CmpEditRow label="Shopify" cols={d.compare} name="shopifyBilling" pick={(c) => c.inShopifyBilling} explain={EXPLAIN.shopify} />
                 <CmpEditRow label="Doubleclick Fee" cols={d.compare} name="doubleclickFee" pick={(c) => c.inDoubleclickFee} />
                 <CmpEditRow label="Doubleclick Subscription" cols={d.compare} name="doubleclickSub" pick={(c) => c.inDoubleclickSub} />
-                <CmpRow label="Gst 12%" cols={d.compare} pick={(c) => sfmt(c.gstOutput)} />
-                <CmpRow label="Gst 18% Claim" cols={d.compare} pick={(c) => fmt(c.gstInput, "Pending")} />
+                <CmpRow label="GST charged" cols={d.compare} pick={(c) => sfmt(c.gstOutput)} />
+                <CmpRow label="GST reclaimed" cols={d.compare} pick={(c) => fmt(c.gstInput, "Pending")} />
                 <CmpRow label="Return/Exchange Fees" cols={d.compare} pick={(c) => fmt(c.returnExchangeFees)} />
                 <CmpRow label="P&L" cols={d.compare} pick={(c) => fmt(c.netPnl, "Pending")} strong hl />
                 <CmpRow label="Per Pair" cols={d.compare} pick={(c) => fmt(c.netPnlPerDeliveredPair, "Pending")} />
@@ -705,8 +707,8 @@ export default function PnlDashboard() {
                   <EditRow label="Doubleclick fee" name="doubleclickFee" value={d.monthInput.doubleclickFee} />
                   <EditRow label="Doubleclick subscription" name="doubleclickSub" value={d.monthInput.doubleclickSub} />
                   <Row label="Shipping per pair" explain={EXPLAIN.freightPerOrder} value={sfmt(r.freightPerDeliveredOrder)} neg pending={r.freightPerDeliveredOrder == null} />
-                  <Row label="GST charged (12%)" explain={EXPLAIN.gstOut} value={sfmt(r.gstOutput)} neg pending={r.gstOutput == null} />
-                  <Row label="GST reclaimed (18%)" explain={EXPLAIN.gstIn} value={fmt(r.gstInput, "Pending")} pending={r.gstInput == null} />
+                  <Row label={`GST charged (${(d.gstOutputRatePct ?? 0).toFixed(2)}%)`} explain={EXPLAIN.gstOut} value={sfmt(r.gstOutput)} neg pending={r.gstOutput == null} />
+                  <Row label="GST reclaimed" explain={EXPLAIN.gstIn} value={fmt(r.gstInput, "Pending")} pending={r.gstInput == null} />
                   {/* Auto-summed from the fee orders; editable in place only if
                       that figure is disputed, rather than as its own junk row. */}
                   <EditRow

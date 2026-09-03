@@ -19,6 +19,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     deliverySheetUrl: app.deliverySheetUrl,
     stockingMatch: app.stockingMatch,
     stockingUnitCost: (Number(app.stockingUnitCostMinor) / 100).toString(),
+    gstOutputRatePct: (app.gstOutputRateBp / 100).toString(),
   });
 };
 
@@ -39,6 +40,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const deliverySheetUrl = String(form.get("deliverySheetUrl") || "").trim();
   const stockingMatch = String(form.get("stockingMatch") || "").trim();
   // Rupees in the field, paise in the column. Blank keeps the current value.
+  const gstRaw = String(form.get("gstOutputRatePct") || "").trim();
+  const gstNum = Number(gstRaw);
+  const gstOutputRateBp =
+    gstRaw === "" || !isFinite(gstNum) || gstNum < 0 || gstNum > 100
+      ? null
+      : Math.round(gstNum * 100);
   const stockingUnitCostRaw = String(form.get("stockingUnitCost") || "").trim();
   const stockingUnitCostNum = Number(stockingUnitCostRaw);
   const stockingUnitCostMinor =
@@ -64,6 +71,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       deliverySheetUrl,
       stockingMatch,
       ...(stockingUnitCostMinor != null ? { stockingUnitCostMinor } : {}),
+      ...(gstOutputRateBp != null ? { gstOutputRateBp } : {}),
       ...(adminToken ? { adminToken } : {}),
       ...(shiprocketPassword ? { shiprocketPassword } : {}),
       ...(delhiveryApiKey ? { delhiveryApiKey } : {}),
@@ -138,6 +146,14 @@ export default function PnlSettings() {
             type="password"
             placeholder={d.hasMetaToken ? "•••••••• saved" : "EAAG… (ads_read token)"}
           />
+          <hr className="pnl-rule" />
+          <div className="pnl-section-label">GST on sales</div>
+          <div className="pnl-help" style={{ marginBottom: 12 }}>
+            A single blended rate backed out of GST-inclusive delivered revenue. If you sell at
+            more than one rate (say 5% on clothing and footwear, 18% on handbags), this is an
+            approximation weighted by your actual mix &mdash; not a per-item calculation.
+          </div>
+          <Field label="Blended GST rate on sales (%)" name="gstOutputRatePct" defaultValue={d.gstOutputRatePct} placeholder="5" />
           <hr className="pnl-rule" />
           <div className="pnl-section-label">Stocking (free product added to orders)</div>
           <div className="pnl-help" style={{ marginBottom: 12 }}>
