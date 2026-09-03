@@ -32,6 +32,7 @@ const EXPLAIN = {
   fees: "The flat fee charged on every return and exchange request. Return-fee orders are pure fee; for exchanges only the fee is counted here, because the replacement product is already in Net Sale.",
   delivered: "Orders that reached the customer. Every per-unit figure is divided by this.",
   profit: "Net sale, minus every known cost, plus GST reclaimed and request fees. Shows Pending if any cost is still unknown — a total with a missing cost would be misleading.",
+  ops: "Your per-item handling and packing cost — the rate set in Settings × items delivered.",
   profitPerPair: "Profit divided by the number of items delivered.",
   placed: "Every order placed this month, whatever happened to it afterwards.",
   rto: "Returned To Origin: shipped but refused or undeliverable, so it came back. You pay freight both ways and earn nothing.",
@@ -292,6 +293,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       shopifyBilling: s(c.shopifyBillingMinor),
       doubleclickFee: s(c.doubleclickFeeMinor),
       doubleclickSub: s(c.doubleclickSubMinor),
+      ops: s(c.opsMinor),
       gstOutput: s(c.gstOutputMinor),
       gstInput: s(c.gstInputMinor),
       returnExchangeFees: s(c.returnExchangeFeesMinor),
@@ -592,6 +594,7 @@ export default function PnlDashboard() {
                 <CmpRow label="Shopify" cols={d.compare} pick={(c) => sfmt(c.shopifyBilling)} />
                 <CmpRow label="Doubleclick Fee" cols={d.compare} pick={(c) => sfmt(c.doubleclickFee)} />
                 <CmpRow label="Doubleclick Subscription" cols={d.compare} pick={(c) => sfmt(c.doubleclickSub)} />
+                <CmpRow label="Operations" cols={d.compare} pick={(c) => sfmt(c.ops)} />
                 <CmpRow label="Gst 12%" cols={d.compare} pick={(c) => sfmt(c.gstOutput)} />
                 <CmpRow label="Gst 18% Claim" cols={d.compare} pick={(c) => fmt(c.gstInput, "Pending")} />
                 <CmpRow label="Return/Exchange Fees" cols={d.compare} pick={(c) => fmt(c.returnExchangeFees)} />
@@ -684,6 +687,9 @@ export default function PnlDashboard() {
                   <EditRow label="Shopify (subscription + billing)" name="shopifyBilling" explain={EXPLAIN.shopify} value={d.monthInput.shopifyBilling} />
                   <EditRow label="Doubleclick fee" name="doubleclickFee" value={d.monthInput.doubleclickFee} />
                   <EditRow label="Doubleclick subscription" name="doubleclickSub" value={d.monthInput.doubleclickSub} />
+                  {/* Operations was deducted from profit but had NO row: the
+                      statement's lines could not be added up to its own total. */}
+                  <Row label="Operations" explain={EXPLAIN.ops} value={sfmt(r.ops)} neg />
                   <Row label="Shipping per pair" explain={EXPLAIN.freightPerOrder} value={sfmt(r.freightPerDeliveredOrder)} neg pending={r.freightPerDeliveredOrder == null} />
                   <Row label="GST charged (12%)" explain={EXPLAIN.gstOut} value={sfmt(r.gstOutput)} neg pending={r.gstOutput == null} />
                   <Row label="GST reclaimed (18%)" explain={EXPLAIN.gstIn} value={fmt(r.gstInput, "Pending")} pending={r.gstInput == null} />
