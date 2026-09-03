@@ -66,7 +66,12 @@ export type ReturnHqMonth = {
  * whose order isn't synced yet is skipped (it'll count once the order syncs).
  * `mixed` counts as both; cancelled excluded.
  */
-export async function refreshReturnHqCache(): Promise<{ ok: boolean; months: number }> {
+export async function refreshReturnHqCache(): Promise<{
+  ok: boolean;
+  months: number;
+  skipped?: number; // requests whose order isn't synced, so they count nowhere
+  total?: number;
+}> {
   const db = returnHqClient();
   if (!db) return { ok: false, months: 0 };
   try {
@@ -92,10 +97,14 @@ export async function refreshReturnHqCache(): Promise<{ ok: boolean; months: num
 
     // Bucket returns/exchanges by the order's month, and sum the order's revenue.
     const counts = new Map<string, { returns: number; exchanges: number; returnsValueMinor: bigint; exchangesValueMinor: bigint }>();
+    let skipped = 0;
     for (const r of reqs) {
       const orderName = String(r.shopify_order_number || "").trim();
       const month = monthByOrder.get(orderName);
-      if (!month) continue; // order not synced yet
+      // Order not synced yet, so we can't tell which month this request belongs
+      // to. Counted so the caller can report it: silently dropping requests makes
+      // a stale cache look identical to a genuinely quiet month.
+      if (!month) { skipped++; continue; }
       const rev = revByOrder.get(orderName) ?? 0n;
       const e = counts.get(month) || { returns: 0, exchanges: 0, returnsValueMinor: 0n, exchangesValueMinor: 0n };
       if (r.type === "return") { e.returns += 1; e.returnsValueMinor += rev; }
@@ -120,7 +129,7 @@ export async function refreshReturnHqCache(): Promise<{ ok: boolean; months: num
         update: row,
       });
     }
-    return { ok: true, months: counts.size };
+    return { ok: true, months: counts.size, skipped, total: reqs.length };
   } catch (e: any) {
     console.error("[returnhq] refresh", String(e?.message || e).slice(0, 200));
     return { ok: false, months: 0 };
