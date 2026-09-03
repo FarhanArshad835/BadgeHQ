@@ -187,6 +187,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     hasDeliverySheet: Boolean(app.deliverySheetUrl),
     // The real configured rate, so the label can never claim a rate we do not apply.
     gstOutputRatePct: app.gstOutputRateBp / 100,
+    gstInputRatePct: (app.gstInputRateNumer / app.gstInputRateDenom) * 100,
+    gstInputNumer: app.gstInputRateNumer,
+    gstInputDenom: app.gstInputRateDenom,
     monthInput: {
       overhead: rupees(monthInput?.overheadMinor),
       returnExchangeFees: rupees(monthInput?.returnExchangeFeesMinor),
@@ -519,6 +522,32 @@ export default function PnlDashboard() {
     if (total === 0n) return formatMinor(0n, d.currency);
     return "-" + formatMinor(total, d.currency);
   };
+  // How each GST figure was actually worked out, shown on hovering the amount.
+  // Both are single blended rates, so the breakdown shows the arithmetic rather
+  // than a per-category split the engine does not compute.
+  const gstOutBreakdown = () => {
+    if (!d.report?.netSale) return undefined;
+    const rate = d.gstOutputRatePct;
+    return (
+      `${fmt(d.report.netSale)} delivered revenue is GST-INCLUSIVE, so the tax is ` +
+      `backed out rather than added on: ${fmt(d.report.netSale)} x ${rate}% / ` +
+      `(100% + ${rate}%) = ${fmt(d.report.gstOutput)}. One blended rate across every ` +
+      `product, set in Settings.`
+    );
+  };
+  const gstInBreakdown = () => {
+    const r = d.report;
+    if (!r || r.gstInput == null) return undefined;
+    const parts = [
+      `Shipping ${fmt(r.freight, "pending")}`,
+      `Advertising ${fmt(r.adSpend, "pending")}`,
+      `Fixed costs ${fmt(r.overhead)}`,
+    ].join(" + ");
+    return (
+      `Reclaimed on expenses that carry GST: ${parts}, then x ${d.gstInputNumer}/${d.gstInputDenom} ` +
+      `(the ${d.gstInputRatePct.toFixed(2)}% share of a GST-inclusive amount) = ${fmt(r.gstInput)}.`
+    );
+  };
   const monthLabel = (m: string) => d.monthLabels[m] ?? m;
   const r = d.report;
   const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
@@ -668,9 +697,9 @@ export default function PnlDashboard() {
               </div>
               <table className="pnl-table pnl-waterfall">
                 <tbody>
-                  <Row label="Gross Sale" explain={EXPLAIN.grossSale} value={fmt(r.grossSale)} strong
+                  <Row label="Gross Sale" explain={EXPLAIN.grossSale} breakdown={`Everything ordered before discounts. Less ${fmt(r.discounts)} discounts = ${fmt(r.netPlaced)} net placed, of which ${fmt(r.deliveredRevenue)} was delivered.`} value={fmt(r.grossSale)} strong
                     delta={<Delta now={r.grossSale} was={d.prev?.grossSale} fmt={fmt} label={d.prevLabel} />} />
-                  <Row label="Net Sale" explain={EXPLAIN.netSale} value={fmt(r.netSale)} strong hl
+                  <Row label="Net Sale" explain={EXPLAIN.netSale} breakdown={`Delivered orders only: ${fmt(r.deliveredRevenue)} delivered revenue less ${fmt(r.refunds)} refunds = ${fmt(r.netSale)}. Cancelled, RTO and in-transit orders are excluded.`} value={fmt(r.netSale)} strong hl
                     delta={<Delta now={r.netSale} was={d.prev?.netSale} fmt={fmt} label={d.prevLabel} />} />
                   <Row label="Refund Amount" explain={EXPLAIN.refunds} value={sfmt(r.refunds)} neg
                     delta={<Delta now={r.refunds} was={d.prev?.refunds} fmt={fmt} label={d.prevLabel} goodWhenUp={false} />} />
@@ -706,9 +735,9 @@ export default function PnlDashboard() {
                   <EditRow label="Shopify (subscription + billing)" name="shopifyBilling" explain={EXPLAIN.shopify} value={d.monthInput.shopifyBilling} />
                   <EditRow label="Doubleclick fee" name="doubleclickFee" value={d.monthInput.doubleclickFee} />
                   <EditRow label="Doubleclick subscription" name="doubleclickSub" value={d.monthInput.doubleclickSub} />
-                  <Row label="Shipping per pair" explain={EXPLAIN.freightPerOrder} value={sfmt(r.freightPerDeliveredOrder)} neg pending={r.freightPerDeliveredOrder == null} />
-                  <Row label={`GST charged (${(d.gstOutputRatePct ?? 0).toFixed(2)}%)`} explain={EXPLAIN.gstOut} value={sfmt(r.gstOutput)} neg pending={r.gstOutput == null} />
-                  <Row label="GST reclaimed" explain={EXPLAIN.gstIn} value={fmt(r.gstInput, "Pending")} pending={r.gstInput == null} />
+                  <Row label="Shipping per pair" explain={EXPLAIN.freightPerOrder} breakdown={r.freight != null ? `${fmt(r.freight)} shipping / ${r.deliveredOrders.toLocaleString("en-IN")} delivered orders.` : undefined} value={sfmt(r.freightPerDeliveredOrder)} neg pending={r.freightPerDeliveredOrder == null} />
+                  <Row label={`GST charged (${(d.gstOutputRatePct ?? 0).toFixed(2)}%)`} explain={EXPLAIN.gstOut} breakdown={gstOutBreakdown()} value={sfmt(r.gstOutput)} neg pending={r.gstOutput == null} />
+                  <Row label="GST reclaimed" explain={EXPLAIN.gstIn} breakdown={gstInBreakdown()} value={fmt(r.gstInput, "Pending")} pending={r.gstInput == null} />
                   {/* Auto-summed from the fee orders; editable in place only if
                       that figure is disputed, rather than as its own junk row. */}
                   <EditRow
@@ -731,7 +760,7 @@ export default function PnlDashboard() {
                     delta={<Delta now={String(r.deliveredOrders)} was={d.prev ? String(d.prev.deliveredOrders) : null} fmt={(v: any) => String(v)} label={d.prevLabel} />} />
                   <Row label="Profit" explain={EXPLAIN.profit} value={fmt(r.netPnl, "Pending")} strong hl big
                     delta={<Delta now={r.netPnl} was={d.prev?.netPnl} fmt={fmt} label={d.prevLabel} />} />
-                  <Row label="Profit per pair" explain={EXPLAIN.profitPerPair} value={fmt(r.netPnlPerDeliveredPair, "Pending")} pending={r.netPnlPerDeliveredPair == null}
+                  <Row label="Profit per pair" explain={EXPLAIN.profitPerPair} breakdown={r.netPnl != null ? `${fmt(r.netPnl)} profit / ${r.deliveredPairs.toLocaleString("en-IN")} delivered items = ${fmt(r.netPnlPerDeliveredPair)}.` : undefined} value={fmt(r.netPnlPerDeliveredPair, "Pending")} pending={r.netPnlPerDeliveredPair == null}
                     delta={<Delta now={r.netPnlPerDeliveredPair} was={d.prev?.netPnlPerDeliveredPair} fmt={fmt} label={d.prevLabel} />} />
                 </tbody>
               </table>
@@ -1105,10 +1134,11 @@ function CmpRow({ label, cols, pick, strong, hl }: {
   );
 }
 
-function Row({ label, value, value2, delta, explain, neg, strong, hl, big, pending, to, active }: {
+function Row({ label, value, value2, delta, explain, breakdown, neg, strong, hl, big, pending, to, active }: {
   label: string; value: string; value2?: string;
   delta?: React.ReactNode; // change vs the previous month
   explain?: string; // plain-language definition, shown on hover
+  breakdown?: string; // how the AMOUNT was worked out, shown on hovering it
   neg?: boolean; strong?: boolean; hl?: boolean; big?: boolean; pending?: boolean;
   to?: string; active?: boolean;
 }) {
@@ -1127,7 +1157,7 @@ function Row({ label, value, value2, delta, explain, neg, strong, hl, big, pendi
       </td>
       <td className={`pnl-num ${strong ? "pnl-strong" : ""} ${neg ? "pnl-neg" : ""} ${pending ? "pnl-pending" : ""}`}
         style={big ? { fontSize: 18, fontWeight: 700 } : undefined}>
-        {value}
+        {breakdown ? <span className="pnl-explain" title={breakdown}>{value}</span> : value}
       </td>
       {/* Always rendered, even when empty: a row with fewer cells than its
           neighbours breaks the column alignment down the whole table. */}
