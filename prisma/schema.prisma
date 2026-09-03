@@ -574,6 +574,9 @@ model OrderLineFinancials {
   productId      String   @default("")
   variantId      String   @default("")
   productTitle   String   @default("")
+  // Shopify product type, captured so GST can be charged per line at the right
+  // rate (handbags 18%, clothing and footwear 5%) instead of one blended rate.
+  productType    String   @default("")
   variantTitle   String   @default("")
   quantity       Int      @default(0)
   lineRevenueMinor BigInt @default(0)
@@ -623,7 +626,15 @@ model PnlApp {
   returnRequestFeeMinor  BigInt @default(10000) // Rs100
   stockingMatch          String @default("")
   stockingUnitCostMinor  BigInt @default(6000) // ₹60 per stocking unit
-  gstOutputRateBp     Int    @default(487)   // Output GST on delivered revenue, basis points (4.87%)
+  // GST on sales, charged PER LINE at the rate for that product's type. The
+  // blended gstOutputRateBp below is the fallback for lines with no type data
+  // (orders synced before productType was captured).
+  gstHighRateBp       Int    @default(1800)  // handbags etc: 18%
+  gstHighTypes        String @default("Bags") // comma-separated Shopify product types
+  gstStandardRateBp   Int    @default(500)   // clothing and footwear: 5%
+  gstMidRateBp        Int    @default(1200)  // footwear over the threshold: 12%
+  gstFootwearThresholdMinor BigInt @default(100000) // Rs1,000 per pair
+  gstOutputRateBp     Int    @default(487)   // fallback blended rate for untyped lines
   gstInputRateNumer   Int    @default(18)    // ITC on (freight+ads+overhead): ×18/118
   gstInputRateDenom   Int    @default(118)
   maturityDays        Int    @default(12)    // wait this many days after month-end before the month is "matured"

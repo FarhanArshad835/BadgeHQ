@@ -319,6 +319,84 @@ export async function unmatchedCostItems(shop: string, month: string): Promise<U
 /** GST output tax backed out of GST-inclusive collected revenue:
  *    output = netSale × rate/(1+rate), rate as basis points (e.g. 487 = 4.87%).
  *  Integer math in paise — round to nearest paisa, never a float. */
+export type GstSplit = {
+  /** Taxable (GST-inclusive) delivered revenue and the tax backed out, per rate. */
+  bands: Array<{ rateBp: number; taxableMinor: bigint; taxMinor: bigint }>;
+  totalMinor: bigint;
+  /** True when no line carried a product type, so the blended fallback was used. */
+  blended: boolean;
+};
+
+/**
+ * GST on sales, charged PER LINE rather than at one blended rate, because this
+ * catalogue spans three slabs:
+ *   - handbags                     18%
+ *   - footwear over the threshold  12%  (India's per-pair price slab)
+ *   - everything else               5%
+ *
+ * The 12% test is on the UNIT price, not the line total: two Rs900 pairs on one
+ * line are Rs1,800 of revenue but each pair is under the threshold, so they stay
+ * at 5%. Delivered lines only, matching the rest of the P&L. Lines with no
+ * product type (synced before it was captured) fall back to the blended rate,
+ * and `blended` says so rather than presenting a split that didn't happen.
+ */
+export async function gstOutputSplit(
+  shop: string,
+  month: string,
+  cfg: {
+    highTypes: string[];
+    highRateBp: number;
+    standardRateBp: number;
+    fallbackRateBp: number;
+    /** Footwear priced ABOVE this (per pair, paise) moves to midRateBp. */
+    footwearThresholdMinor: bigint;
+    midRateBp: number;
+  },
+): Promise<GstSplit> {
+  const { start, end } = monthWindowIst(month);
+  const delivered = await prisma.orderFinancials.findMany({
+    where: { shop, orderCreatedAt: { gte: start, lt: end }, deliveryStatus: "delivered" },
+    select: { orderId: true },
+  });
+  if (!delivered.length) return { bands: [], totalMinor: 0n, blended: false };
+
+  const lines = await prisma.orderLineFinancials.findMany({
+    where: { shop, orderId: { in: delivered.map((d) => d.orderId) } },
+    select: { productType: true, lineRevenueMinor: true, quantity: true },
+  });
+
+  const high = new Set(cfg.highTypes.map((t) => t.trim().toLowerCase()).filter(Boolean));
+  const taxable = new Map<number, bigint>();
+  let untyped = 0n;
+  for (const l of lines) {
+    const type = (l.productType || "").trim().toLowerCase();
+    if (!type) { untyped += l.lineRevenueMinor; continue; }
+    let rate: number;
+    if (high.has(type)) {
+      rate = cfg.highRateBp;
+    } else {
+      // Per-PAIR price decides the slab, so a multi-quantity line of cheap pairs
+      // isn't pushed over the threshold by its own total.
+      const qty = BigInt(Math.max(1, l.quantity || 1));
+      const unit = l.lineRevenueMinor / qty;
+      rate = unit > cfg.footwearThresholdMinor ? cfg.midRateBp : cfg.standardRateBp;
+    }
+    taxable.set(rate, (taxable.get(rate) ?? 0n) + l.lineRevenueMinor);
+  }
+  if (untyped > 0n) taxable.set(cfg.fallbackRateBp, (taxable.get(cfg.fallbackRateBp) ?? 0n) + untyped);
+
+  const bands = Array.from(taxable.entries())
+    .map(([rateBp, taxableMinor]) => ({ rateBp, taxableMinor, taxMinor: gstOutput(taxableMinor, rateBp) }))
+    .filter((b) => b.taxableMinor > 0n)
+    .sort((a, b) => a.rateBp - b.rateBp);
+
+  return {
+    bands,
+    totalMinor: bands.reduce((t, b) => t + b.taxMinor, 0n),
+    blended: untyped > 0n && taxable.size === 1,
+  };
+}
+
 export function gstOutput(netSaleMinor: bigint, rateBp: number): bigint {
   // netSale × rate / (10000 + rate), with rounding.
   const num = netSaleMinor * BigInt(rateBp);
@@ -370,6 +448,8 @@ export type MonthlyPnl = {
   stockingSource: string; // "auto" (units × unit cost) | "manual" (entered)
   // GST.
   gstOutputMinor: bigint;
+  /** Taxable revenue and tax per GST slab, for the statement's breakdown. */
+  gstBands: Array<{ rateBp: number; taxableMinor: bigint; taxMinor: bigint }>;
   gstInputMinor: bigint | null;
   netGstMinor: bigint | null;
   returnExchangeFeesMinor: bigint;
@@ -501,7 +581,19 @@ export async function computeMonth(shop: string, month: string): Promise<Monthly
     manualFeesMinor > 0n ? 0n : BigInt(rq.exchanges) * app.returnRequestFeeMinor;
 
   // ── Ops / GST ─────────────────────────────────────────────────────────────
-  const gstOutputMinor = gstOutput(rev.netSaleMinor, app.gstOutputRateBp);
+  // Per-line GST: handbags 18%, footwear over the threshold 12%, rest 5%.
+  const gstSplit = await gstOutputSplit(shop, month, {
+    highTypes: app.gstHighTypes.split(",").map((t) => t.trim()).filter(Boolean),
+    highRateBp: app.gstHighRateBp,
+    standardRateBp: app.gstStandardRateBp,
+    midRateBp: app.gstMidRateBp,
+    footwearThresholdMinor: app.gstFootwearThresholdMinor,
+    fallbackRateBp: app.gstOutputRateBp,
+  });
+  // Fall back to the blended rate only when no line carried a product type at
+  // all, so a month synced before productType existed still shows a figure.
+  const gstOutputMinor =
+    gstSplit.bands.length > 0 ? gstSplit.totalMinor : gstOutput(rev.netSaleMinor, app.gstOutputRateBp);
   const gstInputMinor = gstInputCredit(
     freightMinor,
     adSpendMinor,
@@ -573,6 +665,7 @@ export async function computeMonth(shop: string, month: string): Promise<Monthly
     stockingUnits,
     stockingSource,
     gstOutputMinor,
+    gstBands: gstSplit.bands,
     gstInputMinor,
     netGstMinor,
     returnExchangeFeesMinor,

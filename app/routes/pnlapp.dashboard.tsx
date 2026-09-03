@@ -27,7 +27,7 @@ const EXPLAIN = {
   shipping: "What the carrier actually billed you for freight. Shows Pending until the carrier bills — never an estimate.",
   advertising: "Ad spend for the month, pulled live from Meta.",
   shopify: "Your Shopify subscription and billing for the month, as invoiced.",
-  gstOut: "GST collected on sales, backed out of GST-inclusive delivered revenue. One blended rate for every product — an approximation if you sell at several rates.",
+  gstOut: "GST collected on sales, backed out of GST-inclusive delivered revenue. Charged per item at its own slab: handbags 18%, footwear over Rs1,000 a pair 12%, everything else 5%.",
   gstIn: "GST you paid on expenses (freight, ads, overheads) and can claim back.",
   fees: "The flat fee charged on every return and exchange request. Return-fee orders are pure fee; for exchanges only the fee is counted here, because the replacement product is already in Net Sale.",
   delivered: "Orders that reached the customer. Every per-unit figure is divided by this.",
@@ -226,6 +226,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       stockingUnits: r.stockingUnits,
       stockingSource: r.stockingSource,
       gstOutput: s(r.gstOutputMinor),
+      gstBands: r.gstBands.map((b) => ({
+        ratePct: b.rateBp / 100,
+        taxable: s(b.taxableMinor),
+        tax: s(b.taxMinor),
+      })),
       gstInput: s(r.gstInputMinor),
       netGst: s(r.netGstMinor),
       returnExchangeFees: s(r.returnExchangeFeesMinor),
@@ -314,6 +319,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       discounts: s(c.discountsMinor),
       overhead: s(c.overheadMinor),
       gstOutput: s(c.gstOutputMinor),
+      gstBands: c.gstBands.map((b) => ({
+        ratePct: b.rateBp / 100,
+        taxable: s(b.taxableMinor),
+        tax: s(b.taxMinor),
+      })),
       gstInput: s(c.gstInputMinor),
       returnExchangeFees: s(c.returnExchangeFeesMinor),
       netPnl: s(c.netPnlMinor),
@@ -526,12 +536,13 @@ export default function PnlDashboard() {
   };
   // The arithmetic behind a figure, shown on hovering it. Terse on purpose: a
   // breakdown is there to be scanned, not read.
-  const gstOutBreakdown = () => {
-    const r = d.report;
-    if (!r?.netSale) return undefined;
-    const rate = d.gstOutputRatePct;
-    return `${fmt(r.netSale)} x ${rate}% / ${100 + rate}%  =  ${fmt(r.gstOutput)}`;
+  // Taxable amount and tax per slab — the split the catalogue actually has.
+  const bandsBreakdown = (bands: any[], total: string | null | undefined) => {
+    if (!bands?.length) return undefined;
+    const rows = bands.map((b) => `${fmt(b.taxable)} x ${b.ratePct}%  =  ${fmt(b.tax)}`);
+    return rows.length > 1 ? rows.join("\n") + "\n=  " + fmt(total) : rows[0];
   };
+  const gstOutBreakdown = () => bandsBreakdown(d.report?.gstBands ?? [], d.report?.gstOutput);
   const gstInBreakdown = () => {
     const r = d.report;
     if (!r || r.gstInput == null) return undefined;
@@ -546,8 +557,7 @@ export default function PnlDashboard() {
     );
   };
   // Same arithmetic as the statement, applied to any comparison column.
-  const colGstOut = (c: any) =>
-    c.netSale ? `${fmt(c.netSale)} x ${d.gstOutputRatePct}% / ${100 + d.gstOutputRatePct}%  =  ${fmt(c.gstOutput)}` : undefined;
+  const colGstOut = (c: any) => bandsBreakdown(c.gstBands ?? [], c.gstOutput);
   const colGstIn = (c: any) =>
     c.gstInput == null
       ? undefined
@@ -760,7 +770,7 @@ of which ${fmt(r.deliveredRevenue)} delivered`} value={fmt(r.grossSale)} strong
                   <EditRow label="Doubleclick fee" name="doubleclickFee" value={d.monthInput.doubleclickFee} />
                   <EditRow label="Doubleclick subscription" name="doubleclickSub" value={d.monthInput.doubleclickSub} />
                   <Row label="Shipping per pair" explain={EXPLAIN.freightPerOrder} breakdown={r.freight != null ? `${fmt(r.freight)} / ${r.deliveredOrders.toLocaleString("en-IN")} orders  =  ${fmt(r.freightPerDeliveredOrder)}` : undefined} value={sfmt(r.freightPerDeliveredOrder)} neg pending={r.freightPerDeliveredOrder == null} />
-                  <Row label={`GST charged (${(d.gstOutputRatePct ?? 0).toFixed(2)}%)`} explain={EXPLAIN.gstOut} breakdown={gstOutBreakdown()} value={sfmt(r.gstOutput)} neg pending={r.gstOutput == null} />
+                  <Row label="GST charged" explain={EXPLAIN.gstOut} breakdown={gstOutBreakdown()} value={sfmt(r.gstOutput)} neg pending={r.gstOutput == null} />
                   <Row label="GST reclaimed" explain={EXPLAIN.gstIn} breakdown={gstInBreakdown()} value={fmt(r.gstInput, "Pending")} pending={r.gstInput == null} />
                   {/* Auto-summed from the fee orders; editable in place only if
                       that figure is disputed, rather than as its own junk row. */}

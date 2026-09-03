@@ -214,6 +214,7 @@ async function writeOrderPage(shop: string, computed: OrderFinancialsComputed[])
       productId: l.productId,
       variantId: l.variantId,
       productTitle: l.productTitle,
+      productType: l.productType,
       variantTitle: l.variantTitle,
       quantity: l.quantity,
       lineRevenueMinor: l.lineRevenueMinor,

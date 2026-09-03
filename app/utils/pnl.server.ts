@@ -41,7 +41,7 @@ const ORDER_PNL_FIELDS = `
       quantity
       originalUnitPriceSet { shopMoney { amount } }
       discountedUnitPriceSet { shopMoney { amount } }
-      product { id title }
+      product { id title productType }
       variant { id title inventoryItem { unitCost { amount currencyCode } } }
     }
   }
@@ -54,6 +54,7 @@ export type LineFinancials = {
   productId: string;
   variantId: string;
   productTitle: string;
+  productType: string;
   variantTitle: string;
   quantity: number;
   lineRevenueMinor: bigint;
@@ -168,6 +169,7 @@ export function computeOrderFinancials(node: any): OrderFinancialsComputed {
       productId: String(li?.product?.id || ""),
       variantId: String(li?.variant?.id || ""),
       productTitle: String(li?.product?.title || ""),
+      productType: String(li?.product?.productType || ""),
       variantTitle: String(li?.variant?.title || ""),
       quantity,
       lineRevenueMinor,
