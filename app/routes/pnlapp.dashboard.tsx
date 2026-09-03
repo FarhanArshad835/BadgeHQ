@@ -949,7 +949,12 @@ function EditRow({ label, name, value, hint, auto, explain }: {
       <td className="pnl-num">
         <span className="pnl-edit-wrap">
           <span className="pnl-edit-cur">₹</span>
+          {/* Keyed on the saved value: defaultValue is only read when the input
+              first mounts, so after a save React kept the old DOM node and the
+              field appeared stuck. Changing the key remounts it with the new
+              value while still leaving the field uncontrolled to type in. */}
           <input
+            key={`${name}:${value}`}
             className="pnl-edit-input"
             type="text"
             inputMode="decimal"
