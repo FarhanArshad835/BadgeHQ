@@ -19,6 +19,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const admin = tokenAdmin(app.shopDomain, app.adminToken);
 
   const types = new Map<string, { products: number; sample: string[] }>();
+  const blankTags = new Map<string, number>();
   let cursor: string | null = null;
   let pages = 0;
   while (pages < 20) {
@@ -40,6 +41,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       e.products++;
       if (e.sample.length < 3) e.sample.push(n.title);
       types.set(t, e);
+      // For the untyped products, collect their tags: if those classify the
+      // category we can fall back to them instead of leaving 39% unrated.
+      if (t === "(blank)") {
+        for (const raw of n.tags ?? []) {
+          const tag = String(raw).trim().toLowerCase();
+          if (!tag) continue;
+          blankTags.set(tag, (blankTags.get(tag) ?? 0) + 1);
+        }
+      }
     }
     pages++;
     if (!p.pageInfo?.hasNextPage) break;
@@ -51,5 +61,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     productTypes: Array.from(types.entries())
       .map(([type, v]) => ({ type, products: v.products, sample: v.sample }))
       .sort((a, b) => b.products - a.products),
+    tagsOnUntypedProducts: Array.from(blankTags.entries())
+      .map(([tag, n]) => ({ tag, products: n }))
+      .sort((a, b) => b.products - a.products)
+      .slice(0, 40),
   });
 };
