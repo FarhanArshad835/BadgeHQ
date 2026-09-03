@@ -710,7 +710,9 @@ of which ${fmt(c.deliveredRevenue)} delivered`;
                 </span>
                 <span className="pnl-headline-note">
                   {r.netPnl == null
-                    ? "Suppressed until every cost is known"
+                    ? r.resolutionRate < 0.98
+                      ? `Month still settling — ${pct(r.resolutionRate)} of orders resolved, needs 98%`
+                      : "Suppressed until every cost is known"
                     : <>{pct(contributionPct(r))} margin{d.prev?.netPnl != null && <> · <Delta now={r.netPnl} was={d.prev.netPnl} fmt={fmt} label={d.prevLabel} /></>}</>}
                 </span>
               </div>

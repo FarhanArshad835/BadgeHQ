@@ -613,17 +613,29 @@ export async function computeMonth(shop: string, month: string): Promise<Monthly
   const daysToMaturity = app.maturityDays - daysSince;
   const matured = daysToMaturity <= 0;
 
+  // A month whose orders haven't reached an outcome yet isn't a P&L: the RTOs and
+  // cancellations still to land will move revenue AND cost. Treated like a
+  // missing cost — suppress the total rather than publish one that will change.
+  const RESOLUTION_THRESHOLD = 0.98;
+  const resolved = rev.resolutionRate >= RESOLUTION_THRESHOLD;
+
   const pendingReasons: string[] = [];
   if (cogs.cogsMinor == null) {
     pendingReasons.push(`COGS: cost-per-item set on only ${(cogs.matchRate * 100).toFixed(1)}% of delivered lines`);
   }
   if (freightMinor == null) pendingReasons.push("Freight: carrier billing not yet resolved");
   if (adSpendMinor == null) pendingReasons.push("Ad spend: Meta token not set / month not pulled");
+  if (!resolved) {
+    pendingReasons.push(
+      `Delivery outcomes: only ${(rev.resolutionRate * 100).toFixed(1)}% of orders have resolved ` +
+        `(need ${(RESOLUTION_THRESHOLD * 100).toFixed(0)}%) — ${rev.placedOrders - rev.resolvedOrders} still in transit or unknown`,
+    );
+  }
 
   // Net P&L is only computed when EVERY required cost is known. Any pending cost
   // suppresses it (null), per the spec — no partial total masquerading as a P&L.
   let netPnlMinor: bigint | null = null;
-  if (cogs.cogsMinor != null && freightMinor != null && adSpendMinor != null && netGstMinor != null) {
+  if (resolved && cogs.cogsMinor != null && freightMinor != null && adSpendMinor != null && netGstMinor != null) {
     netPnlMinor =
       rev.netSaleMinor -
       cogs.cogsMinor -
@@ -639,9 +651,11 @@ export async function computeMonth(shop: string, month: string): Promise<Monthly
       (returnExchangeFeesMinor - feesAlreadyInNetSaleMinor);
   }
 
+  // An unresolved month is already a pendingReason above, so it lands in
+  // "pending" here rather than needing its own clause.
   let publishStatus: PublishStatus = "final";
   if (pendingReasons.length > 0) publishStatus = "pending";
-  else if (!matured || overheadProvisional || rev.resolutionRate < 0.97) publishStatus = "provisional";
+  else if (!matured || overheadProvisional) publishStatus = "provisional";
 
   const perDelOrder = (v: bigint | null): bigint | null =>
     v == null || rev.deliveredOrders === 0 ? null : v / BigInt(rev.deliveredOrders);
