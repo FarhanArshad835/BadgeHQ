@@ -27,7 +27,7 @@ const EXPLAIN = {
   shipping: "What the carrier actually billed you for freight. Shows Pending until the carrier bills — never an estimate.",
   advertising: "Ad spend for the month, pulled live from Meta.",
   shopify: "Your Shopify subscription and billing for the month, as invoiced.",
-  gstOut: "GST you collected on sales and owe to the government, backed out of GST-inclusive delivered revenue at one blended rate set in Settings. If you sell at several rates it is an approximation, not a per-item calculation.",
+  gstOut: "GST collected on sales, backed out of GST-inclusive delivered revenue. One blended rate for every product — an approximation if you sell at several rates.",
   gstIn: "GST you paid on expenses (freight, ads, overheads) and can claim back.",
   fees: "The flat fee charged on every return and exchange request. Return-fee orders are pure fee; for exchanges only the fee is counted here, because the replacement product is already in Net Sale.",
   delivered: "Orders that reached the customer. Every per-unit figure is divided by this.",
@@ -522,30 +522,25 @@ export default function PnlDashboard() {
     if (total === 0n) return formatMinor(0n, d.currency);
     return "-" + formatMinor(total, d.currency);
   };
-  // How each GST figure was actually worked out, shown on hovering the amount.
-  // Both are single blended rates, so the breakdown shows the arithmetic rather
-  // than a per-category split the engine does not compute.
+  // The arithmetic behind a figure, shown on hovering it. Terse on purpose: a
+  // breakdown is there to be scanned, not read.
   const gstOutBreakdown = () => {
-    if (!d.report?.netSale) return undefined;
+    const r = d.report;
+    if (!r?.netSale) return undefined;
     const rate = d.gstOutputRatePct;
-    return (
-      `${fmt(d.report.netSale)} delivered revenue is GST-INCLUSIVE, so the tax is ` +
-      `backed out rather than added on: ${fmt(d.report.netSale)} x ${rate}% / ` +
-      `(100% + ${rate}%) = ${fmt(d.report.gstOutput)}. One blended rate across every ` +
-      `product, set in Settings.`
-    );
+    return `${fmt(r.netSale)} x ${rate}% / ${100 + rate}%  =  ${fmt(r.gstOutput)}`;
   };
   const gstInBreakdown = () => {
     const r = d.report;
     if (!r || r.gstInput == null) return undefined;
-    const parts = [
-      `Shipping ${fmt(r.freight, "pending")}`,
-      `Advertising ${fmt(r.adSpend, "pending")}`,
-      `Fixed costs ${fmt(r.overhead)}`,
-    ].join(" + ");
     return (
-      `Reclaimed on expenses that carry GST: ${parts}, then x ${d.gstInputNumer}/${d.gstInputDenom} ` +
-      `(the ${d.gstInputRatePct.toFixed(2)}% share of a GST-inclusive amount) = ${fmt(r.gstInput)}.`
+      `${fmt(r.freight, "?")} shipping
+` +
+      `+ ${fmt(r.adSpend, "?")} advertising
+` +
+      `+ ${fmt(r.overhead)} fixed
+` +
+      `x ${d.gstInputNumer}/${d.gstInputDenom}  =  ${fmt(r.gstInput)}`
     );
   };
   const monthLabel = (m: string) => d.monthLabels[m] ?? m;
@@ -697,9 +692,14 @@ export default function PnlDashboard() {
               </div>
               <table className="pnl-table pnl-waterfall">
                 <tbody>
-                  <Row label="Gross Sale" explain={EXPLAIN.grossSale} breakdown={`Everything ordered before discounts. Less ${fmt(r.discounts)} discounts = ${fmt(r.netPlaced)} net placed, of which ${fmt(r.deliveredRevenue)} was delivered.`} value={fmt(r.grossSale)} strong
+                  <Row label="Gross Sale" explain={EXPLAIN.grossSale} breakdown={`${fmt(r.grossSale)} ordered
+− ${fmt(r.discounts)} discounts
+=  ${fmt(r.netPlaced)} placed
+of which ${fmt(r.deliveredRevenue)} delivered`} value={fmt(r.grossSale)} strong
                     delta={<Delta now={r.grossSale} was={d.prev?.grossSale} fmt={fmt} label={d.prevLabel} />} />
-                  <Row label="Net Sale" explain={EXPLAIN.netSale} breakdown={`Delivered orders only: ${fmt(r.deliveredRevenue)} delivered revenue less ${fmt(r.refunds)} refunds = ${fmt(r.netSale)}. Cancelled, RTO and in-transit orders are excluded.`} value={fmt(r.netSale)} strong hl
+                  <Row label="Net Sale" explain={EXPLAIN.netSale} breakdown={`${fmt(r.deliveredRevenue)} delivered
+− ${fmt(r.refunds)} refunds
+=  ${fmt(r.netSale)}`} value={fmt(r.netSale)} strong hl
                     delta={<Delta now={r.netSale} was={d.prev?.netSale} fmt={fmt} label={d.prevLabel} />} />
                   <Row label="Refund Amount" explain={EXPLAIN.refunds} value={sfmt(r.refunds)} neg
                     delta={<Delta now={r.refunds} was={d.prev?.refunds} fmt={fmt} label={d.prevLabel} goodWhenUp={false} />} />
@@ -735,7 +735,7 @@ export default function PnlDashboard() {
                   <EditRow label="Shopify (subscription + billing)" name="shopifyBilling" explain={EXPLAIN.shopify} value={d.monthInput.shopifyBilling} />
                   <EditRow label="Doubleclick fee" name="doubleclickFee" value={d.monthInput.doubleclickFee} />
                   <EditRow label="Doubleclick subscription" name="doubleclickSub" value={d.monthInput.doubleclickSub} />
-                  <Row label="Shipping per pair" explain={EXPLAIN.freightPerOrder} breakdown={r.freight != null ? `${fmt(r.freight)} shipping / ${r.deliveredOrders.toLocaleString("en-IN")} delivered orders.` : undefined} value={sfmt(r.freightPerDeliveredOrder)} neg pending={r.freightPerDeliveredOrder == null} />
+                  <Row label="Shipping per pair" explain={EXPLAIN.freightPerOrder} breakdown={r.freight != null ? `${fmt(r.freight)} / ${r.deliveredOrders.toLocaleString("en-IN")} orders  =  ${fmt(r.freightPerDeliveredOrder)}` : undefined} value={sfmt(r.freightPerDeliveredOrder)} neg pending={r.freightPerDeliveredOrder == null} />
                   <Row label={`GST charged (${(d.gstOutputRatePct ?? 0).toFixed(2)}%)`} explain={EXPLAIN.gstOut} breakdown={gstOutBreakdown()} value={sfmt(r.gstOutput)} neg pending={r.gstOutput == null} />
                   <Row label="GST reclaimed" explain={EXPLAIN.gstIn} breakdown={gstInBreakdown()} value={fmt(r.gstInput, "Pending")} pending={r.gstInput == null} />
                   {/* Auto-summed from the fee orders; editable in place only if
@@ -760,7 +760,7 @@ export default function PnlDashboard() {
                     delta={<Delta now={String(r.deliveredOrders)} was={d.prev ? String(d.prev.deliveredOrders) : null} fmt={(v: any) => String(v)} label={d.prevLabel} />} />
                   <Row label="Profit" explain={EXPLAIN.profit} value={fmt(r.netPnl, "Pending")} strong hl big
                     delta={<Delta now={r.netPnl} was={d.prev?.netPnl} fmt={fmt} label={d.prevLabel} />} />
-                  <Row label="Profit per pair" explain={EXPLAIN.profitPerPair} breakdown={r.netPnl != null ? `${fmt(r.netPnl)} profit / ${r.deliveredPairs.toLocaleString("en-IN")} delivered items = ${fmt(r.netPnlPerDeliveredPair)}.` : undefined} value={fmt(r.netPnlPerDeliveredPair, "Pending")} pending={r.netPnlPerDeliveredPair == null}
+                  <Row label="Profit per pair" explain={EXPLAIN.profitPerPair} breakdown={r.netPnl != null ? `${fmt(r.netPnl)} / ${r.deliveredPairs.toLocaleString("en-IN")} items  =  ${fmt(r.netPnlPerDeliveredPair)}` : undefined} value={fmt(r.netPnlPerDeliveredPair, "Pending")} pending={r.netPnlPerDeliveredPair == null}
                     delta={<Delta now={r.netPnlPerDeliveredPair} was={d.prev?.netPnlPerDeliveredPair} fmt={fmt} label={d.prevLabel} />} />
                 </tbody>
               </table>
