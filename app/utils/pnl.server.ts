@@ -233,10 +233,14 @@ export async function fetchOrdersPage(
   nextCursor: string | null;
   throttle: { currentlyAvailable: number; maximumAvailable: number } | null;
 }> {
+  // NEWEST FIRST (reverse: true). Ascending meant a backfill spanning several
+  // months had to walk every older order before reaching the current month, so
+  // the months being looked at were the last to populate. Recent months now land
+  // first and the older backlog fills in behind them.
   const q = `created_at:>='${opts.createdAtMin}' AND created_at:<='${opts.createdAtMax}'`;
   const resp = await admin.graphql(
     `query PnlOrders($q: String!, $cursor: String) {
-      orders(first: 50, query: $q, after: $cursor, sortKey: CREATED_AT) {
+      orders(first: 50, query: $q, after: $cursor, sortKey: CREATED_AT, reverse: true) {
         nodes { ${ORDER_PNL_FIELDS} }
         pageInfo { hasNextPage endCursor }
       }

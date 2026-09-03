@@ -363,9 +363,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   try {
+    // A press is worth something on a real backlog: 4 pages/5s was tuned for
+    // topping up a synced store and made clicking feel futile against thousands
+    // of orders. NOT raised past Vercel's default 10s function timeout: a
+    // route-level `export const config` would lift that, but doing so previously
+    // broke this kind of route's single-fetch .data endpoint (404 on POST), and
+    // the Sync button posts that way. The cron does the heavy lifting anyway.
     const result = await runStandaloneSync({
-      maxPages: 4,
-      timeBudgetMs: 5_000,
+      maxPages: 12,
+      timeBudgetMs: 7_500,
       deliveryLimit: 60, // bulk path (one Shiprocket auth) resolves ~60 AWBs/click
       shippingLimit: 20,
     });
