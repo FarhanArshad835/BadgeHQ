@@ -480,11 +480,23 @@ export async function computeMonth(shop: string, month: string): Promise<Monthly
   // Shopify orders tagged "returnhq-fee" (+ "do-not-ship"), which the funnel
   // excludes as non-sales. Sum their revenue instead of asking for a manual
   // figure. A manual entry still wins if one was explicitly set (override).
-  const feeAgg = await prisma.orderFinancials.aggregate({
-    where: { shop, orderCreatedAt: { gte: start, lt: end }, deliveryStatus: "returnhq-fee" },
-    _sum: { grossRevenueMinor: true },
-  });
-  const autoFeesMinor = feeAgg._sum.grossRevenueMinor ?? 0n;
+  const [feeAgg, exchangeFeeOrders] = await Promise.all([
+    // Return-fee orders: no product, so the whole order IS the fee.
+    prisma.orderFinancials.aggregate({
+      where: { shop, orderCreatedAt: { gte: start, lt: end }, deliveryStatus: "returnhq-fee" },
+      _sum: { grossRevenueMinor: true },
+    }),
+    // Exchange-fee orders: the fee is charged on these too, but the order also
+    // carries the replacement product and is already counted in Net Sale. Count
+    // them and add only the FLAT FEE, never the order total (that would
+    // double-count the product).
+    prisma.orderFinancials.count({
+      where: { shop, orderCreatedAt: { gte: start, lt: end }, isExchangeFee: true },
+    }),
+  ]);
+  const returnFeesMinor = feeAgg._sum.grossRevenueMinor ?? 0n;
+  const exchangeFeesMinor = BigInt(exchangeFeeOrders) * app.returnRequestFeeMinor;
+  const autoFeesMinor = returnFeesMinor + exchangeFeesMinor;
   const manualFeesMinor = input?.returnExchangeFeesMinor ?? 0n;
   const returnExchangeFeesMinor = manualFeesMinor > 0n ? manualFeesMinor : autoFeesMinor;
   const returnExchangeFeesSource = manualFeesMinor > 0n ? "manual" : "auto";

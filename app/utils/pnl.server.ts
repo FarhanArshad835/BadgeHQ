@@ -75,6 +75,7 @@ export type OrderFinancialsComputed = {
   fulfillmentStatus: string;
   isCancelled: boolean;
   isReturnFeeOrder: boolean;
+  isExchangeFeeOrder: boolean;
   awb: string;
   carrier: string;
   lines: LineFinancials[];
@@ -203,21 +204,38 @@ export function computeOrderFinancials(node: any): OrderFinancialsComputed {
     // "returnhq-fee" + "exchange" and DOES carry the real replacement product,
     // so it is a genuine sale and is deliberately NOT excluded here.
     isReturnFeeOrder: isReturnHqReturnFee(node?.tags),
+    isExchangeFeeOrder: isReturnHqExchangeFee(node?.tags),
     awb,
     carrier,
     lines,
   };
 }
 
-/** True for a ReturnHQ return-only fee order (never shipped, no product). */
-function isReturnHqReturnFee(tags: unknown): boolean {
-  const list = Array.isArray(tags)
+/** Lower-cased tag list, whether Shopify gave an array or a comma string. */
+function tagList(tags: unknown): string[] {
+  return Array.isArray(tags)
     ? tags.map((t) => String(t).toLowerCase())
     : String(tags || "")
         .toLowerCase()
         .split(",")
         .map((t) => t.trim());
+}
+
+/** True for a ReturnHQ return-only fee order (never shipped, no product). */
+function isReturnHqReturnFee(tags: unknown): boolean {
+  const list = tagList(tags);
   return list.includes("returnhq-fee") && list.includes("do-not-ship");
+}
+
+/**
+ * True for a ReturnHQ EXCHANGE fee order. Unlike the return-fee order this one
+ * carries the real replacement product, so it stays a genuine sale — its total
+ * is product + the flat fee. Flagged only so the monthly engine can add the FEE
+ * portion to the fee line without double-counting the product revenue.
+ */
+function isReturnHqExchangeFee(tags: unknown): boolean {
+  const list = tagList(tags);
+  return list.includes("returnhq-fee") && list.includes("exchange");
 }
 
 /**

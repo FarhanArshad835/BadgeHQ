@@ -154,7 +154,7 @@ async function writeOrderPage(shop: string, computed: OrderFinancialsComputed[])
       ${c.cogsMinor}, ${c.cogsComplete},
       ${initialShippingStatus}, ${c.awb}, ${c.carrier},
       ${c.financialStatus}, ${c.fulfillmentStatus},
-      ${c.cogsComplete}, ${initialDeliveryStatus}, ${now}, ${now}, ${now}
+      ${c.cogsComplete}, ${initialDeliveryStatus}, ${c.isExchangeFeeOrder}, ${now}, ${now}, ${now}
     )`;
   });
 
@@ -166,7 +166,7 @@ async function writeOrderPage(shop: string, computed: OrderFinancialsComputed[])
       "cogsMinor", "cogsComplete",
       "shippingStatus", "awb", "carrier",
       "financialStatus", "fulfillmentStatus",
-      "dataComplete", "deliveryStatus", "revenueSyncedAt", "cogsSyncedAt", "updatedAt"
+      "dataComplete", "deliveryStatus", "isExchangeFee", "revenueSyncedAt", "cogsSyncedAt", "updatedAt"
     )
     VALUES ${Prisma.join(rows)}
     ON CONFLICT ("shop", "orderId") DO UPDATE SET
@@ -185,6 +185,7 @@ async function writeOrderPage(shop: string, computed: OrderFinancialsComputed[])
       "awb"               = EXCLUDED."awb",
       "carrier"           = EXCLUDED."carrier",
       "financialStatus"   = EXCLUDED."financialStatus",
+      "isExchangeFee"     = EXCLUDED."isExchangeFee",
       "fulfillmentStatus" = EXCLUDED."fulfillmentStatus",
       -- A no-AWB order newly resolved as cancelled/abandoned takes that status;
       -- otherwise keep the outcome the sheet resolved (delivered/rto/…). Never

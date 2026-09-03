@@ -546,6 +546,10 @@ model OrderFinancials {
   financialStatus   String   @default("")
   fulfillmentStatus String   @default("")
   dataComplete      Boolean  @default(false) // cogsComplete AND shipping resolved
+  // ReturnHQ EXCHANGE fee order: a genuine sale (it carries the replacement
+  // product), flagged so the monthly engine can add the flat FEE portion to the
+  // fee line without double-counting the product revenue already in Net Sale.
+  isExchangeFee     Boolean  @default(false)
   revenueSyncedAt   DateTime?
   cogsSyncedAt      DateTime?
   shippingSyncedAt  DateTime?
@@ -609,6 +613,10 @@ model PnlApp {
   // Stocking: a free product added to orders that still costs us to supply.
   // Counted from the delivered order lines whose product title contains
   // stockingMatch, times stockingUnitCostMinor. Blank match = feature off.
+  // Flat fee charged on EVERY return/exchange request. Return-fee orders carry
+  // only this amount; exchange-fee orders bundle it with the replacement product,
+  // so the fee line adds this per exchange rather than the whole order total.
+  returnRequestFeeMinor  BigInt @default(10000) // Rs100
   stockingMatch          String @default("")
   stockingUnitCostMinor  BigInt @default(6000) // ₹60 per stocking unit
   gstOutputRateBp     Int    @default(487)   // Output GST on delivered revenue, basis points (4.87%)
