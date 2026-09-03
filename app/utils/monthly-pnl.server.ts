@@ -23,6 +23,7 @@ import prisma from "../db.server";
 import { isResolvedOutcome } from "./pnl-sync.server";
 import { getPnlApp } from "./pnl-app.server";
 import { fetchMetaMonthlySpend } from "./meta-ads.server";
+import { returnHqCountsForMonth } from "./returnhq.server";
 
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 
@@ -481,26 +482,15 @@ export async function computeMonth(shop: string, month: string): Promise<Monthly
   // Shopify orders tagged "returnhq-fee" (+ "do-not-ship"), which the funnel
   // excludes as non-sales. Sum their revenue instead of asking for a manual
   // figure. A manual entry still wins if one was explicitly set (override).
-  const [feeAgg, exchangeFeeOrders] = await Promise.all([
-    // Return-fee orders: no product, so the whole order IS the fee.
-    prisma.orderFinancials.aggregate({
-      where: { shop, orderCreatedAt: { gte: start, lt: end }, deliveryStatus: "returnhq-fee" },
-      _sum: { grossRevenueMinor: true },
-    }),
-    // Exchange-fee orders: the fee is charged on these too, but the order also
-    // carries the replacement product and is already counted in Net Sale. Count
-    // them and add only the FLAT FEE, never the order total (that would
-    // double-count the product).
-    prisma.orderFinancials.count({
-      where: { shop, orderCreatedAt: { gte: start, lt: end }, isExchangeFee: true },
-    }),
-  ]);
-  const returnFeesMinor = feeAgg._sum.grossRevenueMinor ?? 0n;
-  const exchangeFeesMinor = BigInt(exchangeFeeOrders) * app.returnRequestFeeMinor;
-  const autoFeesMinor = returnFeesMinor + exchangeFeesMinor;
+  // Fee is charged per REQUEST, so count requests — not the Shopify fee orders.
+  // Those two never reconcile: a request is bucketed by its ORIGINAL order's
+  // month, while its fee order is created whenever the customer pays, often in
+  // the next month. Counting fee orders made the line disagree with the request
+  // counts shown right beside it.
+  const rq = await returnHqCountsForMonth(month);
+  const requestCount = rq.returns + rq.exchanges;
+  const autoFeesMinor = BigInt(requestCount) * app.returnRequestFeeMinor;
   const manualFeesMinor = input?.returnExchangeFeesMinor ?? 0n;
-  // SHOWN on the statement: the fee charged on every request, returns and
-  // exchanges alike, so the line matches the request count.
   const returnExchangeFeesMinor = manualFeesMinor > 0n ? manualFeesMinor : autoFeesMinor;
   const returnExchangeFeesSource = manualFeesMinor > 0n ? "manual" : "auto";
   // The exchange share is already inside Net Sale: an exchange fee order is one
@@ -508,7 +498,8 @@ export async function computeMonth(shop: string, month: string): Promise<Monthly
   // to profit would count that fee twice, so the profit formula deducts it —
   // display and profit deliberately differ, and the statement says so.
   // A manual override is taken at face value: we can't know what it includes.
-  const feesAlreadyInNetSaleMinor = manualFeesMinor > 0n ? 0n : exchangeFeesMinor;
+  const feesAlreadyInNetSaleMinor =
+    manualFeesMinor > 0n ? 0n : BigInt(rq.exchanges) * app.returnRequestFeeMinor;
 
   // ── Ops / GST ─────────────────────────────────────────────────────────────
   const opsMinor = app.opsPerPairMinor * BigInt(cogs.deliveredPairs);
