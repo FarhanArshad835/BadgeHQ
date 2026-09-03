@@ -359,7 +359,6 @@ export type MonthlyPnl = {
   freightStatus: PublishStatus;
   adSpendMinor: bigint | null;
   adSpendSource: string;
-  opsMinor: bigint;
   overheadMinor: bigint;
   overheadProvisional: boolean;
   // Itemized fixed costs (statement rows).
@@ -502,7 +501,6 @@ export async function computeMonth(shop: string, month: string): Promise<Monthly
     manualFeesMinor > 0n ? 0n : BigInt(rq.exchanges) * app.returnRequestFeeMinor;
 
   // ── Ops / GST ─────────────────────────────────────────────────────────────
-  const opsMinor = app.opsPerPairMinor * BigInt(cogs.deliveredPairs);
   const gstOutputMinor = gstOutput(rev.netSaleMinor, app.gstOutputRateBp);
   const gstInputMinor = gstInputCredit(
     freightMinor,
@@ -535,7 +533,6 @@ export async function computeMonth(shop: string, month: string): Promise<Monthly
       stockingMinor - // was shown on the statement but never deducted: profit read high
       freightMinor -
       adSpendMinor -
-      opsMinor -
       overheadMinor +
       netGstMinor +
       // Only the portion NOT already inside Net Sale (see above). GST is
@@ -567,7 +564,6 @@ export async function computeMonth(shop: string, month: string): Promise<Monthly
     freightStatus,
     adSpendMinor,
     adSpendSource,
-    opsMinor,
     overheadMinor,
     overheadProvisional,
     shopifyBillingMinor,

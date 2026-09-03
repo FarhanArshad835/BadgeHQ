@@ -609,7 +609,11 @@ model PnlApp {
 
   // Monthly-P&L config knobs (the method's fixed rates; editable in Settings so
   // they're never hard-coded estimates the merchant can't see or change).
-  opsPerPairMinor     BigInt @default(2500)  // Operations cost per delivered pair (₹25)
+  // UNUSED. The Operations line was removed from the P&L: it was the only cost
+  // that wasn't a real billed figure, just a Rs25/item assumption never verified
+  // against actual handling costs. Column kept rather than dropped (harmless,
+  // and a destructive migration for nothing) - do not wire it back in.
+  opsPerPairMinor     BigInt @default(2500)
   // Stocking: a free product added to orders that still costs us to supply.
   // Counted from the delivered order lines whose product title contains
   // stockingMatch, times stockingUnitCostMinor. Blank match = feature off.
