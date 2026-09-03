@@ -641,11 +641,6 @@ export default function PnlDashboard() {
               <Form method="post" id="statement-inputs">
               <input type="hidden" name="intent" value="save-inputs" />
               <input type="hidden" name="month" value={d.month} />
-              {/* The override rows only render while a cost is unresolved. Carry
-                  their stored values so saving from this form can't blank an
-                  override that simply isn't on screen right now. */}
-              {r.freight != null && <input type="hidden" name="freightOverride" value={d.monthInput.freightOverride} />}
-              {r.adSpend != null && <input type="hidden" name="adSpendOverride" value={d.monthInput.adSpendOverride} />}
               <div className="pnl-section-label">
                 {monthLabel(d.month)}{d.prevLabel ? ` · change vs ${d.prevLabel}` : ""}
               </div>
@@ -668,18 +663,24 @@ export default function PnlDashboard() {
                     auto={r.stockingSource === "auto" ? fmt(r.stocking) : undefined}
                     hint={r.stockingSource === "manual" ? "entered" : undefined}
                   />
-                  {r.freight == null ? (
-                    <EditRow label="Shipping" name="freightOverride" value={d.monthInput.freightOverride} hint="carriers unresolved" />
-                  ) : (
-                    <Row label="Shipping" explain={EXPLAIN.shipping} value={sfmt(r.freight)} neg
-                      delta={<Delta now={r.freight} was={d.prev?.freight} fmt={fmt} label={d.prevLabel} goodWhenUp={false} />} />
-                  )}
-                  {r.adSpend == null ? (
-                    <EditRow label="Advertising" name="adSpendOverride" value={d.monthInput.adSpendOverride} hint="Meta not connected" />
-                  ) : (
-                    <Row label={`Advertising${r.adSpendSource === "meta" ? " (Meta)" : ""}`} value={sfmt(r.adSpend)} neg
-                      delta={<Delta now={r.adSpend} was={d.prev?.adSpend} fmt={fmt} label={d.prevLabel} goodWhenUp={false} />} />
-                  )}
+                  <EditRow
+                    label="Shipping"
+                    name="freightOverride"
+                    explain={EXPLAIN.shipping}
+                    value={d.monthInput.freightOverride}
+                    auto={r.freight != null ? fmt(r.freight) : undefined}
+                    hint={r.freight == null ? "carriers unresolved" : undefined}
+                  />
+                  {/* Always editable, resolved or not: a wrong Meta figure was
+                      previously uncorrectable because the row went read-only. */}
+                  <EditRow
+                    label="Advertising"
+                    name="adSpendOverride"
+                    explain={EXPLAIN.advertising}
+                    value={d.monthInput.adSpendOverride}
+                    auto={r.adSpend != null ? fmt(r.adSpend) : undefined}
+                    hint={r.adSpend == null ? "Meta not connected" : r.adSpendSource === "meta" ? "from Meta" : undefined}
+                  />
                   <EditRow label="Shopify (subscription + billing)" name="shopifyBilling" explain={EXPLAIN.shopify} value={d.monthInput.shopifyBilling} />
                   <EditRow label="Doubleclick fee" name="doubleclickFee" value={d.monthInput.doubleclickFee} />
                   <EditRow label="Doubleclick subscription" name="doubleclickSub" value={d.monthInput.doubleclickSub} />
