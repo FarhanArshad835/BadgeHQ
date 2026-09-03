@@ -311,6 +311,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       inReturnExchangeFees: rupees(compareInputByMonth.get(c.month)?.returnExchangeFeesMinor),
       doubleclickFee: s(c.doubleclickFeeMinor),
       doubleclickSub: s(c.doubleclickSubMinor),
+      discounts: s(c.discountsMinor),
+      overhead: s(c.overheadMinor),
       gstOutput: s(c.gstOutputMinor),
       gstInput: s(c.gstInputMinor),
       returnExchangeFees: s(c.returnExchangeFeesMinor),
@@ -543,6 +545,27 @@ export default function PnlDashboard() {
       `x ${d.gstInputNumer}/${d.gstInputDenom}  =  ${fmt(r.gstInput)}`
     );
   };
+  // Same arithmetic as the statement, applied to any comparison column.
+  const colGstOut = (c: any) =>
+    c.netSale ? `${fmt(c.netSale)} x ${d.gstOutputRatePct}% / ${100 + d.gstOutputRatePct}%  =  ${fmt(c.gstOutput)}` : undefined;
+  const colGstIn = (c: any) =>
+    c.gstInput == null
+      ? undefined
+      : `${fmt(c.freight, "?")} shipping
++ ${fmt(c.adSpend, "?")} advertising
++ ${fmt(c.overhead)} fixed
+x ${d.gstInputNumer}/${d.gstInputDenom}  =  ${fmt(c.gstInput)}`;
+  const colNetSale = (c: any) =>
+    `${fmt(c.deliveredRevenue)} delivered
+− ${fmt(c.refunds)} refunds
+=  ${fmt(c.netSale)}`;
+  const colGross = (c: any) =>
+    `${fmt(c.grossSale)} ordered
+− ${fmt(c.discounts)} discounts
+=  ${fmt(c.netPlaced)} placed
+of which ${fmt(c.deliveredRevenue)} delivered`;
+  const colPerPair = (c: any) =>
+    c.netPnl == null ? undefined : `${fmt(c.netPnl)} / ${c.deliveredPairs.toLocaleString("en-IN")} items  =  ${fmt(c.netPnlPerDeliveredPair)}`;
   const monthLabel = (m: string) => d.monthLabels[m] ?? m;
   const r = d.report;
   const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
@@ -629,20 +652,21 @@ export default function PnlDashboard() {
                 </tr>
               </thead>
               <tbody>
-                <CmpRow label="Gross Sale" cols={d.compare} pick={(c) => fmt(c.grossSale)} strong />
-                <CmpRow label="Net Sale" cols={d.compare} pick={(c) => fmt(c.netSale)} strong />
-                <CmpRow label="Refund Amount" cols={d.compare} pick={(c) => sfmt(c.refunds)} />
-                <CmpRow label="Cost Price + (stocking)" cols={d.compare} pick={(c) => sfmt(c.cogs, c.stocking)} />
+                <CmpRow label="Gross Sale" cols={d.compare} pick={(c) => fmt(c.grossSale)} breakdown={colGross} explain={EXPLAIN.grossSale} strong />
+                <CmpRow label="Net Sale" cols={d.compare} pick={(c) => fmt(c.netSale)} breakdown={colNetSale} explain={EXPLAIN.netSale} strong />
+                <CmpRow label="Refund Amount" cols={d.compare} pick={(c) => sfmt(c.refunds)} explain={EXPLAIN.refunds} />
+                <CmpRow label="Cost Price + (stocking)" cols={d.compare} pick={(c) => sfmt(c.cogs, c.stocking)} breakdown={(c) => `${fmt(c.cogs, "?")} cost of goods
++ ${fmt(c.stocking)} stocking`} explain={EXPLAIN.cogs} />
                 <CmpEditRow label="Shipping Fees" cols={d.compare} name="freightOverride" pick={(c) => c.inFreightOverride} explain={EXPLAIN.shipping} />
                 <CmpEditRow label="Advertisement" cols={d.compare} name="adSpendOverride" pick={(c) => c.inAdSpendOverride} explain={EXPLAIN.advertising} />
                 <CmpEditRow label="Shopify" cols={d.compare} name="shopifyBilling" pick={(c) => c.inShopifyBilling} explain={EXPLAIN.shopify} />
                 <CmpEditRow label="Doubleclick Fee" cols={d.compare} name="doubleclickFee" pick={(c) => c.inDoubleclickFee} />
                 <CmpEditRow label="Doubleclick Subscription" cols={d.compare} name="doubleclickSub" pick={(c) => c.inDoubleclickSub} />
-                <CmpRow label="GST charged" cols={d.compare} pick={(c) => sfmt(c.gstOutput)} />
-                <CmpRow label="GST reclaimed" cols={d.compare} pick={(c) => fmt(c.gstInput, "Pending")} />
+                <CmpRow label="GST charged" cols={d.compare} pick={(c) => sfmt(c.gstOutput)} breakdown={colGstOut} explain={EXPLAIN.gstOut} />
+                <CmpRow label="GST reclaimed" cols={d.compare} pick={(c) => fmt(c.gstInput, "Pending")} breakdown={colGstIn} explain={EXPLAIN.gstIn} />
                 <CmpRow label="Return/Exchange Fees" cols={d.compare} pick={(c) => fmt(c.returnExchangeFees)} />
-                <CmpRow label="P&L" cols={d.compare} pick={(c) => fmt(c.netPnl, "Pending")} strong hl />
-                <CmpRow label="Per Pair" cols={d.compare} pick={(c) => fmt(c.netPnlPerDeliveredPair, "Pending")} />
+                <CmpRow label="P&L" cols={d.compare} pick={(c) => fmt(c.netPnl, "Pending")} explain={EXPLAIN.profit} strong hl />
+                <CmpRow label="Per Pair" cols={d.compare} pick={(c) => fmt(c.netPnlPerDeliveredPair, "Pending")} breakdown={colPerPair} explain={EXPLAIN.profitPerPair} />
                 <CmpRow label="—" cols={d.compare} pick={() => ""} />
                 <CmpRow label="Placed orders" cols={d.compare} pick={(c) => String(c.placedOrders)} />
                 <CmpRow label="Delivered" cols={d.compare} pick={(c) => String(c.deliveredOrders)} />
@@ -1117,19 +1141,29 @@ function CmpEditRow({ label, cols, name, pick, explain }: {
 }
 
 // One comparison row: a label plus one cell per month column.
-function CmpRow({ label, cols, pick, strong, hl }: {
+function CmpRow({ label, cols, pick, breakdown, explain, strong, hl }: {
   label: string;
   cols: any[];
   pick: (c: any) => string;
+  /** The arithmetic behind that column's figure, on hovering it. */
+  breakdown?: (c: any) => string | undefined;
+  explain?: string;
   strong?: boolean;
   hl?: boolean;
 }) {
   return (
     <tr className={hl ? "pnl-row-hl" : ""}>
-      <td className={strong ? "pnl-strong" : ""} style={{ whiteSpace: "nowrap" }}>{label === "—" ? " " : label}</td>
-      {cols.map((c, i) => (
-        <td key={i} className={`pnl-num ${strong ? "pnl-strong" : ""}`}>{pick(c)}</td>
-      ))}
+      <td className={strong ? "pnl-strong" : ""} style={{ whiteSpace: "nowrap" }}>
+        {label === "—" ? " " : explain ? <span className="pnl-explain" title={explain}>{label}</span> : label}
+      </td>
+      {cols.map((c, i) => {
+        const b = breakdown?.(c);
+        return (
+          <td key={i} className={`pnl-num ${strong ? "pnl-strong" : ""}`}>
+            {b ? <span className="pnl-explain" title={b}>{pick(c)}</span> : pick(c)}
+          </td>
+        );
+      })}
     </tr>
   );
 }
