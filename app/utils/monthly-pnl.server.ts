@@ -325,6 +325,8 @@ export type GstSplit = {
   totalMinor: bigint;
   /** True when no line carried a product type, so the blended fallback was used. */
   blended: boolean;
+  /** Revenue on lines with no product type — they can't be slabbed until re-synced. */
+  untypedMinor: bigint;
 };
 
 /**
@@ -358,7 +360,7 @@ export async function gstOutputSplit(
     where: { shop, orderCreatedAt: { gte: start, lt: end }, deliveryStatus: "delivered" },
     select: { orderId: true },
   });
-  if (!delivered.length) return { bands: [], totalMinor: 0n, blended: false };
+  if (!delivered.length) return { bands: [], totalMinor: 0n, blended: false, untypedMinor: 0n };
 
   const lines = await prisma.orderLineFinancials.findMany({
     where: { shop, orderId: { in: delivered.map((d) => d.orderId) } },
@@ -394,6 +396,7 @@ export async function gstOutputSplit(
     bands,
     totalMinor: bands.reduce((t, b) => t + b.taxMinor, 0n),
     blended: untyped > 0n && taxable.size === 1,
+    untypedMinor: untyped,
   };
 }
 
@@ -450,6 +453,8 @@ export type MonthlyPnl = {
   gstOutputMinor: bigint;
   /** Taxable revenue and tax per GST slab, for the statement's breakdown. */
   gstBands: Array<{ rateBp: number; taxableMinor: bigint; taxMinor: bigint }>;
+  /** Delivered revenue whose lines have no product type yet (needs a re-sync). */
+  gstUntypedMinor: bigint;
   gstInputMinor: bigint | null;
   netGstMinor: bigint | null;
   returnExchangeFeesMinor: bigint;
@@ -666,6 +671,7 @@ export async function computeMonth(shop: string, month: string): Promise<Monthly
     stockingSource,
     gstOutputMinor,
     gstBands: gstSplit.bands,
+    gstUntypedMinor: gstSplit.untypedMinor,
     gstInputMinor,
     netGstMinor,
     returnExchangeFeesMinor,

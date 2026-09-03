@@ -226,6 +226,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       stockingUnits: r.stockingUnits,
       stockingSource: r.stockingSource,
       gstOutput: s(r.gstOutputMinor),
+      gstUntyped: s(r.gstUntypedMinor),
       gstBands: r.gstBands.map((b) => ({
         ratePct: b.rateBp / 100,
         taxable: s(b.taxableMinor),
@@ -319,6 +320,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       discounts: s(c.discountsMinor),
       overhead: s(c.overheadMinor),
       gstOutput: s(c.gstOutputMinor),
+      gstUntyped: s(c.gstUntypedMinor),
       gstBands: c.gstBands.map((b) => ({
         ratePct: b.rateBp / 100,
         taxable: s(b.taxableMinor),
@@ -537,12 +539,19 @@ export default function PnlDashboard() {
   // The arithmetic behind a figure, shown on hovering it. Terse on purpose: a
   // breakdown is there to be scanned, not read.
   // Taxable amount and tax per slab — the split the catalogue actually has.
-  const bandsBreakdown = (bands: any[], total: string | null | undefined) => {
+  const bandsBreakdown = (bands: any[], total: string | null | undefined, untyped?: string | null) => {
     if (!bands?.length) return undefined;
+    // One band made entirely of untyped lines isn't a slab split, it's the old
+    // blended rate. Say so, or it reads identically to a genuine single-slab month.
+    if (bands.length === 1 && untyped && BigInt(untyped) > 0n) {
+      return `${fmt(bands[0].taxable)} x ${bands[0].ratePct}%  =  ${fmt(bands[0].tax)}
+
+Blended rate: these orders were synced before product types were captured. Re-sync the month to split 5% / 12% / 18%.`;
+    }
     const rows = bands.map((b) => `${fmt(b.taxable)} x ${b.ratePct}%  =  ${fmt(b.tax)}`);
     return rows.length > 1 ? rows.join("\n") + "\n=  " + fmt(total) : rows[0];
   };
-  const gstOutBreakdown = () => bandsBreakdown(d.report?.gstBands ?? [], d.report?.gstOutput);
+  const gstOutBreakdown = () => bandsBreakdown(d.report?.gstBands ?? [], d.report?.gstOutput, d.report?.gstUntyped);
   const gstInBreakdown = () => {
     const r = d.report;
     if (!r || r.gstInput == null) return undefined;
@@ -557,7 +566,7 @@ export default function PnlDashboard() {
     );
   };
   // Same arithmetic as the statement, applied to any comparison column.
-  const colGstOut = (c: any) => bandsBreakdown(c.gstBands ?? [], c.gstOutput);
+  const colGstOut = (c: any) => bandsBreakdown(c.gstBands ?? [], c.gstOutput, c.gstUntyped);
   const colGstIn = (c: any) =>
     c.gstInput == null
       ? undefined
