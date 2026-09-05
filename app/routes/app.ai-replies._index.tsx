@@ -30,7 +30,7 @@ import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { aiReplyStats, recentAiReplyActivity, skipLabel } from "../utils/ai-reply-stats.server";
-import { DailyTrend } from "../components/DailyTrend";
+import { SplitTrend } from "../components/SplitTrend";
 import { Stat, RankedList, Split, ago, nfmt } from "../components/Stats";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -269,9 +269,9 @@ export default function AiRepliesActivityPage() {
 
         <Card>
           <BlockStack gap="300">
-            <Text as="h2" variant="headingMd">Replies sent per day</Text>
+            <Text as="h2" variant="headingMd">Bot and team, day by day</Text>
             <div style={dim}>
-              <DailyTrend points={s.days} noun="replies" />
+              <SplitTrend points={s.split} />
             </div>
           </BlockStack>
         </Card>
@@ -312,16 +312,6 @@ export default function AiRepliesActivityPage() {
                 A shopper who asked for a person keeps the bot out until they come back. An
                 escalation the bot chose expires on its own.
               </Text>
-              {/* Handovers were not recorded until this shipped, and the old
-                  conversation rows they could have been rebuilt from are purged
-                  after 24 hours. A zero here must not read as "nobody was ever
-                  handed over". */}
-              {s.handedOver === 0 && s.answered > 0 && (
-                <Text as="p" variant="bodySm" tone="subdued">
-                  Handovers are recorded from the day this counter was added, so earlier ones are
-                  not included.
-                </Text>
-              )}
             </BlockStack>
           </Card>
 
@@ -372,6 +362,14 @@ export default function AiRepliesActivityPage() {
               {/* Said plainly rather than filled in with a plausible number. Once
                   a chat is assigned, your team answers inside Interakt or
                   Instagram, and none of that comes back to this app. */}
+              {s.handedOver === 0 && s.answered > 0 ? (
+                <Banner tone="info">
+                  <Text as="p" variant="bodySm">
+                    Handovers are only counted from the day this was added, so this split reads
+                    100% until the next one happens. It is not yet a real measurement.
+                  </Text>
+                </Banner>
+              ) : null}
               <Text as="p" variant="bodySm" tone="subdued">
                 A customer counts as finished by the bot unless the chat was handed to a person.
                 Your team's own reply time is not shown: that happens in Interakt or Instagram,

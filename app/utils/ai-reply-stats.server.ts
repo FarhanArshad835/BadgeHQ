@@ -27,6 +27,10 @@ export function skipLabel(reason: string): string {
 
 export type AiReplyStats = {
   days: Array<{ day: string; adds: number }>; // "adds" = replies sent, to match DailyTrend
+  // Bot vs team per day. Separate from `days` because this is a two-series
+  // comparison, not a volume trend: what matters is the SHARE the bot carried,
+  // and whether it is drifting.
+  split: Array<{ day: string; bot: number; human: number }>;
   received: number;
   answered: number;
   failed: number;
@@ -88,13 +92,17 @@ export async function aiReplyStats(
     // one week of shoppers was the bug that made this card unreadable.
     prisma.handover.findMany({
       where: { shop, createdAt: window },
-      select: { channel: true, customerId: true, reason: true },
+      select: { channel: true, customerId: true, reason: true, createdAt: true },
     }),
   ]);
 
   const byDay = new Map<string, number>();
+  // Handovers per day, so the split can be plotted rather than only totalled.
+  const handoverByDay = new Map<string, number>();
   for (let t = Date.parse(`${fromDay}T00:00:00Z`); t <= Date.parse(`${toDay}T00:00:00Z`); t += DAY_MS) {
-    byDay.set(new Date(t).toISOString().slice(0, 10), 0);
+    const day = new Date(t).toISOString().slice(0, 10);
+    byDay.set(day, 0);
+    handoverByDay.set(day, 0);
   }
 
   const shoppers = new Set<string>();
@@ -143,6 +151,11 @@ export async function aiReplyStats(
     if (handedToHuman.has(id)) handledByHuman++;
   }
 
+  for (const h of handovers) {
+    const day = new Date(h.createdAt.getTime() + IST_OFFSET_MS).toISOString().slice(0, 10);
+    if (handoverByDay.has(day)) handoverByDay.set(day, (handoverByDay.get(day) ?? 0) + 1);
+  }
+
   const escalatedByBot = handovers.filter((h) => h.reason === "escalated").length;
   const askedForHuman = handovers.filter((h) => h.reason === "asked").length;
 
@@ -165,6 +178,11 @@ export async function aiReplyStats(
 
   return {
     days: Array.from(byDay.entries()).map(([day, adds]) => ({ day, adds })),
+    split: Array.from(byDay.entries()).map(([day, bot]) => ({
+      day,
+      bot,
+      human: handoverByDay.get(day) ?? 0,
+    })),
     received: waJobs.length + igJobs.length + skipped,
     answered,
     failed,
