@@ -31,7 +31,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { aiReplyStats, recentAiReplyActivity, skipLabel } from "../utils/ai-reply-stats.server";
 import { DailyTrend } from "../components/DailyTrend";
-import { Stat, RankedList, ago, nfmt } from "../components/Stats";
+import { Stat, RankedList, Split, ago, nfmt } from "../components/Stats";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
@@ -245,16 +245,20 @@ export default function AiRepliesActivityPage() {
               value={`${s.answerRate}%`}
               sub={s.failed > 0 ? `${nfmt(s.failed)} failed` : "Of messages the bot took on"}
             />
-            <Stat label="Shoppers helped" value={nfmt(s.shoppers)} />
             <Stat
-              label="Not answered"
-              value={nfmt(s.skipped)}
-              sub={s.pending > 0 ? `${nfmt(s.pending)} still in the queue` : "See reasons below"}
+              label="Handled by the bot"
+              value={nfmt(s.handledByAi)}
+              sub={`${nfmt(s.shoppers)} shoppers in total`}
             />
             <Stat
-              label="Waiting on a human"
-              value={nfmt(s.handedOver)}
-              sub="Conversations the bot has stepped out of"
+              label="Handled by a person"
+              value={nfmt(s.handledByHuman)}
+              sub={`${nfmt(s.messagesToHuman)} messages reached your team`}
+            />
+            <Stat
+              label="Bot reply time"
+              value={s.medianReplySeconds > 0 ? `${s.medianReplySeconds}s` : "-"}
+              sub="Median, message in to reply out"
             />
           </InlineGrid>
         </div>
@@ -269,23 +273,23 @@ export default function AiRepliesActivityPage() {
         </Card>
 
         <InlineGrid columns={{ xs: 1, md: 2 }} gap="300">
-          <RankedList
-            title="Why messages went unanswered"
-            items={d.topSkips}
-            empty="Every message got a reply."
-          />
-
           <Card>
             <BlockStack gap="300">
-              <Text as="h2" variant="headingMd">Where the replies went</Text>
+              <Text as="h2" variant="headingMd">Where conversations go next</Text>
               <BlockStack gap="200">
                 <InlineStack align="space-between" blockAlign="center">
-                  <Text as="span">WhatsApp</Text>
-                  <Text as="span" fontWeight="semibold">{nfmt(s.waAnswered)}</Text>
+                  <Text as="span">Shopper asked for a person</Text>
+                  <Text as="span" fontWeight="semibold">{nfmt(s.askedForHuman)}</Text>
                 </InlineStack>
                 <InlineStack align="space-between" blockAlign="center">
-                  <Text as="span">Instagram</Text>
-                  <Text as="span" fontWeight="semibold">{nfmt(s.igAnswered)}</Text>
+                  <Text as="span">Bot escalated on its own</Text>
+                  <Text as="span" fontWeight="semibold">{nfmt(s.escalatedByBot)}</Text>
+                </InlineStack>
+                <InlineStack align="space-between" blockAlign="center">
+                  <Text as="span">WhatsApp / Instagram replies</Text>
+                  <Text as="span" fontWeight="semibold">
+                    {nfmt(s.waAnswered)} / {nfmt(s.igAnswered)}
+                  </Text>
                 </InlineStack>
               </BlockStack>
               <InlineStack gap="200">
@@ -296,6 +300,54 @@ export default function AiRepliesActivityPage() {
                   {d.waReady ? "WhatsApp on" : "WhatsApp off"}
                 </Badge>
               </InlineStack>
+              <Text as="p" variant="bodySm" tone="subdued">
+                A shopper who asked for a person keeps the bot out until they come back. An
+                escalation the bot chose expires on its own.
+              </Text>
+            </BlockStack>
+          </Card>
+
+          <RankedList
+            title="Why messages went unanswered"
+            items={d.topSkips}
+            empty="Every message got a reply."
+          />
+
+          <Card>
+            <BlockStack gap="300">
+              <Text as="h2" variant="headingMd">Bot and team</Text>
+              <Split
+                label="Shoppers dealt with"
+                bot={s.handledByAi}
+                human={s.handledByHuman}
+              />
+              <Split label="Messages" bot={s.answered} human={s.messagesToHuman} />
+              <Box paddingBlockStart="100">
+                <BlockStack gap="150">
+                  <InlineStack align="space-between" blockAlign="center">
+                    <Text as="span">Bot median reply time</Text>
+                    <Text as="span" fontWeight="semibold">
+                      {s.medianReplySeconds > 0 ? `${s.medianReplySeconds}s` : "-"}
+                    </Text>
+                  </InlineStack>
+                  <InlineStack align="space-between" blockAlign="center">
+                    <Text as="span">Replied within a minute</Text>
+                    <Text as="span" fontWeight="semibold">
+                      {s.answered > 0
+                        ? `${Math.round((s.repliesUnderAMinute / s.answered) * 100)}%`
+                        : "-"}
+                    </Text>
+                  </InlineStack>
+                </BlockStack>
+              </Box>
+              {/* Said plainly rather than filled in with a plausible number. Once
+                  a chat is assigned, your team answers inside Interakt or
+                  Instagram, and none of that comes back to this app. */}
+              <Text as="p" variant="bodySm" tone="subdued">
+                Your team's reply time is not shown because it happens in Interakt or Instagram,
+                which does not report back here. Only the share of work each side took on can be
+                compared.
+              </Text>
             </BlockStack>
           </Card>
         </InlineGrid>

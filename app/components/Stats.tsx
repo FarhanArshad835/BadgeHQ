@@ -64,6 +64,56 @@ export function RankedList({
   );
 }
 
+/**
+ * How one total divides between two handlers, as a bar plus both figures.
+ *
+ * A bar rather than two numbers because the SHARE is the question ("is the bot
+ * carrying this or are we?"), and a share is read faster from a length than from
+ * mental arithmetic. Both raw counts stay visible so nothing is encoded only in
+ * the bar, and the labels carry the identity so it never rests on colour alone.
+ */
+export function Split({
+  label,
+  bot,
+  human,
+}: {
+  label: string;
+  bot: number;
+  human: number;
+}) {
+  const total = bot + human;
+  const botPct = total > 0 ? (bot / total) * 100 : 0;
+
+  return (
+    <BlockStack gap="150">
+      <InlineStack align="space-between" blockAlign="center">
+        <Text as="span">{label}</Text>
+        <Text as="span" tone="subdued" variant="bodySm">
+          {total > 0 ? `${Math.round(botPct)}% bot` : "Nothing yet"}
+        </Text>
+      </InlineStack>
+      <div
+        style={{
+          display: "flex",
+          height: 8,
+          borderRadius: 4,
+          overflow: "hidden",
+          background: "#e3e3e0",
+        }}
+      >
+        {/* A 2px surface gap keeps the two segments from reading as one bar. */}
+        <div style={{ width: `${botPct}%`, background: "#2a78d6" }} />
+        {bot > 0 && human > 0 && <div style={{ width: 2, background: "#fcfcfb" }} />}
+        <div style={{ flex: 1, background: "#8a8a85" }} />
+      </div>
+      <InlineStack align="space-between" blockAlign="center">
+        <Text as="span" variant="bodySm" tone="subdued">Bot {nfmt(bot)}</Text>
+        <Text as="span" variant="bodySm" tone="subdued">Team {nfmt(human)}</Text>
+      </InlineStack>
+    </BlockStack>
+  );
+}
+
 /** "3 minutes ago" reads faster than a timestamp in a live activity feed. */
 export function ago(iso: string): string {
   const secs = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));

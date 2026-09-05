@@ -36,7 +36,23 @@ export type AiReplyStats = {
   answerRate: number; // 0..100, of messages the bot could have answered
   waAnswered: number;
   igAnswered: number;
-  handedOver: number; // conversations currently muted or opted out
+  // How the shopper base splits by who dealt with them. Every conversation in
+  // the range is in exactly one of these two, so they sum to `shoppers`.
+  handledByAi: number;
+  handledByHuman: number;
+  // Everyone a human currently owns, whenever they were handed over. Current
+  // state, so deliberately not limited to the range.
+  handedOver: number;
+  escalatedByBot: number; // the assistant decided it needed a person
+  askedForHuman: number; // the shopper asked, and the bot stays out until they return
+  // Bot speed, from the message landing to the reply going out. Median rather
+  // than mean: one 40s LLM timeout would drag a mean into fiction.
+  medianReplySeconds: number;
+  repliesUnderAMinute: number;
+  // Messages a human had to deal with. There is NO matching time figure: once a
+  // chat is assigned, the human answers inside Interakt or Instagram and nothing
+  // comes back to this database, so their speed is genuinely unmeasurable here.
+  messagesToHuman: number;
   topSkips: Array<{ reason: string; count: number }>;
 };
 
@@ -52,11 +68,11 @@ export async function aiReplyStats(
   const [waJobs, igJobs, waSkips, igSkips, waMuted, igMuted] = await Promise.all([
     prisma.whatsAppReplyJob.findMany({
       where: { shop, createdAt: window },
-      select: { createdAt: true, status: true, phone: true },
+      select: { createdAt: true, updatedAt: true, status: true, phone: true },
     }),
     prisma.socialReplyJob.findMany({
       where: { shop, createdAt: window },
-      select: { createdAt: true, status: true, customerId: true },
+      select: { createdAt: true, updatedAt: true, status: true, customerId: true },
     }),
     prisma.whatsAppSkip.findMany({
       where: { shop, createdAt: window },
@@ -68,11 +84,17 @@ export async function aiReplyStats(
     }),
     // Handovers are a CURRENT state, not a windowed one: a shopper still waiting
     // on a human is who the merchant needs to see, whenever they were muted.
-    prisma.whatsAppConversation.count({
+    //
+    // mutedUntil separates the two reasons. An automatic escalation sets an
+    // expiry; an explicit "stop" from the shopper leaves it null, because no
+    // shopper knows to type "start" and the bot must not barge back in.
+    prisma.whatsAppConversation.findMany({
       where: { shop, OR: [{ optedOut: true }, { mutedUntil: { gt: new Date() } }] },
+      select: { phone: true, mutedUntil: true },
     }),
-    prisma.socialConversation.count({
+    prisma.socialConversation.findMany({
       where: { shop, OR: [{ optedOut: true }, { mutedUntil: { gt: new Date() } }] },
+      select: { customerId: true, mutedUntil: true },
     }),
   ]);
 
@@ -88,14 +110,18 @@ export async function aiReplyStats(
   let waAnswered = 0;
   let igAnswered = 0;
 
+  // Seconds from the message arriving to the reply being sent, for done jobs.
+  const latencies: number[] = [];
+
   const tally = (
-    rows: Array<{ createdAt: Date; status: string }>,
+    rows: Array<{ createdAt: Date; updatedAt: Date; status: string }>,
     onDone: () => void,
   ) => {
     for (const r of rows) {
       if (r.status === "done") {
         answered++;
         onDone();
+        latencies.push((r.updatedAt.getTime() - r.createdAt.getTime()) / 1000);
         const day = new Date(r.createdAt.getTime() + IST_OFFSET_MS).toISOString().slice(0, 10);
         if (byDay.has(day)) byDay.set(day, (byDay.get(day) ?? 0) + 1);
       } else if (r.status === "failed") {
@@ -111,6 +137,32 @@ export async function aiReplyStats(
   for (const j of igJobs) shoppers.add(`ig:${j.customerId}`);
   tally(waJobs, () => waAnswered++);
   tally(igJobs, () => igAnswered++);
+
+  // A shopper counts as human-handled if a person currently owns their thread,
+  // or if the bot never managed to answer them at all in this range. Anything
+  // else the assistant dealt with end to end.
+  const humanOwned = new Set<string>([
+    ...waMuted.map((c) => `wa:${c.phone}`),
+    ...igMuted.map((c) => `ig:${c.customerId}`),
+  ]);
+  const answeredShoppers = new Set<string>([
+    ...waJobs.filter((j) => j.status === "done").map((j) => `wa:${j.phone}`),
+    ...igJobs.filter((j) => j.status === "done").map((j) => `ig:${j.customerId}`),
+  ]);
+  let handledByAi = 0;
+  for (const id of shoppers) {
+    if (!humanOwned.has(id) && answeredShoppers.has(id)) handledByAi++;
+  }
+
+  // An expiring mute was the bot's own call; a permanent one was the shopper
+  // asking for a person.
+  const muted = [...waMuted, ...igMuted];
+  const escalatedByBot = muted.filter((c) => c.mutedUntil !== null).length;
+
+  latencies.sort((a, b) => a - b);
+  const medianReplySeconds =
+    latencies.length > 0 ? Math.round(latencies[Math.floor(latencies.length / 2)]) : 0;
+  const repliesUnderAMinute = latencies.filter((l) => l <= 60).length;
 
   const skipCounts = new Map<string, number>();
   for (const s of [...waSkips, ...igSkips]) {
@@ -135,7 +187,16 @@ export async function aiReplyStats(
     answerRate,
     waAnswered,
     igAnswered,
-    handedOver: waMuted + igMuted,
+    handledByAi,
+    handledByHuman: shoppers.size - handledByAi,
+    handedOver: muted.length,
+    escalatedByBot,
+    askedForHuman: muted.length - escalatedByBot,
+    medianReplySeconds,
+    repliesUnderAMinute,
+    // Everything the bot did not resolve is work that reached a person: the
+    // failures, plus every message it deliberately handed over or skipped.
+    messagesToHuman: failed + skipped,
     topSkips: Array.from(skipCounts.entries())
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5)
