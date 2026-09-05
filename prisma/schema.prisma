@@ -193,6 +193,16 @@ model WishlistSettings {
   productPlacement String   @default("below-atc") // below-atc | above-atc
   showHeader       Boolean  @default(true)
   iconColor        String   @default("#e74c3c")
+  // Meta Conversions API: forwards each wishlist add as an AddToWishlist event
+  // so the shopper can be retargeted with the product they saved.
+  capiEnabled      Boolean  @default(false)
+  capiDatasetId    String   @default("") // Pixel / Dataset id — NOT a secret
+  capiAccessToken  String   @default("") // server-side only, never sent to the storefront
+  // Hashed email materially improves Meta's match rate, but email is Shopify
+  // Protected Customer Data Level 2 and this app has Level 1 only (request
+  // #106713). Requesting a protected field makes Shopify reject the WHOLE query,
+  // so this stays false until Level 2 is approved — then flip it, no rework.
+  capiSendEmail    Boolean  @default(false)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 }
@@ -206,6 +216,30 @@ model Wishlist {
   updatedAt  DateTime @updatedAt
 
   @@unique([shop, customerId])
+}
+
+/// One row per wishlist add/remove. The Wishlist row above is a destructive
+/// upsert holding only current state, so it can't answer "when was this saved"
+/// (the CSV export) or "has this been sent to Meta" (delivery + retry).
+///
+/// customerId is "" for guests: they never reach wishlist-sync, but they DO
+/// reach the public event endpoint, and they're most of the wishlist traffic.
+model WishlistEvent {
+  id         String   @id @default(cuid())
+  shop       String
+  customerId String   @default("") // "" = guest
+  handle     String
+  productId  String   @default("")
+  action     String   @default("add") // add | remove
+  // Meta delivery. "skipped" = CAPI off or unconfigured for this shop, which is
+  // not a failure and must not be retried.
+  metaStatus String   @default("pending") // pending | sent | failed | skipped
+  metaError  String   @default("")
+  attempts   Int      @default(0)
+  createdAt  DateTime @default(now())
+
+  @@index([shop, createdAt])
+  @@index([shop, metaStatus])
 }
 
 model BackInStockSettings {

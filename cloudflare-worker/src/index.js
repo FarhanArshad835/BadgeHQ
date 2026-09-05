@@ -183,6 +183,32 @@ export default {
       return new Response(upstream.body, { status: upstream.status, headers });
     }
 
+    if (url.pathname === "/api/wishlist-event") {
+      // Meta matches a guest partly on IP and user agent, so unlike the other
+      // passthroughs these MUST survive the hop. Cloudflare gives us the real
+      // client IP in CF-Connecting-IP; without forwarding it the origin would
+      // only ever see the worker's own address and every shopper would look the
+      // same to Meta.
+      const upstream = await fetch(`${ORIGIN}/api/wishlist-event`, {
+        method: request.method,
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          "X-Forwarded-For":
+            request.headers.get("CF-Connecting-IP") || request.headers.get("X-Forwarded-For") || "",
+          "User-Agent": request.headers.get("User-Agent") || "",
+        },
+        body: request.method === "POST" ? await request.text() : undefined,
+      });
+      const headers = new Headers();
+      headers.set("Content-Type", "application/json");
+      headers.set("Cache-Control", "no-store");
+      headers.set("Access-Control-Allow-Origin", "*");
+      headers.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+      headers.set("Access-Control-Allow-Headers", "Content-Type");
+      return new Response(upstream.body, { status: upstream.status, headers });
+    }
+
     // Cache-bust hook: the Remix app calls this after every admin save so
     // storefronts fetch the new config immediately instead of waiting out
     // the edge TTL. Authenticated with the BUMP_SECRET worker secret.
@@ -223,7 +249,7 @@ export default {
           widget_hash: WIDGET_HASH,
           widget_built_at: WIDGET_BUILT_AT,
           widget_bytes: WIDGET_SOURCE.length,
-          routes: ["/widget.js", "/health", "/api/widgets", "/api/products/inventory", "/api/delivery-edd", "/api/back-in-stock", "/api/ai-reply", "/internal/bump"],
+          routes: ["/widget.js", "/health", "/api/widgets", "/api/products/inventory", "/api/delivery-edd", "/api/back-in-stock", "/api/wishlist-event", "/api/ai-reply", "/internal/bump"],
           origin: ORIGIN,
           cache_ttl_by_path_seconds: CACHE_TTL_BY_PATH,
         }),

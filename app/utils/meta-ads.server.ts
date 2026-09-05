@@ -14,7 +14,9 @@
  */
 import { toMinor } from "./pnl.server";
 
-const GRAPH_VERSION = "v21.0";
+// Exported so the Conversions API sender pins to the SAME version — two Graph
+// callers drifting apart is a silent source of "works here, not there".
+export const GRAPH_VERSION = "v21.0";
 
 // Pinned attribution windows — asserted here so a code change can't silently
 // revert to the API default (the spec's 34%-CPP-error guard).

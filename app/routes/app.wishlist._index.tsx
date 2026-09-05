@@ -12,11 +12,15 @@ import {
   Select,
   Checkbox,
   Banner,
+  Button,
+  Badge,
+  InlineStack,
 } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { bumpConfigVersion } from "../utils/config-version.server";
+import { sendWishlistEvent } from "../utils/meta-capi.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -31,12 +35,44 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     productPlacement: settings?.productPlacement ?? "below-atc",
     showHeader: settings?.showHeader ?? true,
     iconColor: settings?.iconColor ?? "#e74c3c",
+    // Meta Conversions API. The dataset id is public (it identifies the pixel),
+    // but the access token NEVER leaves the server — only whether one is saved,
+    // plus a last-4 preview so the merchant can tell which token is in place.
+    capiEnabled: settings?.capiEnabled ?? false,
+    capiDatasetId: settings?.capiDatasetId ?? "",
+    hasCapiToken: Boolean(settings?.capiAccessToken),
+    capiTokenPreview: settings?.capiAccessToken ? settings.capiAccessToken.slice(-4) : "",
+    capiSendEmail: settings?.capiSendEmail ?? false,
+    eventCount: await prisma.wishlistEvent.count({ where: { shop: session.shop } }),
   });
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const formData = await request.formData();
+
+  // "Send test event" uses the SAVED token, so the merchant doesn't have to
+  // paste a secret again just to check the connection works.
+  if (formData.get("intent") === "test-capi") {
+    const s = await prisma.wishlistSettings.findUnique({ where: { shop: session.shop } });
+    if (!s?.capiDatasetId || !s?.capiAccessToken) {
+      return json({ error: "Save a Meta dataset id and access token first." }, { status: 400 });
+    }
+    const result = await sendWishlistEvent({
+      datasetId: s.capiDatasetId,
+      accessToken: s.capiAccessToken,
+      handle: "badgehq-test-product",
+      // A synthetic identifier: enough for Meta to accept the event without
+      // attributing it to a real shopper.
+      customerId: `badgehq-test-${session.shop}`,
+      eventId: `badgehq-test-${Date.now()}`,
+      testEventCode: String(formData.get("testEventCode") || "").trim() || undefined,
+    });
+    return result.ok
+      ? json({ testOk: `Meta accepted the test event (${result.eventsReceived} received). Check Events Manager > Test Events.` })
+      : json({ error: result.reason }, { status: 400 });
+  }
+
   const data = JSON.parse(formData.get("data") as string);
 
   const iconColor = String(data.iconColor || "").trim();
@@ -55,11 +91,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       productPlacement,
       showHeader: Boolean(data.showHeader),
       iconColor,
+      capiEnabled: Boolean(data.capiEnabled),
+      capiDatasetId: String(data.capiDatasetId || "").trim().replace(/\D/g, ""),
+      capiSendEmail: Boolean(data.capiSendEmail),
     };
+    // A blank token field means "keep the saved one" — the house convention, so
+    // saving an unrelated setting can't silently wipe the credential.
+    const newToken = String(data.capiAccessToken || "").trim();
     await prisma.wishlistSettings.upsert({
       where: { shop: session.shop },
-      create: { shop: session.shop, ...values },
-      update: values,
+      create: { shop: session.shop, ...values, ...(newToken ? { capiAccessToken: newToken } : {}) },
+      update: { ...values, ...(newToken ? { capiAccessToken: newToken } : {}) },
     });
     await bumpConfigVersion(session.shop);
     return json({ success: true });
@@ -70,7 +112,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
 export default function WishlistSettingsPage() {
   const loaderData = useLoaderData<typeof loader>();
-  const actionData = useActionData<{ success?: boolean; error?: string }>();
+  const actionData = useActionData<{ success?: boolean; error?: string; testOk?: string }>();
   const submit = useSubmit();
 
   const initial = {
@@ -81,6 +123,9 @@ export default function WishlistSettingsPage() {
     productPlacement: loaderData.productPlacement,
     showHeader: loaderData.showHeader,
     iconColor: loaderData.iconColor,
+    capiEnabled: loaderData.capiEnabled,
+    capiDatasetId: loaderData.capiDatasetId,
+    capiSendEmail: loaderData.capiSendEmail,
   };
 
   const [enabled, setEnabled] = useState(initial.enabled);
@@ -90,6 +135,12 @@ export default function WishlistSettingsPage() {
   const [productPlacement, setProductPlacement] = useState(initial.productPlacement);
   const [showHeader, setShowHeader] = useState(initial.showHeader);
   const [iconColor, setIconColor] = useState(initial.iconColor);
+  const [capiEnabled, setCapiEnabled] = useState(initial.capiEnabled);
+  const [capiDatasetId, setCapiDatasetId] = useState(initial.capiDatasetId);
+  // Starts empty: the saved token is never sent to the browser, so an empty
+  // field means "unchanged" rather than "cleared".
+  const [capiAccessToken, setCapiAccessToken] = useState("");
+  const [capiSendEmail, setCapiSendEmail] = useState(initial.capiSendEmail);
   const [showSuccess, setShowSuccess] = useState(false);
 
   const isDirty =
@@ -99,7 +150,11 @@ export default function WishlistSettingsPage() {
     showOnProduct !== initial.showOnProduct ||
     productPlacement !== initial.productPlacement ||
     showHeader !== initial.showHeader ||
-    iconColor !== initial.iconColor;
+    iconColor !== initial.iconColor ||
+    capiEnabled !== initial.capiEnabled ||
+    capiDatasetId !== initial.capiDatasetId ||
+    capiSendEmail !== initial.capiSendEmail ||
+    capiAccessToken.length > 0;
 
   useEffect(() => {
     if (actionData?.success) {
@@ -117,6 +172,10 @@ export default function WishlistSettingsPage() {
     setProductPlacement(initial.productPlacement);
     setShowHeader(initial.showHeader);
     setIconColor(initial.iconColor);
+    setCapiEnabled(initial.capiEnabled);
+    setCapiDatasetId(initial.capiDatasetId);
+    setCapiAccessToken("");
+    setCapiSendEmail(initial.capiSendEmail);
   };
 
   const handleSave = () => {
@@ -130,10 +189,18 @@ export default function WishlistSettingsPage() {
           productPlacement,
           showHeader,
           iconColor,
+          capiEnabled,
+          capiDatasetId,
+          capiAccessToken,
+          capiSendEmail,
         }),
       },
       { method: "POST" },
     );
+  };
+
+  const handleTestCapi = () => {
+    submit({ intent: "test-capi" }, { method: "POST" });
   };
 
   return (
@@ -149,7 +216,7 @@ export default function WishlistSettingsPage() {
             {actionData?.error && <Banner tone="critical">{actionData.error}</Banner>}
 
             <Banner tone="info">
-              Everything appears automatically — hearts on product cards, a wishlist
+              Everything appears automatically: hearts on product cards, a wishlist
               button on product pages, and a header icon that opens the wishlist page at
               /apps/badgehq/wishlist. Guests keep their wishlist on their device;
               logged-in customers sync across devices. Changes reach your storefront in
@@ -215,6 +282,86 @@ export default function WishlistSettingsPage() {
                   checked={showHeader}
                   onChange={setShowHeader}
                 />
+              </BlockStack>
+            </Card>
+
+            <Card>
+              <BlockStack gap="300">
+                <InlineStack align="space-between" blockAlign="center">
+                  <Text as="h2" variant="headingMd">Send wishlists to Meta</Text>
+                  <Badge tone={loaderData.capiEnabled ? "success" : undefined}>
+                    {loaderData.capiEnabled ? "On" : "Off"}
+                  </Badge>
+                </InlineStack>
+                <Text as="p" tone="subdued">
+                  Every saved product is sent to Meta as an <b>AddToWishlist</b> event, so Facebook and
+                  Instagram can retarget that shopper with the exact product they saved. Sent from our
+                  server, so ad-blockers do not stop it. Works for guests as well as logged-in customers.
+                </Text>
+
+                <Checkbox
+                  label="Send wishlist events to Meta"
+                  checked={capiEnabled}
+                  onChange={setCapiEnabled}
+                />
+                <TextField
+                  label="Dataset (Pixel) ID"
+                  value={capiDatasetId}
+                  onChange={setCapiDatasetId}
+                  autoComplete="off"
+                  placeholder="1234567890123456"
+                  helpText="Events Manager → your dataset → Settings. Digits only."
+                />
+                <TextField
+                  label="Conversions API access token"
+                  type="password"
+                  value={capiAccessToken}
+                  onChange={setCapiAccessToken}
+                  autoComplete="off"
+                  placeholder={
+                    loaderData.hasCapiToken
+                      ? `Saved token ending in ${loaderData.capiTokenPreview}. Enter a new one to replace it.`
+                      : "Paste the token generated in Events Manager"
+                  }
+                  helpText="Events Manager → Settings → Generate access token. Stored securely, server-side only. Never sent to your storefront."
+                />
+
+                <InlineStack gap="300" blockAlign="center">
+                  <Button onClick={handleTestCapi} disabled={!loaderData.hasCapiToken}>
+                    Send test event
+                  </Button>
+                  <Text as="span" tone="subdued">
+                    Then check Events Manager → Test Events.
+                  </Text>
+                </InlineStack>
+
+                {actionData?.testOk && <Banner tone="success">{actionData.testOk}</Banner>}
+
+                {/* Email is Shopify Protected Customer Data Level 2. Requesting it
+                    without approval makes Shopify reject the whole query, so this
+                    stays off until approval lands — then it's one checkbox. */}
+                <Checkbox
+                  label="Also send hashed customer email (needs Shopify approval)"
+                  checked={capiSendEmail}
+                  onChange={setCapiSendEmail}
+                  helpText="Improves Meta's match rate. Requires Protected Customer Data Level 2 approval from Shopify. Leave this off until that is granted, or events will fail."
+                />
+              </BlockStack>
+            </Card>
+
+            <Card>
+              <BlockStack gap="300">
+                <Text as="h2" variant="headingMd">Export wishlist data</Text>
+                <Text as="p" tone="subdued">
+                  {loaderData.eventCount > 0
+                    ? `${loaderData.eventCount.toLocaleString()} wishlist ${loaderData.eventCount === 1 ? "action" : "actions"} recorded: which customer saved which product, and when.`
+                    : "No wishlist activity recorded yet. Saves are recorded from now on; anything wishlisted before today isn't included."}
+                </Text>
+                <InlineStack>
+                  <Button url="/app/wishlist/export" download disabled={loaderData.eventCount === 0}>
+                    Download CSV
+                  </Button>
+                </InlineStack>
               </BlockStack>
             </Card>
           </BlockStack>
