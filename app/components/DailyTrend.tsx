@@ -31,6 +31,19 @@ export function DailyTrend({ points, noun = "saves" }: { points: Point[]; noun?:
   const [hover, setHover] = useState<number | null>(null);
 
   if (!points.length) return null;
+  // A single day is a chart of one number: the line has no slope to read, the
+  // area collapses, and both end-labels land on the same spot. The stat tiles
+  // above already say it better, so say it plainly instead of plotting it.
+  if (points.length === 1) {
+    return (
+      <div style={{ padding: "24px 0", textAlign: "center" }}>
+        <div style={{ fontSize: 32, fontWeight: 650, color: "#1a1a19" }}>{points[0].adds}</div>
+        <div style={{ fontSize: 13, color: INK_MUTED }}>
+          {noun} on {shortDay(points[0].day)}
+        </div>
+      </div>
+    );
+  }
 
   const plotW = W - PAD.left - PAD.right;
   const plotH = H - PAD.top - PAD.bottom;

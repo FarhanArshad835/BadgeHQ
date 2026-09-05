@@ -31,7 +31,6 @@ import { authenticate } from "../shopify.server";
 import { wishlistStats, recentWishlistActivity } from "../utils/wishlist-stats.server";
 import { DailyTrend } from "../components/DailyTrend";
 
-const WINDOWS: Record<string, number> = { "7d": 7, "30d": 30, "90d": 90 };
 const DAY_MS = 24 * 60 * 60 * 1000;
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
@@ -43,6 +42,30 @@ function istToday(): string {
 function addDays(day: string, n: number): string {
   return new Date(Date.parse(`${day}T00:00:00Z`) + n * DAY_MS).toISOString().slice(0, 10);
 }
+
+/**
+ * The presets, each resolved to an explicit IST day range.
+ *
+ * Deliberately not a map of day COUNTS: "yesterday" is the one preset that does
+ * not end today, and expressing it as a count forces a special case at every
+ * call site. Returning both ends keeps the loader a single lookup.
+ */
+const WINDOWS: Record<string, (today: string) => { from: string; to: string }> = {
+  today: (t) => ({ from: t, to: t }),
+  yesterday: (t) => ({ from: addDays(t, -1), to: addDays(t, -1) }),
+  "7d": (t) => ({ from: addDays(t, -6), to: t }),
+  "30d": (t) => ({ from: addDays(t, -29), to: t }),
+  "90d": (t) => ({ from: addDays(t, -89), to: t }),
+};
+
+const WINDOW_OPTIONS = [
+  { label: "Today", value: "today" },
+  { label: "Yesterday", value: "yesterday" },
+  { label: "Last 7 days", value: "7d" },
+  { label: "Last 30 days", value: "30d" },
+  { label: "Last 90 days", value: "90d" },
+  { label: "Custom range", value: "custom" },
+];
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -57,10 +80,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const windowKey = custom ? "custom" : WINDOWS[requested] ? requested : "7d";
 
   const today = istToday();
-  const fromDay = custom ? from : addDays(today, -(WINDOWS[windowKey] - 1));
+  const preset = custom ? null : WINDOWS[windowKey](today);
+  const fromDay = preset ? preset.from : from;
   // Never let a custom range run past today: future days would plot as a flat
   // zero tail and read as a collapse in activity.
-  const toDay = custom ? (to > today ? today : to) : today;
+  const toDay = preset ? preset.to : to > today ? today : to;
 
   const [stats, activity] = await Promise.all([
     wishlistStats(session.shop, fromDay, toDay),
@@ -142,12 +166,7 @@ export default function WishlistActivityPage() {
               label="Period"
               labelHidden
               disabled={loading}
-              options={[
-                { label: "Last 7 days", value: "7d" },
-                { label: "Last 30 days", value: "30d" },
-                { label: "Last 90 days", value: "90d" },
-                { label: "Custom range", value: "custom" },
-              ]}
+              options={WINDOW_OPTIONS}
               value={d.windowKey}
               onChange={(v) => {
                 if (v === "custom") {
