@@ -365,8 +365,9 @@ export default function AiRepliesActivityPage() {
               {s.handedOver === 0 && s.answered > 0 ? (
                 <Banner tone="info">
                   <Text as="p" variant="bodySm">
-                    Handovers are only counted from the day this was added, so this split reads
-                    100% until the next one happens. It is not yet a real measurement.
+                    Nothing was handed to a person in this period. If that looks wrong, check that
+                    your team replies from the WhatsApp inbox after the bot steps out: a handover
+                    is only counted once the bot has stopped answering that thread.
                   </Text>
                 </Banner>
               ) : null}

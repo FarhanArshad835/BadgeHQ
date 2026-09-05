@@ -78,11 +78,11 @@ export async function aiReplyStats(
     }),
     prisma.whatsAppSkip.findMany({
       where: { shop, createdAt: window },
-      select: { reason: true },
+      select: { reason: true, phone: true, createdAt: true },
     }),
     prisma.socialSkip.findMany({
       where: { shop, createdAt: window },
-      select: { reason: true },
+      select: { reason: true, customerId: true, createdAt: true },
     }),
     // Real handover EVENTS, so the split respects the date range.
     //
@@ -137,15 +137,26 @@ export async function aiReplyStats(
 
   for (const j of waJobs) shoppers.add(`wa:${j.phone}`);
   for (const j of igJobs) shoppers.add(`ig:${j.customerId}`);
+  // A shopper whose thread a person already owns never creates a reply job, so
+  // building this only from jobs made your team's customers invisible: they
+  // were missing from the denominator AND from the handed-over count, which is
+  // what pinned the split at 100% bot.
+  for (const k of waSkips) if (k.reason === "muted") shoppers.add(`wa:${k.phone}`);
+  for (const k of igSkips) if (k.reason === "muted") shoppers.add(`ig:${k.customerId}`);
   tally(waJobs, () => waAnswered++);
   tally(igJobs, () => igAnswered++);
 
   // A shopper was finished by the bot unless they were handed to a person. That
   // is the whole question this card exists to answer, so it is measured on the
   // handover event and nothing else.
-  const handedToHuman = new Set(
-    handovers.map((h) => `${h.channel === "whatsapp" ? "wa" : "ig"}:${h.customerId}`),
-  );
+  const handedToHuman = new Set([
+    ...handovers.map((h) => `${h.channel === "whatsapp" ? "wa" : "ig"}:${h.customerId}`),
+    // Same standing-in as the chart: a shopper who messaged while a person owned
+    // the thread was being handled by that person, whether or not a Handover row
+    // exists for the day it started.
+    ...waSkips.filter((k) => k.reason === "muted").map((k) => `wa:${k.phone}`),
+    ...igSkips.filter((k) => k.reason === "muted").map((k) => `ig:${k.customerId}`),
+  ]);
   let handledByHuman = 0;
   for (const id of shoppers) {
     if (handedToHuman.has(id)) handledByHuman++;
@@ -154,6 +165,30 @@ export async function aiReplyStats(
   for (const h of handovers) {
     const day = new Date(h.createdAt.getTime() + IST_OFFSET_MS).toISOString().slice(0, 10);
     if (handoverByDay.has(day)) handoverByDay.set(day, (handoverByDay.get(day) ?? 0) + 1);
+  }
+
+  // A "muted" skip is a message that arrived while a person owned the thread,
+  // so it marks a day on which your team was handling someone. Handover rows
+  // only exist from the day that table was added; these skips go back as far as
+  // the data does, and without them every earlier day plots as a flat zero that
+  // reads as "your team never touched a conversation".
+  //
+  // Counted per customer per day, not per message, to match the handover rows:
+  // one shopper sending six messages to a human is one conversation, not six.
+  const mutedByDay = new Map<string, Set<string>>();
+  for (const k of waSkips) {
+    if (k.reason !== "muted") continue;
+    const day = new Date(k.createdAt.getTime() + IST_OFFSET_MS).toISOString().slice(0, 10);
+    if (!handoverByDay.has(day)) continue;
+    if (!mutedByDay.has(day)) mutedByDay.set(day, new Set());
+    mutedByDay.get(day)!.add(`wa:${k.phone}`);
+  }
+  for (const k of igSkips) {
+    if (k.reason !== "muted") continue;
+    const day = new Date(k.createdAt.getTime() + IST_OFFSET_MS).toISOString().slice(0, 10);
+    if (!handoverByDay.has(day)) continue;
+    if (!mutedByDay.has(day)) mutedByDay.set(day, new Set());
+    mutedByDay.get(day)!.add(`ig:${k.customerId}`);
   }
 
   const escalatedByBot = handovers.filter((h) => h.reason === "escalated").length;
@@ -181,7 +216,10 @@ export async function aiReplyStats(
     split: Array.from(byDay.entries()).map(([day, bot]) => ({
       day,
       bot,
-      human: handoverByDay.get(day) ?? 0,
+      // Whichever source saw more that day. Recorded handovers win once they
+      // exist; before that, muted-message days stand in. Never summed: on a day
+      // with both they describe the same conversations.
+      human: Math.max(handoverByDay.get(day) ?? 0, mutedByDay.get(day)?.size ?? 0),
     })),
     received: waJobs.length + igJobs.length + skipped,
     answered,
@@ -194,7 +232,10 @@ export async function aiReplyStats(
     igAnswered,
     handledByAi: shoppers.size - handledByHuman,
     handledByHuman,
-    handedOver: handovers.length,
+    // Conversations a person took over, counted by customer so the two sources
+    // (handover rows and muted messages) cannot double-count the same thread.
+    // Same number as handledByHuman by construction.
+    handedOver: handledByHuman,
     escalatedByBot,
     askedForHuman,
     unresolvedHandovers: handovers.length - escalatedByBot - askedForHuman,

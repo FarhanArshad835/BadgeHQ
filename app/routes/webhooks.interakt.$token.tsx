@@ -42,6 +42,24 @@ export const config = { maxDuration: 120 };
 /** 200 with no body — the "received, nothing to do" response. */
 const ack = () => new Response(null, { status: 200 });
 
+/**
+ * Record a message the bot chose not to answer.
+ *
+ * These decisions all happen before a reply job exists, so without this they
+ * leave no trace and a merchant asking "why didn't it reply to her" has
+ * nothing to look at. Never throws: a logging failure must not cost a 200,
+ * which on this provider would spend one of the five allowed failures.
+ */
+async function noteSkip(shop: string, phone: string, reason: string, preview: string) {
+  try {
+    await prisma.whatsAppSkip.create({
+      data: { shop, phone, reason, preview: preview.slice(0, 120) },
+    });
+  } catch {
+    /* diagnostics only */
+  }
+}
+
 export const loader = async (_: LoaderFunctionArgs) =>
   new Response("Method not allowed", { status: 405 });
 
@@ -121,8 +139,13 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       return ack();
     }
 
-    // Muted: a human is handling this thread in Interakt's inbox.
-    if (isMuted(convo)) return ack();
+    // Muted: a human is handling this thread in Interakt's inbox. Recorded,
+    // because these are exactly the messages your team answered instead of the
+    // bot, and they are the only trace of that.
+    if (isMuted(convo)) {
+      await noteSkip(shop, phone, "muted", inbound.text);
+      return ack();
+    }
 
     // Rate limit per shopper. Enforced HERE rather than in the cron so a flood
     // never even creates rows.
@@ -130,6 +153,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     const count = windowExpired ? 0 : convo.windowCount;
     if (count >= RATE_LIMIT_PER_HOUR) {
       console.warn(`[interakt-webhook] rate limited ${shop} ${phone.slice(-4)}`);
+      await noteSkip(shop, phone, "rate-limited", inbound.text);
       return ack();
     }
 
