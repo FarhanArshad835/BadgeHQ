@@ -329,7 +329,7 @@ export default function WishlistSettingsPage() {
                     Send test event
                   </Button>
                   <Text as="span" tone="subdued">
-                    Then check Events Manager > Test Events.
+                    Then check Events Manager &gt; Test Events.
                   </Text>
                 </InlineStack>
 

@@ -952,7 +952,7 @@ export default function AiRepliesPage() {
                         webhooks aren't available on lower plans.
                       </Text>
                       <List type="number">
-                        <List.Item>Paste your Interakt API key and webhook secret below (Interakt > Settings > Developer Settings).</List.Item>
+                        <List.Item>Paste your Interakt API key and webhook secret below (Interakt &gt; Settings &gt; Developer Settings).</List.Item>
                         <List.Item>Generate the webhook URL, then add it in Interakt's Developer Settings.</List.Item>
                         <List.Item>Save, then turn on <strong>Reply to WhatsApp messages</strong>.</List.Item>
                       </List>

@@ -387,8 +387,8 @@ export default function PnlPage() {
                         that order cancellation is waiting on.
                       </Text>
                       <Text as="p" variant="bodySm">
-                        To grant it: Partner Dashboard > your app > <strong>API access</strong> >
-                        <strong> Protected customer data</strong> > request access (data you need: orders, for financial
+                        To grant it: Partner Dashboard &gt; your app &gt; <strong>API access</strong> &gt;
+                        <strong> Protected customer data</strong> &gt; request access (data you need: orders, for financial
                         reporting). Once approved, press Sync now and the P&amp;L fills in.
                       </Text>
                     </BlockStack>
