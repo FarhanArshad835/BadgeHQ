@@ -158,7 +158,7 @@ const features = [
   },
   {
     title: "Order Management",
-    description: "Let customers cancel or edit the address on unfulfilled orders",
+    description: "Let customers cancel their own unfulfilled orders",
     route: "/app/order-management",
     key: "orderManagements" as const,
   },

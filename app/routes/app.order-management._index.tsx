@@ -157,7 +157,7 @@ export default function OrderManagement() {
             {actionData?.error && <Banner tone="critical">{actionData.error}</Banner>}
 
             <Banner tone="info">
-              Adds "Cancel order" and "Edit shipping address" to the customer's order page
+              Adds "Cancel order" to the customer's order page
               in their account, available only while the order is unfulfilled. Requires the
               app to have orders permission — if you recently installed this feature, open
               the app once and approve the new permissions when prompted.
@@ -238,16 +238,13 @@ export default function OrderManagement() {
               </BlockStack>
             </Card>
 
-            <Card>
-              <BlockStack gap="400">
-                <Text as="h2" variant="headingMd">Address Editing</Text>
-                <Checkbox
-                  label="Allow customers to edit the shipping address on unfulfilled orders"
-                  checked={allowAddressEdit}
-                  onChange={setAllowAddressEdit}
-                />
-              </BlockStack>
-            </Card>
+            {/* Address editing is hidden, not merely disabled: reading or writing
+                a shipping address needs Shopify Protected Customer Data Level 2,
+                which this app does not hold, so the server rejects every attempt
+                (see ADDRESS_EDIT_ENABLED in order-actions.server.ts). Offering the
+                toggle meant a merchant could switch on something that silently
+                failed for their shoppers. The stored setting is untouched, so it
+                comes back by un-hiding this once Level 2 is approved. */}
           </BlockStack>
         </Layout.Section>
       </Layout>
