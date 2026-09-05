@@ -248,12 +248,16 @@ export default function AiRepliesActivityPage() {
             <Stat
               label="Handled by the bot"
               value={nfmt(s.handledByAi)}
-              sub={`${nfmt(s.shoppers)} shoppers in total`}
+              sub={
+                s.shoppers > 0
+                  ? `${Math.round((s.handledByAi / s.shoppers) * 100)}% of ${nfmt(s.shoppers)} customers`
+                  : "No customers yet"
+              }
             />
             <Stat
               label="Handled by a person"
               value={nfmt(s.handledByHuman)}
-              sub={`${nfmt(s.messagesToHuman)} messages reached your team`}
+              sub={`${nfmt(s.handedOver)} chats handed over`}
             />
             <Stat
               label="Bot reply time"
@@ -286,6 +290,10 @@ export default function AiRepliesActivityPage() {
                   <Text as="span" fontWeight="semibold">{nfmt(s.escalatedByBot)}</Text>
                 </InlineStack>
                 <InlineStack align="space-between" blockAlign="center">
+                  <Text as="span">Asked but never said what was wrong</Text>
+                  <Text as="span" fontWeight="semibold">{nfmt(s.unresolvedHandovers)}</Text>
+                </InlineStack>
+                <InlineStack align="space-between" blockAlign="center">
                   <Text as="span">WhatsApp / Instagram replies</Text>
                   <Text as="span" fontWeight="semibold">
                     {nfmt(s.waAnswered)} / {nfmt(s.igAnswered)}
@@ -304,6 +312,16 @@ export default function AiRepliesActivityPage() {
                 A shopper who asked for a person keeps the bot out until they come back. An
                 escalation the bot chose expires on its own.
               </Text>
+              {/* Handovers were not recorded until this shipped, and the old
+                  conversation rows they could have been rebuilt from are purged
+                  after 24 hours. A zero here must not read as "nobody was ever
+                  handed over". */}
+              {s.handedOver === 0 && s.answered > 0 && (
+                <Text as="p" variant="bodySm" tone="subdued">
+                  Handovers are recorded from the day this counter was added, so earlier ones are
+                  not included.
+                </Text>
+              )}
             </BlockStack>
           </Card>
 
@@ -317,11 +335,10 @@ export default function AiRepliesActivityPage() {
             <BlockStack gap="300">
               <Text as="h2" variant="headingMd">Bot and team</Text>
               <Split
-                label="Shoppers dealt with"
+                label="Customers finished without a person"
                 bot={s.handledByAi}
                 human={s.handledByHuman}
               />
-              <Split label="Messages" bot={s.answered} human={s.messagesToHuman} />
               <Box paddingBlockStart="100">
                 <BlockStack gap="150">
                   <InlineStack align="space-between" blockAlign="center">
@@ -340,13 +357,25 @@ export default function AiRepliesActivityPage() {
                   </InlineStack>
                 </BlockStack>
               </Box>
+              <Box paddingBlockStart="100">
+                <BlockStack gap="150">
+                  <InlineStack align="space-between" blockAlign="center">
+                    <Text as="span">Handed to your team</Text>
+                    <Text as="span" fontWeight="semibold">{nfmt(s.handedOver)}</Text>
+                  </InlineStack>
+                  <InlineStack align="space-between" blockAlign="center">
+                    <Text as="span" tone="subdued">Messages the bot could not answer</Text>
+                    <Text as="span" tone="subdued">{nfmt(s.messagesToHuman)}</Text>
+                  </InlineStack>
+                </BlockStack>
+              </Box>
               {/* Said plainly rather than filled in with a plausible number. Once
                   a chat is assigned, your team answers inside Interakt or
                   Instagram, and none of that comes back to this app. */}
               <Text as="p" variant="bodySm" tone="subdued">
-                Your team's reply time is not shown because it happens in Interakt or Instagram,
-                which does not report back here. Only the share of work each side took on can be
-                compared.
+                A customer counts as finished by the bot unless the chat was handed to a person.
+                Your team's own reply time is not shown: that happens in Interakt or Instagram,
+                which does not report back here.
               </Text>
             </BlockStack>
           </Card>

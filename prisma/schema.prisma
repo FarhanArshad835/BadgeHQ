@@ -9,23 +9,23 @@ datasource db {
 }
 
 model Session {
-  id                    String    @id
-  shop                  String
-  state                 String
-  isOnline              Boolean   @default(false)
-  scope                 String?
-  expires               DateTime?
-  accessToken           String?
-  userId                BigInt?
-  firstName             String?
-  lastName              String?
-  email                 String?
-  accountOwner          Boolean   @default(false)
-  locale                String?
-  collaborator          Boolean?  @default(false)
-  emailVerified         Boolean?  @default(false)
-  refreshToken          String?
-  refreshTokenExpires   DateTime?
+  id                  String    @id
+  shop                String
+  state               String
+  isOnline            Boolean   @default(false)
+  scope               String?
+  expires             DateTime?
+  accessToken         String?
+  userId              BigInt?
+  firstName           String?
+  lastName            String?
+  email               String?
+  accountOwner        Boolean   @default(false)
+  locale              String?
+  collaborator        Boolean?  @default(false)
+  emailVerified       Boolean?  @default(false)
+  refreshToken        String?
+  refreshTokenExpires DateTime?
 }
 
 model TrustBadge {
@@ -42,35 +42,35 @@ model TrustBadge {
 }
 
 model ProductBadge {
-  id         String   @id @default(cuid())
+  id         String  @id @default(cuid())
   shop       String
-  text       String   @default("Sale")
-  badgeType  String   @default("text")
-  shape      String   @default("rectangle")
-  badgeColor String   @default("#e74c3c")
-  textColor  String   @default("#ffffff")
-  position   String   @default("top-left")
-  placement  String   @default("image")
-  targeting  String   @default("{\"type\":\"all\"}")
-  isActive   Boolean  @default(false)
+  text       String  @default("Sale")
+  badgeType  String  @default("text")
+  shape      String  @default("rectangle")
+  badgeColor String  @default("#e74c3c")
+  textColor  String  @default("#ffffff")
+  position   String  @default("top-left")
+  placement  String  @default("image")
+  targeting  String  @default("{\"type\":\"all\"}")
+  isActive   Boolean @default(false)
 
   // ShineTrust-level features
-  condition  String   @default("{\"type\":\"none\"}")
-  pages      String   @default("[\"all\"]")
-  schedule   String   @default("{}")
-  priority   Int      @default(0)
-  imageUrl   String   @default("")
-  fontSize   Int      @default(11)
-  fontSizeMobile Int  @default(11)
-  opacity    Float    @default(1.0)
-  rotation   Int      @default(0)
-  gradient   String   @default("")
-  borderColor String  @default("")
-  borderWidth Int     @default(0)
-  customCSS  String   @default("")
+  condition      String @default("{\"type\":\"none\"}")
+  pages          String @default("[\"all\"]")
+  schedule       String @default("{}")
+  priority       Int    @default(0)
+  imageUrl       String @default("")
+  fontSize       Int    @default(11)
+  fontSizeMobile Int    @default(11)
+  opacity        Float  @default(1.0)
+  rotation       Int    @default(0)
+  gradient       String @default("")
+  borderColor    String @default("")
+  borderWidth    Int    @default(0)
+  customCSS      String @default("")
 
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([shop])
 }
@@ -106,23 +106,23 @@ model FreeShippingBar {
 }
 
 model StickyCart {
-  id             String  @id @default(cuid())
-  shop           String
-  buttonText     String  @default("Add to Cart")
-  buttonColor    String  @default("#ffffff")
-  bgColor        String  @default("#000000")
-  textColor      String  @default("#ffffff")
-  buttonStyle    String  @default("solid")
-  buttonRadius   String  @default("6")
-  showPrice      Boolean @default(true)
-  showQuantity   Boolean @default(true)
-  alwaysShow     Boolean @default(false)
-  showMobile     Boolean @default(true)
-  showDesktop    Boolean @default(true)
-  position       String  @default("bottom")
-  isActive       Boolean @default(false)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id           String   @id @default(cuid())
+  shop         String
+  buttonText   String   @default("Add to Cart")
+  buttonColor  String   @default("#ffffff")
+  bgColor      String   @default("#000000")
+  textColor    String   @default("#ffffff")
+  buttonStyle  String   @default("solid")
+  buttonRadius String   @default("6")
+  showPrice    Boolean  @default(true)
+  showQuantity Boolean  @default(true)
+  alwaysShow   Boolean  @default(false)
+  showMobile   Boolean  @default(true)
+  showDesktop  Boolean  @default(true)
+  position     String   @default("bottom")
+  isActive     Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   @@index([shop])
 }
@@ -152,23 +152,23 @@ model AppSettings {
 }
 
 model DeliverySettings {
-  id          String   @id @default(cuid())
-  shop        String   @unique
-  isEnabled   Boolean  @default(false)
-  apiToken    String   @default("")
-  originPin   String   @default("")
-  bufferDays   Int     @default(1)
-  environment  String  @default("staging")
-  placement    String  @default("below-atc")
-  deliveryMode String  @default("standard") // "standard" | "express" | "both"
-  headingText      String  @default("Estimate delivery date")
-  deliverByText    String  @default("Delivery by")
-  freeDeliveryOn   Boolean @default(false)
-  freeDeliveryText String  @default("Free delivery")
-  fasterNoteOn     Boolean @default(false)
-  fasterNoteText   String  @default("Faster delivery methods available at checkout")
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id               String   @id @default(cuid())
+  shop             String   @unique
+  isEnabled        Boolean  @default(false)
+  apiToken         String   @default("")
+  originPin        String   @default("")
+  bufferDays       Int      @default(1)
+  environment      String   @default("staging")
+  placement        String   @default("below-atc")
+  deliveryMode     String   @default("standard") // "standard" | "express" | "both"
+  headingText      String   @default("Estimate delivery date")
+  deliverByText    String   @default("Delivery by")
+  freeDeliveryOn   Boolean  @default(false)
+  freeDeliveryText String   @default("Free delivery")
+  fasterNoteOn     Boolean  @default(false)
+  fasterNoteText   String   @default("Faster delivery methods available at checkout")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 }
 
 model OrderManageSettings {
@@ -243,30 +243,30 @@ model WishlistEvent {
 }
 
 model BackInStockSettings {
-  id          String   @id @default(cuid())
-  shop        String   @unique
-  isEnabled   Boolean  @default(false)
-  placement   String   @default("below-atc") // below-atc | above-atc | replace-button
-  buttonText  String   @default("Notify me when available")
-  headingText String   @default("Get notified when this is back")
-  consentText String   @default("We'll message you on WhatsApp when it's back in stock.")
-  successText String   @default("Done! We'll WhatsApp you when it's back in stock.")
+  id          String  @id @default(cuid())
+  shop        String  @unique
+  isEnabled   Boolean @default(false)
+  placement   String  @default("below-atc") // below-atc | above-atc | replace-button
+  buttonText  String  @default("Notify me when available")
+  headingText String  @default("Get notified when this is back")
+  consentText String  @default("We'll message you on WhatsApp when it's back in stock.")
+  successText String  @default("Done! We'll WhatsApp you when it's back in stock.")
 
   // WhatsApp delivery. The shopper's number is first-party data typed into the
   // storefront form, so notifying needs no customer records and no Protected
   // Customer Data access. The merchant brings their own provider account.
-  waEnabled      Boolean @default(false)
-  waProvider     String  @default("interakt") // "interakt" | "doubletick"
-  waApiKey       String  @default("") // provider secret; Interakt's is base64 and sent verbatim
-  waTemplateName String  @default("")
-  waLanguageCode String  @default("en")
-  waFromNumber   String  @default("") // DoubleTick only: the sender WhatsApp number
+  waEnabled       Boolean @default(false)
+  waProvider      String  @default("interakt") // "interakt" | "doubletick"
+  waApiKey        String  @default("") // provider secret; Interakt's is base64 and sent verbatim
+  waTemplateName  String  @default("")
+  waLanguageCode  String  @default("en")
+  waFromNumber    String  @default("") // DoubleTick only: the sender WhatsApp number
   // Template header image. Products without a featured image fall back to this
   // so one image template covers every send (Meta rejects an empty header).
-  waFallbackImage String @default("")
+  waFallbackImage String  @default("")
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model BackInStockSubscription {
@@ -284,23 +284,23 @@ model BackInStockSubscription {
 }
 
 model AiReplySettings {
-  id           String   @id @default(cuid())
-  shop         String   @unique
-  isEnabled    Boolean  @default(false)
+  id           String  @id @default(cuid())
+  shop         String  @unique
+  isEnabled    Boolean @default(false)
   // "gemini" | "groq" | "claude". Groq is the practical default for new shops:
   // Gemini's free tier allows 20 requests A DAY, which no storefront can run on.
-  aiProvider   String   @default("gemini")
+  aiProvider   String  @default("gemini")
   // Provider-specific model id. Only Claude exposes a picker today (Gemini and
   // Groq are pinned to one model each); "" means the provider's own default.
-  aiModel      String   @default("")
-  apiKey       String   @default("") // merchant's LLM key — server-side only
-  knowledge    String   @default("") // policies/FAQ text the bot may answer from
-  botName      String   @default("Support")
-  greeting     String   @default("Hi! Ask me about shipping, returns or sizing.")
-  supportEmail String   @default("")
-  supportUrl   String   @default("")
-  accentColor  String   @default("#111111")
-  position     String   @default("bottom-right") // bottom-right | bottom-left
+  aiModel      String  @default("")
+  apiKey       String  @default("") // merchant's LLM key — server-side only
+  knowledge    String  @default("") // policies/FAQ text the bot may answer from
+  botName      String  @default("Support")
+  greeting     String  @default("Hi! Ask me about shipping, returns or sizing.")
+  supportEmail String  @default("")
+  supportUrl   String  @default("")
+  accentColor  String  @default("#111111")
+  position     String  @default("bottom-right") // bottom-right | bottom-left
 
   // Inbound AI replies over WhatsApp. The same knowledge base and Gemini key
   // answer both channels; only the delivery path differs. Set independently of
@@ -349,7 +349,7 @@ model AiReplySettings {
   // my order" / "201294" in a few seconds; this quiet gap coalesces them into a
   // single reply. Shared by WhatsApp and Instagram. 0 disables debouncing
   // (reply to each message immediately).
-  waDebounceSeconds  Int @default(6)
+  waDebounceSeconds Int @default(6)
 
   // Live parcel tracking. When a shopper asks "where's my order?" the bot pulls
   // the AWB out of the thread (the merchant's flow bot posts it) and asks the
@@ -357,9 +357,9 @@ model AiReplySettings {
   // panel email + password; the Delhivery key is reused from DeliverySettings
   // (the storefront delivery-estimate feature already stores it), so there's no
   // Delhivery field here. Empty creds → that carrier is simply skipped.
-  waTrackingEnabled     Boolean @default(false)
-  waShiprocketEmail     String  @default("")
-  waShiprocketPassword  String  @default("") // Shiprocket panel password — server-side only
+  waTrackingEnabled    Boolean @default(false)
+  waShiprocketEmail    String  @default("")
+  waShiprocketPassword String  @default("") // Shiprocket panel password — server-side only
 
   // Handoff assignment. When the bot steps back for a human, it POSTs the
   // customer's number to a DoubleTick Bot Studio flow's "On Webhook" trigger;
@@ -367,7 +367,7 @@ model AiReplySettings {
   // This is how a chat gets assigned via automation — DoubleTick's REST API
   // can't do it, but a flow can. Empty → no assignment (silent handoff, the bot
   // just mutes itself). Paste the webhook URL from the flow's On Webhook node.
-  waHandoffFlowUrl String  @default("")
+  waHandoffFlowUrl String @default("")
 
   // Instagram DM replies (Meta Graph API, direct — no middleman like DoubleTick).
   // Same AI brain and knowledge base as WhatsApp; only the transport differs.
@@ -381,8 +381,8 @@ model AiReplySettings {
   igWebhookToken String  @default("") // unguessable segment in our webhook URL, identifies the shop
   igVerifyToken  String  @default("") // the token Meta echoes on the GET verification challenge
 
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([waWebhookToken])
   @@index([igWebhookToken])
@@ -394,18 +394,18 @@ model AiReplySettings {
 /// so identity is (shop, channel, customerId) rather than (shop, phone). Kept
 /// only long enough for the bot to follow the conversation, then purged.
 model SocialConversation {
-  id            String   @id @default(cuid())
+  id            String    @id @default(cuid())
   shop          String
   channel       String // "instagram" (room for "messenger" etc. later)
   customerId    String // platform user id (IGSID) — the conversation key
-  turns         String   @default("[]") // JSON ChatTurn[]; capped via trimHistory()
-  optedOut      Boolean  @default(false)
+  turns         String    @default("[]") // JSON ChatTurn[]; capped via trimHistory()
+  optedOut      Boolean   @default(false)
   mutedUntil    DateTime?
-  windowCount   Int      @default(0)
-  windowStart   DateTime @default(now())
-  lastInboundAt DateTime @default(now())
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  windowCount   Int       @default(0)
+  windowStart   DateTime  @default(now())
+  lastInboundAt DateTime  @default(now())
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   @@unique([shop, channel, customerId])
   @@index([updatedAt])
@@ -447,24 +447,24 @@ model SocialSkip {
 /// One rolling WhatsApp thread per shopper. Kept only long enough for the bot to
 /// follow the conversation, then purged — see PURGE_AFTER_HOURS in the cron.
 model WhatsAppConversation {
-  id            String   @id @default(cuid())
+  id            String    @id @default(cuid())
   shop          String
   phone         String // normalised 10-digit — the conversation key
-  turns         String   @default("[]") // JSON ChatTurn[]; capped via trimHistory()
+  turns         String    @default("[]") // JSON ChatTurn[]; capped via trimHistory()
   // Bot silenced for this shopper. Two sources with different lifetimes:
   //  - the shopper typed "stop"/"agent": permanent until they type "start"
   //  - the bot escalated a complaint itself: temporary, see mutedUntil
-  optedOut      Boolean  @default(false)
+  optedOut      Boolean   @default(false)
   // When an automatic handoff mute expires. Null means permanent (an explicit
   // opt-out). Without this a single complaint silenced the bot for that number
   // forever, including for unrelated questions weeks later, because no real
   // shopper knows to type "start".
   mutedUntil    DateTime?
-  windowCount   Int      @default(0) // replies sent in the current rate-limit window
-  windowStart   DateTime @default(now())
-  lastInboundAt DateTime @default(now())
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  windowCount   Int       @default(0) // replies sent in the current rate-limit window
+  windowStart   DateTime  @default(now())
+  lastInboundAt DateTime  @default(now())
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   @@unique([shop, phone])
   @@index([updatedAt]) // for the purge sweep
@@ -488,6 +488,31 @@ model WhatsAppSkip {
   /// First part of the message, for recognising the conversation. Truncated.
   preview   String   @default("")
   createdAt DateTime @default(now())
+
+  @@index([shop, createdAt])
+}
+
+/// One conversation the bot stopped handling and gave to a person.
+///
+/// Exists because neither existing table can answer "how many customers did the
+/// bot finish, and how many did we have to take over" over a real reporting
+/// period. Conversation rows carry the mute flags but are PURGED after 24 hours,
+/// so anything older than a day left no trace; skips are per-message and include
+/// voice notes and rate limits that no human ever saw.
+///
+/// One row per handover, never updated, so a date range means what it says.
+model Handover {
+  id         String   @id @default(cuid())
+  shop       String
+  channel    String   @default("whatsapp") // whatsapp | instagram
+  /// Phone (WhatsApp) or platform user id (Instagram). The conversation key.
+  customerId String
+  /// asked | escalated | unresolved
+  ///  - asked:      the shopper requested a person
+  ///  - escalated:  the assistant decided it could not finish
+  ///  - unresolved: the shopper asked twice and never described an issue
+  reason     String
+  createdAt  DateTime @default(now())
 
   @@index([shop, createdAt])
 }
@@ -523,18 +548,18 @@ model ShopPlan {
 /// holds only the P&L-specific config: the Meta Ads credentials (Phase 2) and
 /// the last-sync bookkeeping.
 model PnlSettings {
-  id             String   @id @default(cuid())
-  shop           String   @unique
-  isEnabled      Boolean  @default(false)
+  id              String    @id @default(cuid())
+  shop            String    @unique
+  isEnabled       Boolean   @default(false)
   // Meta (Facebook) Ads — Phase 2. Ad spend is aggregate-only (never per-order).
-  metaEnabled     Boolean @default(false)
-  metaAccessToken String  @default("") // long-lived token, server-side only
-  metaAdAccountId String  @default("") // "act_<id>"
+  metaEnabled     Boolean   @default(false)
+  metaAccessToken String    @default("") // long-lived token, server-side only
+  metaAdAccountId String    @default("") // "act_<id>"
   // Last sync bookkeeping, shown in the admin.
-  lastSyncAt     DateTime?
-  lastSyncStatus String   @default("")
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  lastSyncAt      DateTime?
+  lastSyncStatus  String    @default("")
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 }
 
 /// Per-order financials cache — the core P&L table. One row per Shopify order,
@@ -572,23 +597,23 @@ model OrderFinancials {
   // point of the monthly P&L: revenue/COGS/per-order metrics all key off orders
   // that actually delivered). Derived from tracking.server.ts's delivered/RTO
   // signals; "unknown" until the tracking backfill resolves it.
-  deliveryStatus     String    @default("unknown") // delivered | rto | in_transit | no-awb | unknown
-  deliveredAt        DateTime? // best-effort delivery timestamp when the carrier reports it
-  deliverySyncedAt   DateTime?
+  deliveryStatus   String    @default("unknown") // delivered | rto | in_transit | no-awb | unknown
+  deliveredAt      DateTime? // best-effort delivery timestamp when the carrier reports it
+  deliverySyncedAt DateTime?
 
   // Bookkeeping.
-  financialStatus   String   @default("")
-  fulfillmentStatus String   @default("")
-  dataComplete      Boolean  @default(false) // cogsComplete AND shipping resolved
+  financialStatus   String    @default("")
+  fulfillmentStatus String    @default("")
+  dataComplete      Boolean   @default(false) // cogsComplete AND shipping resolved
   // ReturnHQ EXCHANGE fee order: a genuine sale (it carries the replacement
   // product), flagged so the monthly engine can add the flat FEE portion to the
   // fee line without double-counting the product revenue already in Net Sale.
-  isExchangeFee     Boolean  @default(false)
+  isExchangeFee     Boolean   @default(false)
   revenueSyncedAt   DateTime?
   cogsSyncedAt      DateTime?
   shippingSyncedAt  DateTime?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   @@unique([shop, orderId])
   @@index([shop, orderCreatedAt])
@@ -601,22 +626,22 @@ model OrderFinancials {
 /// productId gives contribution margin ex-shipping-ex-ad (shipping is order-level
 /// and can't be split per line honestly).
 model OrderLineFinancials {
-  id             String   @id @default(cuid())
-  shop           String
-  orderId        String
-  orderCreatedAt DateTime // denormalised for date-window filtering
-  productId      String   @default("")
-  variantId      String   @default("")
-  productTitle   String   @default("")
+  id               String   @id @default(cuid())
+  shop             String
+  orderId          String
+  orderCreatedAt   DateTime // denormalised for date-window filtering
+  productId        String   @default("")
+  variantId        String   @default("")
+  productTitle     String   @default("")
   // Shopify product type, captured so GST can be charged per line at the right
   // rate (handbags 18%, clothing and footwear 5%) instead of one blended rate.
-  productType    String   @default("")
-  variantTitle   String   @default("")
-  quantity       Int      @default(0)
-  lineRevenueMinor BigInt @default(0)
+  productType      String   @default("")
+  variantTitle     String   @default("")
+  quantity         Int      @default(0)
+  lineRevenueMinor BigInt   @default(0)
   lineCogsMinor    BigInt?
-  lineCogsComplete Boolean @default(false)
-  createdAt      DateTime @default(now())
+  lineCogsComplete Boolean  @default(false)
+  createdAt        DateTime @default(now())
 
   @@index([shop, productId, orderCreatedAt])
   @@index([shop, orderId])
@@ -630,19 +655,19 @@ model OrderLineFinancials {
 /// credentials are server-side only; the P&L data itself reuses the
 /// OrderFinancials/OrderLineFinancials tables keyed by the shop domain.
 model PnlApp {
-  id             String   @id @default("default")
+  id                 String @id @default("default")
   // Access gate for the standalone tool (it's not behind Shopify login).
-  passwordHash   String   @default("") // scrypt/pbkdf2 hash of the shared password
+  passwordHash       String @default("") // scrypt/pbkdf2 hash of the shared password
   // Shopify custom-app credentials.
-  shopDomain     String   @default("") // e.g. "b03304.myshopify.com"
-  adminToken     String   @default("") // shpat_… custom-app Admin API token
+  shopDomain         String @default("") // e.g. "b03304.myshopify.com"
+  adminToken         String @default("") // shpat_… custom-app Admin API token
   // Carrier credentials (actual billed shipping — verify-first, like the app).
   shiprocketEmail    String @default("")
   shiprocketPassword String @default("")
   delhiveryApiKey    String @default("")
   // Meta Ads — direct Meta Marketing API (ads_read token), not Supermetrics.
-  metaAccessToken String  @default("")
-  metaAdAccountId String  @default("") // e.g. "act_908549380106884"
+  metaAccessToken    String @default("")
+  metaAdAccountId    String @default("") // e.g. "act_908549380106884"
 
   // Monthly-P&L config knobs (the method's fixed rates; editable in Settings so
   // they're never hard-coded estimates the merchant can't see or change).
@@ -650,75 +675,75 @@ model PnlApp {
   // that wasn't a real billed figure, just a Rs25/item assumption never verified
   // against actual handling costs. Column kept rather than dropped (harmless,
   // and a destructive migration for nothing) - do not wire it back in.
-  opsPerPairMinor     BigInt @default(2500)
+  opsPerPairMinor           BigInt    @default(2500)
   // Stocking: a free product added to orders that still costs us to supply.
   // Counted from the delivered order lines whose product title contains
   // stockingMatch, times stockingUnitCostMinor. Blank match = feature off.
   // Flat fee charged on EVERY return/exchange request. Return-fee orders carry
   // only this amount; exchange-fee orders bundle it with the replacement product,
   // so the fee line adds this per exchange rather than the whole order total.
-  returnRequestFeeMinor  BigInt @default(10000) // Rs100
-  stockingMatch          String @default("")
-  stockingUnitCostMinor  BigInt @default(6000) // ₹60 per stocking unit
+  returnRequestFeeMinor     BigInt    @default(10000) // Rs100
+  stockingMatch             String    @default("")
+  stockingUnitCostMinor     BigInt    @default(6000) // ₹60 per stocking unit
   // GST on sales, charged PER LINE at the rate for that product's type. The
   // blended gstOutputRateBp below is the fallback for lines with no type data
   // (orders synced before productType was captured).
-  gstHighRateBp       Int    @default(1800)  // handbags etc: 18%
-  gstHighTypes        String @default("Bags") // comma-separated Shopify product types
-  gstStandardRateBp   Int    @default(500)   // clothing and footwear: 5%
-  gstMidRateBp        Int    @default(1200)  // footwear over the threshold: 12%
-  gstFootwearThresholdMinor BigInt @default(100000) // Rs1,000 per pair
-  gstOutputRateBp     Int    @default(487)   // fallback blended rate for untyped lines
-  gstInputRateNumer   Int    @default(18)    // ITC on (freight+ads+overhead): ×18/118
-  gstInputRateDenom   Int    @default(118)
-  maturityDays        Int    @default(12)    // wait this many days after month-end before the month is "matured"
+  gstHighRateBp             Int       @default(1800) // handbags etc: 18%
+  gstHighTypes              String    @default("Bags") // comma-separated Shopify product types
+  gstStandardRateBp         Int       @default(500) // clothing and footwear: 5%
+  gstMidRateBp              Int       @default(1200) // footwear over the threshold: 12%
+  gstFootwearThresholdMinor BigInt    @default(100000) // Rs1,000 per pair
+  gstOutputRateBp           Int       @default(487) // fallback blended rate for untyped lines
+  gstInputRateNumer         Int       @default(18) // ITC on (freight+ads+overhead): ×18/118
+  gstInputRateDenom         Int       @default(118)
+  maturityDays              Int       @default(12) // wait this many days after month-end before the month is "matured"
   // First calendar month to backfill ("YYYY-MM"). The sync covers COMPLETE
   // months from here to now — NOT a rolling 90-day window (which would cut off
   // the start of older months and drift later every day). Default Apr 2026.
-  backfillStartMonth  String @default("2026-04")
+  backfillStartMonth        String    @default("2026-04")
   // Published-to-web CSV URL of the delivery-status sheet (AWB tab). The app
   // fetches this directly (no Google auth) to set delivery outcome by AWB.
-  deliverySheetUrl    String @default("")
-  deliverySheetSyncedAt DateTime?
-  deliverySheetStatus String @default("")
+  deliverySheetUrl          String    @default("")
+  deliverySheetSyncedAt     DateTime?
+  deliverySheetStatus       String    @default("")
 
   // Resumable sync state. The nightly cron chunks a large backlog across runs:
   // it saves where it stopped (syncCursor) within a window (syncWindowStart /
   // syncWindowEnd) and resumes there next run, so no single invocation runs
   // unbounded (Vercel timeout) or keeps Neon awake longer than needed.
-  syncCursor      String?   // Shopify page cursor to resume from; null = window done
+  syncCursor      String? // Shopify page cursor to resume from; null = window done
   syncWindowStart DateTime? // start of the window currently being paged
   syncWindowEnd   DateTime? // end of that window
-  lastSyncAt     DateTime?
-  lastSyncStatus String   @default("")
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  lastSyncAt      DateTime?
+  lastSyncStatus  String    @default("")
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 }
 
 /// Per-month MANUAL inputs for the monthly P&L — the few numbers that can't be
 /// pulled from an API (or that the user wants to override). One row per month.
 /// Money in minor units (paise) BigInt. Null override = "use the auto value".
 model PnlMonthlyInput {
-  id        String @id @default(cuid())
-  shop      String
-  month     String // "YYYY-MM" (IST calendar month)
+  id    String @id @default(cuid())
+  shop  String
+  month String // "YYYY-MM" (IST calendar month)
 
   // Overhead: Shopify subscription + apps + billing + Doubletick fees. A real
   // invoiced figure the merchant enters; never estimated. Kept as the combined
   // total used by the P&L math; itemized below for the statement's named rows.
-  overheadMinor           BigInt @default(0)
+  overheadMinor           BigInt  @default(0)
   // Itemized fixed costs (real billed figures, entered per month). These SUM into
   // the fixed-cost total; the statement shows each as its own line.
   // One combined Shopify line (subscription + billing): the merchant enters a
   // single figure, so a separate subscription column was just a second box to
   // fill for the same cost.
-  shopifyBillingMinor      BigInt @default(0)
-  doubleclickFeeMinor      BigInt @default(0)
-  doubleclickSubMinor      BigInt @default(0)
+  shopifyBillingMinor     BigInt  @default(0)
+  doubleclickFeeMinor     BigInt  @default(0)
+  doubleclickSubMinor     BigInt  @default(0)
   // Stocking / additional inventory purchase for the month, shown alongside COGS.
-  stockingMinor            BigInt @default(0)
+  stockingMinor           BigInt  @default(0)
   // Return/exchange fees collected (added back in the assembly).
-  returnExchangeFeesMinor BigInt @default(0)
+  returnExchangeFeesMinor BigInt  @default(0)
   // Optional overrides for values that are normally auto. Null = use auto.
   adSpendOverrideMinor    BigInt? // if the Meta pull is unavailable/wrong for a month
   freightOverrideMinor    BigInt? // if the carrier freight can't be resolved
@@ -736,24 +761,24 @@ model PnlMonthlyInput {
 /// Cached ReturnHQ counts per month. Refreshed by the P&L cron (twice daily),
 /// read by the dashboard so it no longer queries ReturnHQ live on every load.
 model ReturnHqCache {
-  id           String   @id @default(cuid())
-  shop         String
-  month        String // "YYYY-MM"
-  returns      Int      @default(0)
-  exchanges    Int      @default(0)
+  id                  String   @id @default(cuid())
+  shop                String
+  month               String // "YYYY-MM"
+  returns             Int      @default(0)
+  exchanges           Int      @default(0)
   // ₹ value (paise) of the orders behind those requests, for the funnel's value
   // column. Summed from OrderFinancials.grossRevenueMinor of the matched orders.
-  returnsValueMinor   BigInt @default(0)
-  exchangesValueMinor BigInt @default(0)
-  syncedAt     DateTime @default(now())
+  returnsValueMinor   BigInt   @default(0)
+  exchangesValueMinor BigInt   @default(0)
+  syncedAt            DateTime @default(now())
 
   @@unique([shop, month])
 }
 
 model PnlMonthlyReport {
-  id        String @id @default(cuid())
-  shop      String
-  month     String // "YYYY-MM"
+  id    String @id @default(cuid())
+  shop  String
+  month String // "YYYY-MM"
 
   // Revenue side.
   grossSaleMinor           BigInt @default(0) // MRP × units, pre-discount
@@ -805,24 +830,24 @@ model PnlMonthlyReport {
 /// (id="default"). Razorpay International charges USD OUTSIDE Shopify checkout;
 /// on payment the order is written back to Shopify. Secrets are server-side only.
 model UsdCheckout {
-  id                String   @id @default("default")
-  enabled           Boolean  @default(false) // master on/off (also gated in theme)
+  id                    String    @id @default("default")
+  enabled               Boolean   @default(false) // master on/off (also gated in theme)
   // Razorpay (test until go-live).
-  razorpayKeyId     String   @default("")
-  razorpayKeySecret String   @default("")
-  razorpayWebhookSecret String @default("")
+  razorpayKeyId         String    @default("")
+  razorpayKeySecret     String    @default("")
+  razorpayWebhookSecret String    @default("")
   // Shopify Admin token for the store we write orders into.
-  shopDomain        String   @default("") // e.g. six-by-eleven.myshopify.com
-  shopifyAdminToken String   @default("")
+  shopDomain            String    @default("") // e.g. six-by-eleven.myshopify.com
+  shopifyAdminToken     String    @default("")
   // Pricing rule: customer pays (INR base × markupBps/10000) converted to USD.
   // markupBps 40000 = ×4 (the "Rs1000 -> Rs4000" rule).
-  markupBps         Int      @default(40000)
+  markupBps             Int       @default(40000)
   // Live rate cache (INR->USD), refreshed periodically so we don't hit the rate
   // API on every checkout. rate = USD per 1 INR.
-  inrToUsdRate      Float    @default(0)
-  rateFetchedAt     DateTime?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  inrToUsdRate          Float     @default(0)
+  rateFetchedAt         DateTime?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 }
 
 // One row per USD checkout attempt. Created when we make the Razorpay order (so

@@ -409,7 +409,20 @@ async function handleJob(job: {
   // The body sends the customer's number under several common key names so the
   // flow can read whichever it expects (phone/customerNumber/customerPhoneNumber),
   // plus the WABA number and a reason for logging.
-  const assignChatViaFlow = async (reason: string): Promise<void> => {
+  const assignChatViaFlow = async (reason: string, kind: string): Promise<void> => {
+    // Recorded FIRST, and regardless of whether a flow URL is configured: the
+    // handover happened either way (the bot has already stopped answering), and
+    // this row is the only durable trace of it. Conversation rows carry the mute
+    // flags but are purged after 24 hours.
+    try {
+      await prisma.handover.create({
+        data: { shop: job.shop, channel: "whatsapp", customerId: job.phone, reason: kind },
+      });
+    } catch (e: any) {
+      // Never let reporting break a handover.
+      console.error("[wa-reply] handover record failed:", String(e?.message || e).slice(0, 160));
+    }
+
     const url = settings.waHandoffFlowUrl?.trim() || "";
     if (!url) return;
     const body = {
@@ -471,7 +484,7 @@ async function handleJob(job: {
   // The handoff acknowledgement is a fixed string — no AI, no quota spent.
   if (job.message === "__handoff__") {
     const wa = await send(HANDOFF_REPLY, "badgehq-ai-handoff");
-    await assignChatViaFlow("Customer asked to talk to a human.");
+    await assignChatViaFlow("Customer asked to talk to a human.", "asked");
     return wa.ok ? { ok: true } : { ok: false, error: wa.error };
   }
 
@@ -607,7 +620,10 @@ async function handleJob(job: {
         "badgehq-menu-human",
       );
       if (wa.ok) {
-        await assignChatViaFlow("Customer asked for a human but never described an issue.");
+        await assignChatViaFlow(
+          "Customer asked for a human but never described an issue.",
+          "unresolved",
+        );
         await prisma.whatsAppConversation.upsert({
           where: { shop_phone: { shop: job.shop, phone: job.phone } },
           create: {
@@ -878,7 +894,7 @@ async function handleJob(job: {
   }
 
   if (handoff) {
-    await assignChatViaFlow("The assistant decided this needs a human.");
+    await assignChatViaFlow("The assistant decided this needs a human.", "escalated");
   }
 
   // Record the exchange only once it actually reached the shopper.

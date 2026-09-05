@@ -294,6 +294,24 @@ async function handleSocialJob(job: {
     return { ok: false, error: `instagram:${wa.error}`, permanent };
   }
 
+  // The durable record of the handover. Conversation rows below carry the mute
+  // flags, but they are purged, so this is what a report can still read later.
+  if (handoff) {
+    try {
+      await prisma.handover.create({
+        data: {
+          shop: job.shop,
+          channel: IG_CHANNEL,
+          customerId: job.customerId,
+          reason: "escalated",
+        },
+      });
+    } catch (e: any) {
+      // Never let reporting break a handover.
+      console.error("[ig-reply] handover record failed:", String(e?.message || e).slice(0, 160));
+    }
+  }
+
   await prisma.socialConversation.upsert({
     where: {
       shop_channel_customerId: { shop: job.shop, channel: IG_CHANNEL, customerId: job.customerId },
