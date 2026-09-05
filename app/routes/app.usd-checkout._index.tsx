@@ -149,7 +149,7 @@ export default function UsdCheckoutSettings() {
                     onChange={setMarkupX}
                     autoComplete="off"
                     suffix="×"
-                    helpText="4 = charge 4× the INR base price, then convert to USD (your ₹1000 → ₹4000 rule)."
+                    helpText="4 = charge 4× the INR base price, then convert to USD (your ₹1000 becomes ₹4000 rule)."
                   />
 
                   <TextField
@@ -180,9 +180,9 @@ export default function UsdCheckoutSettings() {
                   </Badge>
                 </InlineStack>
                 <Box paddingBlockStart="200">
-                  <Text as="p" tone="subdued">Live INR→USD rate: {rateStr} (USD per ₹1)</Text>
+                  <Text as="p" tone="subdued">Live INR to USD rate: {rateStr} (USD per ₹1)</Text>
                   <Text as="p" tone="subdued">
-                    Example: a ₹1,000 base item → ₹{(1000 * (d.markupBps / 10000)).toLocaleString()} → ${exampleUsd} charged.
+                    Example: a ₹1,000 base item becomes ₹{(1000 * (d.markupBps / 10000)).toLocaleString()}, charged as ${exampleUsd}.
                   </Text>
                 </Box>
               </BlockStack>

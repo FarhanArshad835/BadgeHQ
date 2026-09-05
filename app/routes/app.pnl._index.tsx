@@ -190,7 +190,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const message = isPcd
       ? "Shopify hasn't approved this app to read orders yet (Protected Customer Data). " +
         "Revenue, COGS and shipping all come from your orders, so the P&L can't sync until " +
-        "that's granted. Request approval in the Partner Dashboard → your app → API access → " +
+        "that's granted. Request approval in the Partner Dashboard > your app > API access > " +
         "Protected customer data, then sync again."
       : "Sync failed: " + raw.slice(0, 200);
     return json({ ok: false, message }, { status: 500 });
@@ -387,8 +387,8 @@ export default function PnlPage() {
                         that order cancellation is waiting on.
                       </Text>
                       <Text as="p" variant="bodySm">
-                        To grant it: Partner Dashboard → your app → <strong>API access</strong> →
-                        <strong> Protected customer data</strong> → request access (data you need: orders, for financial
+                        To grant it: Partner Dashboard > your app > <strong>API access</strong> >
+                        <strong> Protected customer data</strong> > request access (data you need: orders, for financial
                         reporting). Once approved, press Sync now and the P&amp;L fills in.
                       </Text>
                     </BlockStack>

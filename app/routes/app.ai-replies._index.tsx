@@ -952,7 +952,7 @@ export default function AiRepliesPage() {
                         webhooks aren't available on lower plans.
                       </Text>
                       <List type="number">
-                        <List.Item>Paste your Interakt API key and webhook secret below (Interakt → Settings → Developer Settings).</List.Item>
+                        <List.Item>Paste your Interakt API key and webhook secret below (Interakt > Settings > Developer Settings).</List.Item>
                         <List.Item>Generate the webhook URL, then add it in Interakt's Developer Settings.</List.Item>
                         <List.Item>Save, then turn on <strong>Reply to WhatsApp messages</strong>.</List.Item>
                       </List>
@@ -971,8 +971,8 @@ export default function AiRepliesPage() {
                     d.hasWaKey
                       ? `Saved key ending in ${d.waKeyPreview} — enter a new key to replace it.`
                       : isDoubleTick
-                      ? "From DoubleTick → Settings → API key."
-                      : "From Interakt → Settings → Developer Settings."
+                      ? "From DoubleTick > Settings > API key."
+                      : "From Interakt > Settings > Developer Settings."
                   }
                 />
 
@@ -1022,7 +1022,7 @@ export default function AiRepliesPage() {
                       autoComplete="off"
                       readOnly
                       selectTextOnFocus
-                      helpText="Paste this into Interakt → Developer Settings → Webhooks. Keep it private — anyone with this URL and your secret could message your customers."
+                      helpText="Paste this into Interakt > Developer Settings > Webhooks. Keep it private — anyone with this URL and your secret could message your customers."
                     />
                     <InlineStack gap="200">
                       <Button onClick={handleRotateToken} loading={busy}>
@@ -1154,7 +1154,7 @@ export default function AiRepliesPage() {
                   onChange={setIgPageId}
                   autoComplete="off"
                   placeholder="123456789012345"
-                  helpText="The Facebook Page linked to your Instagram account (Meta → your Page → About → Page ID)."
+                  helpText="The Facebook Page linked to your Instagram account (Meta > your Page > About > Page ID)."
                 />
                 <TextField
                   label="Instagram access token"
@@ -1179,7 +1179,7 @@ export default function AiRepliesPage() {
                   helpText={
                     d.hasIgAppSecret
                       ? "A secret is saved — enter a new one to replace it. Used to verify messages really came from Meta."
-                      : "Meta → App Settings → Basic → App Secret. Without it, incoming messages are rejected."
+                      : "Meta > App Settings > Basic > App Secret. Without it, incoming messages are rejected."
                   }
                 />
 
@@ -1192,7 +1192,7 @@ export default function AiRepliesPage() {
                       autoComplete="off"
                       readOnly
                       selectTextOnFocus
-                      helpText="Meta → your app → Instagram → Webhooks → Callback URL."
+                      helpText="Meta > your app > Instagram > Webhooks > Callback URL."
                     />
                     <TextField
                       label="Verify token (paste into Meta)"
@@ -1201,7 +1201,7 @@ export default function AiRepliesPage() {
                       autoComplete="off"
                       readOnly
                       selectTextOnFocus
-                      helpText="Meta → Webhooks → Verify Token. Meta sends this back once to confirm the URL; we check it matches."
+                      helpText="Meta > Webhooks > Verify Token. Meta sends this back once to confirm the URL; we check it matches."
                     />
                     <InlineStack gap="200">
                       <Button onClick={handleRotateIgToken} loading={busy}>

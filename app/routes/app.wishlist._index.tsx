@@ -308,7 +308,7 @@ export default function WishlistSettingsPage() {
                   onChange={setCapiDatasetId}
                   autoComplete="off"
                   placeholder="1234567890123456"
-                  helpText="Events Manager → your dataset → Settings. Digits only."
+                  helpText="Events Manager > your dataset > Settings. Digits only."
                 />
                 <TextField
                   label="Conversions API access token"
@@ -321,7 +321,7 @@ export default function WishlistSettingsPage() {
                       ? `Saved token ending in ${loaderData.capiTokenPreview}. Enter a new one to replace it.`
                       : "Paste the token generated in Events Manager"
                   }
-                  helpText="Events Manager → Settings → Generate access token. Stored securely, server-side only. Never sent to your storefront."
+                  helpText="Events Manager > Settings > Generate access token. Stored securely, server-side only. Never sent to your storefront."
                 />
 
                 <InlineStack gap="300" blockAlign="center">
@@ -329,7 +329,7 @@ export default function WishlistSettingsPage() {
                     Send test event
                   </Button>
                   <Text as="span" tone="subdued">
-                    Then check Events Manager → Test Events.
+                    Then check Events Manager > Test Events.
                   </Text>
                 </InlineStack>
 

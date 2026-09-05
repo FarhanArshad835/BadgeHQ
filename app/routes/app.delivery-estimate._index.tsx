@@ -370,7 +370,7 @@ export default function DeliveryEstimate() {
                   onChange={setDeliverByText}
                   autoComplete="off"
                   maxLength={120}
-                  helpText="Shown before the date, e.g. “Delivery by” → “Delivery by Sun, 19 Jul”."
+                  helpText="Shown before the date, e.g. “Delivery by” becomes “Delivery by Sun, 19 Jul”."
                 />
                 <Checkbox
                   label="Show a free-delivery line"

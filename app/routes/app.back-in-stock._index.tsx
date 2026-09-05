@@ -396,8 +396,8 @@ export default function BackInStockPage() {
                   }
                   helpText={
                     waProvider === "doubletick"
-                      ? "DoubleTick → Settings → API key. Stored securely — never sent to your storefront."
-                      : "Interakt → Settings → Developer Settings → Secret Key (base64). Stored securely — never sent to your storefront."
+                      ? "DoubleTick > Settings > API key. Stored securely — never sent to your storefront."
+                      : "Interakt > Settings > Developer Settings > Secret Key (base64). Stored securely — never sent to your storefront."
                   }
                 />
                 <TextField
