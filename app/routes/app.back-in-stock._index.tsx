@@ -103,7 +103,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       callbackData: "bis:test",
     });
     return res.ok
-      ? json({ testResult: `Sent to ${phone}. Check WhatsApp — it can take a few seconds.` })
+      ? json({ testResult: `Sent to ${phone}. Check WhatsApp: it can take a few seconds.` })
       : json({ testError: `Send failed: ${res.error}` });
   }
 
@@ -292,7 +292,7 @@ export default function BackInStockPage() {
                 <Text as="p">
                   Signups are being collected, but nobody is notified until you connect
                   Interakt below. Shoppers are messaged on the WhatsApp number they enter
-                  themselves — no Shopify customer data is used to reach them.
+                  themselves: no Shopify customer data is used to reach them.
                 </Text>
               </Banner>
             )}
@@ -351,7 +351,7 @@ export default function BackInStockPage() {
                   onChange={setConsentText}
                   autoComplete="off"
                   multiline={2}
-                  helpText="Shown under the form. Tell shoppers you'll message them on WhatsApp — keep this honest and clear."
+                  helpText="Shown under the form. Tell shoppers you'll message them on WhatsApp: keep this honest and clear."
                 />
                 <TextField
                   label="Success message"
@@ -391,13 +391,13 @@ export default function BackInStockPage() {
                   autoComplete="off"
                   placeholder={
                     d.hasWaKey
-                      ? `Saved key ending in ${d.waKeyPreview} — enter a new key to replace it`
+                      ? `Saved key ending in ${d.waKeyPreview}: enter a new key to replace it`
                       : "Paste your API key"
                   }
                   helpText={
                     waProvider === "doubletick"
-                      ? "DoubleTick > Settings > API key. Stored securely — never sent to your storefront."
-                      : "Interakt > Settings > Developer Settings > Secret Key (base64). Stored securely — never sent to your storefront."
+                      ? "DoubleTick > Settings > API key. Stored securely: never sent to your storefront."
+                      : "Interakt > Settings > Developer Settings > Secret Key (base64). Stored securely: never sent to your storefront."
                   }
                 />
                 <TextField
@@ -414,7 +414,7 @@ export default function BackInStockPage() {
                   onChange={setWaFallbackImage}
                   autoComplete="off"
                   placeholder="https://cdn.shopify.com/…/logo.jpg"
-                  helpText="Used as the message image when a product has no featured image. Must start with https:// — WhatsApp rejects a template whose image header is empty."
+                  helpText="Used as the message image when a product has no featured image. Must start with https://: WhatsApp rejects a template whose image header is empty."
                 />
                 <InlineStack gap="300" wrap={false}>
                   <div style={{ flexGrow: 1 }}>

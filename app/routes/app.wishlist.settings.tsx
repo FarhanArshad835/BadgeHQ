@@ -337,7 +337,7 @@ export default function WishlistSettingsPage() {
 
                 {/* Email is Shopify Protected Customer Data Level 2. Requesting it
                     without approval makes Shopify reject the whole query, so this
-                    stays off until approval lands — then it's one checkbox. */}
+                    stays off until approval lands: then it's one checkbox. */}
                 <Checkbox
                   label="Also send hashed customer email (needs Shopify approval)"
                   checked={capiSendEmail}

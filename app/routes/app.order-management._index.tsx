@@ -159,7 +159,7 @@ export default function OrderManagement() {
             <Banner tone="info">
               Adds "Cancel order" to the customer's order page
               in their account, available only while the order is unfulfilled. Requires the
-              app to have orders permission — if you recently installed this feature, open
+              app to have orders permission: if you recently installed this feature, open
               the app once and approve the new permissions when prompted.
             </Banner>
 

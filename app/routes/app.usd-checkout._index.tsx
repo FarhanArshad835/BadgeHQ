@@ -81,7 +81,7 @@ export default function UsdCheckoutSettings() {
 
   const rateStr = d.inrToUsdRate > 0 ? d.inrToUsdRate.toFixed(6) : "unavailable";
   const exampleUsd =
-    d.inrToUsdRate > 0 ? (1000 * (d.markupBps / 10000) * d.inrToUsdRate).toFixed(2) : "—";
+    d.inrToUsdRate > 0 ? (1000 * (d.markupBps / 10000) * d.inrToUsdRate).toFixed(2) : "-";
 
   return (
     <Page narrowWidth>

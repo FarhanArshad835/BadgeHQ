@@ -94,7 +94,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       const tat = data && data.success && data.data ? data.data.tat : null;
       if (typeof tat === "number" && tat >= 0) {
         const eta = formatEta(computeEtaDate(tat, settings.bufferDays));
-        return `${label(mode)}: serviceable — transit ${tat} day(s), estimated delivery ${eta.etaText} (${eta.etaDate})`;
+        return `${label(mode)}: serviceable: transit ${tat} day(s), estimated delivery ${eta.etaText} (${eta.etaDate})`;
       }
       return `${label(mode)}: not serviceable from ${settings.originPin}`;
     });
@@ -305,7 +305,7 @@ export default function DeliveryEstimate() {
 
             <Banner tone="info">
               Once enabled, the widget appears automatically on your product pages under
-              the Add to Cart button — no theme changes needed. Allow up to 1 hour for it
+              the Add to Cart button: no theme changes needed. Allow up to 1 hour for it
               to appear or disappear, and up to 6 hours for delivery-date updates (results
               are cached at the edge). Tip: to control the exact placement, you can
               instead add the "Delivery Estimate" app block in the theme editor.
@@ -415,10 +415,10 @@ export default function DeliveryEstimate() {
                   autoComplete="off"
                   placeholder={
                     loaderData.hasToken
-                      ? `Saved token ending in ${loaderData.tokenPreview} — enter a new token to replace it`
+                      ? `Saved token ending in ${loaderData.tokenPreview}: enter a new token to replace it`
                       : "Paste your Delhivery API token"
                   }
-                  helpText="Found in your Delhivery One portal under API setup. Stored securely — never sent to your storefront."
+                  helpText="Found in your Delhivery One portal under API setup. Stored securely: never sent to your storefront."
                 />
                 <TextField
                   label="Origin PIN code"

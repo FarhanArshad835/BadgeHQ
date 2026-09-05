@@ -58,16 +58,16 @@ function outcomeOf(status: string, error: string): { label: string; tone: "succe
     // Distinguishable because the fix differs: one clears in a minute, the
     // other needs a bigger plan or tomorrow.
     return error.includes("quota-exhausted")
-      ? { label: "waiting — daily quota used up", tone: "warning" }
-      : { label: "waiting — AI rate limit", tone: "warning" };
+      ? { label: "waiting: daily quota used up", tone: "warning" }
+      : { label: "waiting: AI rate limit", tone: "warning" };
   }
   if (status === "failed") {
     if (error.includes("outside-window")) return { label: "too late (24h window closed)", tone: "critical" };
-    if (error.includes("opted-out")) return { label: "not sent — thread muted", tone: "attention" };
-    if (error.includes("human-replied")) return { label: "not sent — your team replied", tone: "attention" };
-    if (error.includes("too-old")) return { label: "not sent — too old to be useful", tone: "attention" };
-    if (error.includes("bad-key")) return { label: "not sent — API key rejected", tone: "critical" };
-    if (error.includes("daily-limit")) return { label: "not sent — your daily cap", tone: "attention" };
+    if (error.includes("opted-out")) return { label: "not sent: thread muted", tone: "attention" };
+    if (error.includes("human-replied")) return { label: "not sent: your team replied", tone: "attention" };
+    if (error.includes("too-old")) return { label: "not sent: too old to be useful", tone: "attention" };
+    if (error.includes("bad-key")) return { label: "not sent: API key rejected", tone: "critical" };
+    if (error.includes("daily-limit")) return { label: "not sent: your daily cap", tone: "attention" };
     return { label: "not sent", tone: "critical" };
   }
   if (status === "claimed") return { label: "sending…", tone: "attention" };
@@ -248,15 +248,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               isGroq ? "console.groq.com" : "Google AI Studio"
             }.`
           : result.error === "bad-model"
-          ? `${name} no longer offers the model this app requests (providers retire older models). This needs an app update — your API key is fine.`
+          ? `${name} no longer offers the model this app requests (providers retire older models). This needs an app update: your API key is fine.`
           : result.error === "quota-exhausted"
           ? isGroq
-            ? "Groq's DAILY token quota is used up (free tier: 100,000 tokens, roughly 40 replies at current settings). It resets at 00:00 UTC. Queued replies are held and sent automatically once it does — enable billing at console.groq.com for a higher ceiling."
+            ? "Groq's DAILY token quota is used up (free tier: 100,000 tokens, roughly 40 replies at current settings). It resets at 00:00 UTC. Queued replies are held and sent automatically once it does: enable billing at console.groq.com for a higher ceiling."
             : "Gemini's daily quota is used up. It resets at 00:00 Pacific. Enable billing in Google AI Studio for a higher ceiling."
           : result.error === "rate-limited"
           ? isGroq
-            ? "Groq is rate-limiting this key. The free tier allows 30 requests a minute — wait a moment and try again."
-            : "Gemini is rate-limiting this key. The free tier allows only 20 requests PER DAY, which a storefront exhausts almost immediately — switch to Groq above, or enable billing in Google AI Studio."
+            ? "Groq is rate-limiting this key. The free tier allows 30 requests a minute: wait a moment and try again."
+            : "Gemini is rate-limiting this key. The free tier allows only 20 requests PER DAY, which a storefront exhausts almost immediately: switch to Groq above, or enable billing in Google AI Studio."
           : result.error === "timeout"
           ? `${name} didn't respond in time. Try again.`
           : `Couldn't reach ${name}. Check the key and try again.`,
@@ -368,7 +368,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (wantsWa && !waBlocked && waProvider === "doubletick" && !alreadyRegistered) {
     const base = (process.env.SHOPIFY_APP_URL || "").replace(/\/$/, "");
     if (!base) {
-      waBlocked = "WhatsApp replies stayed off: the app URL isn't configured — contact support.";
+      waBlocked = "WhatsApp replies stayed off: the app URL isn't configured: contact support.";
     } else {
       if (!waWebhookToken) waWebhookToken = generateWebhookToken();
       if (!waWebhookAuth) waWebhookAuth = generateWebhookToken();
@@ -382,7 +382,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       if (!reg.ok) {
         waBlocked = reg.error.startsWith("auth-failed")
           ? "WhatsApp replies stayed off: DoubleTick rejected the API key."
-          : `WhatsApp replies stayed off — DoubleTick refused the webhook: ${reg.error}`;
+          : `WhatsApp replies stayed off: DoubleTick refused the webhook: ${reg.error}`;
       }
     }
   }
@@ -719,7 +719,7 @@ export default function AiRepliesPage() {
                 <Text as="p">
                   A chat bubble appears on your storefront. Shoppers ask questions and the
                   assistant answers <strong>only</strong> from the store information you
-                  write below — it's told never to invent policies, prices or delivery dates.
+                  write below: it's told never to invent policies, prices or delivery dates.
                 </Text>
                 <List type="number">
                   <List.Item>
@@ -750,9 +750,9 @@ export default function AiRepliesPage() {
                 <Select
                   label="AI provider"
                   options={[
-                    { label: "Groq — free, recommended", value: "groq" },
+                    { label: "Groq: free, recommended", value: "groq" },
                     { label: "Google Gemini", value: "gemini" },
-                    { label: "Anthropic Claude — paid, most capable", value: "claude" },
+                    { label: "Anthropic Claude: paid, most capable", value: "claude" },
                   ]}
                   value={aiProvider}
                   onChange={setAiProvider}
@@ -779,7 +779,7 @@ export default function AiRepliesPage() {
 
                 {aiProvider === "claude" && (
                   <Banner tone="info">
-                    Claude has <strong>no free tier</strong> — your Anthropic key needs credit.
+                    Claude has <strong>no free tier</strong>: your Anthropic key needs credit.
                     It&apos;s the most capable option; Groq stays free if cost matters more than nuance.
                   </Banner>
                 )}
@@ -798,15 +798,15 @@ export default function AiRepliesPage() {
                   type="password"
                   placeholder={
                     d.hasKey
-                      ? `Saved key ending in ${d.keyPreview} — enter a new key to replace it`
+                      ? `Saved key ending in ${d.keyPreview}: enter a new key to replace it`
                       : "Paste your API key"
                   }
                   helpText={
                     aiProvider === "groq"
-                      ? "Free from console.groq.com — no card needed. Stored securely, never sent to your storefront."
+                      ? "Free from console.groq.com: no card needed. Stored securely, never sent to your storefront."
                       : aiProvider === "claude"
-                      ? "From console.anthropic.com (needs billing set up). Stored securely — never sent to your storefront."
-                      : "From Google AI Studio. Stored securely — never sent to your storefront."
+                      ? "From console.anthropic.com (needs billing set up). Stored securely: never sent to your storefront."
+                      : "From Google AI Studio. Stored securely: never sent to your storefront."
                   }
                 />
               </BlockStack>
@@ -821,7 +821,7 @@ export default function AiRepliesPage() {
                   <Badge tone={d.knowledge.length ? "success" : "critical"}>
                     {d.knowledge.length
                       ? `${d.knowledge.length} characters saved`
-                      : "Empty — the assistant can't answer anything"}
+                      : "Empty: the assistant can't answer anything"}
                   </Badge>
                 </InlineStack>
                 <Text as="p" tone="subdued">
@@ -841,7 +841,7 @@ export default function AiRepliesPage() {
                     "RETURNS\n7 day return window. Items must be unused with tags attached...\n\n" +
                     "SIZING\nSee our size chart at /pages/size-chart..."
                   }
-                  helpText="Plain text. Keep it accurate — the assistant repeats what you write here. Leaving this blank keeps your saved text; use Clear to empty it."
+                  helpText="Plain text. Keep it accurate: the assistant repeats what you write here. Leaving this blank keeps your saved text; use Clear to empty it."
                 />
                 {d.knowledge.length > 0 && (
                   <InlineStack gap="200" blockAlign="center">
@@ -894,7 +894,7 @@ export default function AiRepliesPage() {
                 <Text as="p" tone="subdued">
                   When a customer messages your WhatsApp number, the assistant answers using
                   the same store information as the storefront chat. Replies sent within 24
-                  hours of the customer's message are free on WhatsApp — you only pay for
+                  hours of the customer's message are free on WhatsApp: you only pay for
                   Gemini usage.
                 </Text>
 
@@ -928,14 +928,14 @@ export default function AiRepliesPage() {
                   ]}
                   value={waProvider}
                   onChange={setWaProvider}
-                  helpText="Set separately from Back in Stock — you can use a different provider for each."
+                  helpText="Set separately from Back in Stock: you can use a different provider for each."
                 />
 
                 {isDoubleTick ? (
                   <Banner tone="info">
                     <BlockStack gap="200">
                       <Text as="p">
-                        We set the webhook up in DoubleTick for you — there's nothing to paste
+                        We set the webhook up in DoubleTick for you: there's nothing to paste
                         into their dashboard.
                       </Text>
                       <List type="number">
@@ -948,7 +948,7 @@ export default function AiRepliesPage() {
                   <Banner tone="info">
                     <BlockStack gap="200">
                       <Text as="p">
-                        <strong>Needs Interakt's Growth or Advanced plan</strong> — inbound
+                        <strong>Needs Interakt's Growth or Advanced plan</strong>: inbound
                         webhooks aren't available on lower plans.
                       </Text>
                       <List type="number">
@@ -969,7 +969,7 @@ export default function AiRepliesPage() {
                   placeholder={d.hasWaKey ? "••••••••" : "Paste your API key"}
                   helpText={
                     d.hasWaKey
-                      ? `Saved key ending in ${d.waKeyPreview} — enter a new key to replace it.`
+                      ? `Saved key ending in ${d.waKeyPreview}: enter a new key to replace it.`
                       : isDoubleTick
                       ? "From DoubleTick > Settings > API key."
                       : "From Interakt > Settings > Developer Settings."
@@ -983,7 +983,7 @@ export default function AiRepliesPage() {
                     onChange={setWaFromNumber}
                     autoComplete="off"
                     placeholder="+919999999999"
-                    helpText="Your DoubleTick WhatsApp business number — replies are sent from it."
+                    helpText="Your DoubleTick WhatsApp business number: replies are sent from it."
                   />
                 ) : (
                   <TextField
@@ -995,7 +995,7 @@ export default function AiRepliesPage() {
                     placeholder={d.hasWaSecret ? "••••••••" : "Paste the secret key from Interakt"}
                     helpText={
                       d.hasWaSecret
-                        ? "A secret is saved — enter a new one to replace it. Used to verify messages really came from Interakt."
+                        ? "A secret is saved: enter a new one to replace it. Used to verify messages really came from Interakt."
                         : "Set in Interakt when you add the webhook. Without it, messages are rejected."
                     }
                   />
@@ -1005,7 +1005,7 @@ export default function AiRepliesPage() {
                   d.hasWaAuth && d.webhookUrl ? (
                     <Text as="p" tone="subdued" variant="bodySm">
                       Webhook registered with DoubleTick. It's registered once, not on
-                      every save — changing your sender number registers a new one.
+                      every save: changing your sender number registers a new one.
                     </Text>
                   ) : (
                     <Text as="p" tone="subdued" variant="bodySm">
@@ -1022,14 +1022,14 @@ export default function AiRepliesPage() {
                       autoComplete="off"
                       readOnly
                       selectTextOnFocus
-                      helpText="Paste this into Interakt > Developer Settings > Webhooks. Keep it private — anyone with this URL and your secret could message your customers."
+                      helpText="Paste this into Interakt > Developer Settings > Webhooks. Keep it private: anyone with this URL and your secret could message your customers."
                     />
                     <InlineStack gap="200">
                       <Button onClick={handleRotateToken} loading={busy}>
                         Generate a new URL
                       </Button>
                       <Text as="span" tone="subdued" variant="bodySm">
-                        The old URL stops working immediately — you'd need to update Interakt.
+                        The old URL stops working immediately: you'd need to update Interakt.
                       </Text>
                     </InlineStack>
                   </BlockStack>
@@ -1082,7 +1082,7 @@ export default function AiRepliesPage() {
                       onChange={setWaHandoffFlowUrl}
                       autoComplete="off"
                       placeholder="https://…doubletick…/flow/…"
-                      helpText="From your flow's 'On Webhook' trigger. The flow's 'Assign Agent' node decides which agent gets the chat. The POST body includes the customer's number as phone, customerNumber, and customerPhoneNumber — read whichever your flow expects."
+                      helpText="From your flow's 'On Webhook' trigger. The flow's 'Assign Agent' node decides which agent gets the chat. The POST body includes the customer's number as phone, customerNumber, and customerPhoneNumber: read whichever your flow expects."
                     />
                   </>
                 )}
@@ -1103,7 +1103,7 @@ export default function AiRepliesPage() {
                       onChange={setWaShiprocketEmail}
                       autoComplete="off"
                       placeholder="you@yourstore.com"
-                      helpText="The login email for your Shiprocket panel — used only to read tracking status."
+                      helpText="The login email for your Shiprocket panel: used only to read tracking status."
                     />
                     <TextField
                       label="Shiprocket password"
@@ -1114,13 +1114,13 @@ export default function AiRepliesPage() {
                       placeholder={d.hasShiprocketPassword ? "••••••••" : "Your Shiprocket password"}
                       helpText={
                         d.hasShiprocketPassword
-                          ? "A password is saved — enter a new one to replace it. Stored securely, never sent to your storefront."
+                          ? "A password is saved: enter a new one to replace it. Stored securely, never sent to your storefront."
                           : "Stored securely, server-side only. Needed to read Shiprocket tracking."
                       }
                     />
                     <Text as="p" tone="subdued" variant="bodySm">
                       Delhivery tracking reuses the API key from your{" "}
-                      <strong>Delivery Estimate</strong> settings — nothing to add here. Leave
+                      <strong>Delivery Estimate</strong> settings: nothing to add here. Leave
                       Shiprocket blank if you only ship Delhivery.
                     </Text>
                   </>
@@ -1165,7 +1165,7 @@ export default function AiRepliesPage() {
                   placeholder={d.hasIgAccessToken ? "••••••••" : "Paste the long-lived Page access token"}
                   helpText={
                     d.hasIgAccessToken
-                      ? "A token is saved — enter a new one to replace it. Stored securely, server-side only."
+                      ? "A token is saved: enter a new one to replace it. Stored securely, server-side only."
                       : "A long-lived Page access token with instagram_manage_messages. Stored securely, never sent to your storefront."
                   }
                 />
@@ -1178,7 +1178,7 @@ export default function AiRepliesPage() {
                   placeholder={d.hasIgAppSecret ? "••••••••" : "Paste your Meta app secret"}
                   helpText={
                     d.hasIgAppSecret
-                      ? "A secret is saved — enter a new one to replace it. Used to verify messages really came from Meta."
+                      ? "A secret is saved: enter a new one to replace it. Used to verify messages really came from Meta."
                       : "Meta > App Settings > Basic > App Secret. Without it, incoming messages are rejected."
                   }
                 />
@@ -1245,7 +1245,7 @@ export default function AiRepliesPage() {
                   </Button>
                 </InlineStack>
                 <Text as="p" tone="subdued">
-                  A snapshot from when this page loaded — press Sync for the latest.
+                  A snapshot from when this page loaded: press Sync for the latest.
                   Search a number in your provider's inbox to open the full conversation.
                 </Text>
 
@@ -1268,7 +1268,7 @@ export default function AiRepliesPage() {
                         {d.activity.replied.filter((r) => r.status === "failed" && !r.error.includes("rate-limited") && !r.error.includes("quota-exhausted")).length}{" "}
                         not sent. The badge shows a customer's WORST outcome, so a thread that
                         failed earlier stays visible. Click a row with several messages to
-                        expand it. <strong>Waiting</strong> rows retry by themselves — a
+                        expand it. <strong>Waiting</strong> rows retry by themselves: a
                         per-minute limit clears in about a minute, a daily quota at midnight.
                       </Text>
                       {d.activity.replied.length === 0 ? (
@@ -1333,13 +1333,13 @@ export default function AiRepliesPage() {
                         Not replied ({d.activity.skipped.length})
                       </Text>
                       <Text as="p" tone="subdued" variant="bodySm">
-                        <strong>muted</strong> — your team took the thread over (after a
+                        <strong>muted</strong>: your team took the thread over (after a
                         handoff, or the customer sent stop/agent). Clears automatically 12
                         hours after an automatic handoff; a customer's own stop lasts until
                         they send start.{" "}
-                        <strong>rate-limited</strong> — more than 20 messages from that
+                        <strong>rate-limited</strong>: more than 20 messages from that
                         number in an hour.{" "}
-                        <strong>non-indian</strong> — only +91 numbers are supported.
+                        <strong>non-indian</strong>: only +91 numbers are supported.
                       </Text>
                       {d.activity.skipped.length === 0 ? (
                         <Text as="p" tone="subdued" variant="bodySm">Nothing skipped.</Text>
@@ -1380,7 +1380,7 @@ export default function AiRepliesPage() {
                   value={waDailyLimit}
                   onChange={setWaDailyLimit}
                   autoComplete="off"
-                  helpText="Counts replies, not conversations — one thread often runs 8 to 20 replies. 2000 covers roughly 250 conversations a day. Set 0 for no limit."
+                  helpText="Counts replies, not conversations: one thread often runs 8 to 20 replies. 2000 covers roughly 250 conversations a day. Set 0 for no limit."
                 />
 
                 <TextField
@@ -1391,7 +1391,7 @@ export default function AiRepliesPage() {
                   autoComplete="off"
                   min={0}
                   max={30}
-                  helpText="When a customer sends several messages in a row, the bot waits this long for them to finish, then replies once to all of them — instead of answering each message separately. 6 is a good default. Set 0 to reply to every message immediately. Applies to WhatsApp and Instagram."
+                  helpText="When a customer sends several messages in a row, the bot waits this long for them to finish, then replies once to all of them: instead of answering each message separately. 6 is a good default. Set 0 to reply to every message immediately. Applies to WhatsApp and Instagram."
                 />
 
                 <InlineStack gap="400" wrap={false}>
@@ -1459,7 +1459,7 @@ export default function AiRepliesPage() {
                       (Number(waThreadRecent) || 1) *
                       0.6,
                   ).toLocaleString()}{" "}
-                  tokens — history grows as the thread does, so later replies cost more than
+                  tokens: history grows as the thread does, so later replies cost more than
                   the first.
                 </Banner>
               </BlockStack>
@@ -1487,7 +1487,7 @@ export default function AiRepliesPage() {
                   onChange={setSupportEmail}
                   autoComplete="off"
                   placeholder="support@yourstore.com"
-                  helpText="Offered when the assistant can't help — e.g. order problems or complaints."
+                  helpText="Offered when the assistant can't help: e.g. order problems or complaints."
                 />
                 <TextField
                   label="Support link (optional)"

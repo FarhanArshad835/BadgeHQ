@@ -221,10 +221,10 @@ export default function Dashboard() {
                     One-time setup required to display widgets on your storefront:
                   </Text>
                   <List type="number">
-                    <List.Item>Click <strong>Open Theme Editor</strong> — it will open the App Embeds section directly.</List.Item>
+                    <List.Item>Click <strong>Open Theme Editor</strong>: it will open the App Embeds section directly.</List.Item>
                     <List.Item>Find <strong>BadgeHQ Widget</strong> and toggle it on.</List.Item>
                     <List.Item>Click <strong>Save</strong> in the Theme Editor.</List.Item>
-                    <List.Item>Return here — this notice disappears automatically once active.</List.Item>
+                    <List.Item>Return here: this notice disappears automatically once active.</List.Item>
                   </List>
                   {/* target="_top" escapes the Shopify iframe — required for cross-origin navigation */}
                   <Box>

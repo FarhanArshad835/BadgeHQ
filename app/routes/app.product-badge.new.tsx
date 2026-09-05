@@ -493,14 +493,14 @@ export default function NewProductBadge() {
 
                 <InlineGrid columns={2} gap="400">
                   <TextField
-                    label="Font Size — Desktop (px)"
+                    label="Font Size: Desktop (px)"
                     type="number"
                     value={String(fontSize)}
                     onChange={(v) => setFontSize(Number(v) || 11)}
                     autoComplete="off"
                   />
                   <TextField
-                    label="Font Size — Mobile (px)"
+                    label="Font Size: Mobile (px)"
                     type="number"
                     value={String(fontSizeMobile)}
                     onChange={(v) => setFontSizeMobile(Number(v) || 11)}
@@ -633,7 +633,7 @@ export default function NewProductBadge() {
                 <BlockStack gap="200">
                   <Text as="h3" variant="headingSm">Exclude collection (optional)</Text>
                   <Text as="p" variant="bodySm" tone="subdued">
-                    Hide this badge on products that are in the chosen collection — applied on top of the rule above.
+                    Hide this badge on products that are in the chosen collection: applied on top of the rule above.
                   </Text>
                   <InlineStack gap="200" align="start">
                     <Button onClick={openExcludeCollectionPicker}>

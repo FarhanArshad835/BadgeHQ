@@ -415,8 +415,8 @@ function EditProductBadgeForm() {
                 <TextField label="Gradient Background" value={gradient} onChange={setGradient} autoComplete="off"
                   placeholder="linear-gradient(135deg, #ff6b6b, #ee5a24)" helpText="CSS gradient. Overrides badge color when set." />
                 <InlineGrid columns={2} gap="400">
-                  <TextField label="Font Size — Desktop (px)" type="number" value={String(fontSize)} onChange={(v) => setFontSize(Number(v) || 11)} autoComplete="off" />
-                  <TextField label="Font Size — Mobile (px)" type="number" value={String(fontSizeMobile)} onChange={(v) => setFontSizeMobile(Number(v) || 11)} autoComplete="off"
+                  <TextField label="Font Size: Desktop (px)" type="number" value={String(fontSize)} onChange={(v) => setFontSize(Number(v) || 11)} autoComplete="off" />
+                  <TextField label="Font Size: Mobile (px)" type="number" value={String(fontSizeMobile)} onChange={(v) => setFontSizeMobile(Number(v) || 11)} autoComplete="off"
                     helpText="Applied at viewports ≤ 749px" />
                 </InlineGrid>
                 <TextField label="Priority" type="number" value={String(priority)} onChange={(v) => setPriority(Number(v) || 0)} autoComplete="off"
@@ -511,7 +511,7 @@ function EditProductBadgeForm() {
                 <BlockStack gap="200">
                   <Text as="h3" variant="headingSm">Exclude collection (optional)</Text>
                   <Text as="p" variant="bodySm" tone="subdued">
-                    Hide this badge on products that are in the chosen collection — applied on top of the rule above.
+                    Hide this badge on products that are in the chosen collection: applied on top of the rule above.
                   </Text>
                   <InlineStack gap="200" align="start">
                     <Button onClick={openExcludeCollectionPicker}>

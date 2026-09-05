@@ -206,7 +206,7 @@ export default function PnlPage() {
   const [tab, setTab] = useState(0);
   const busy = nav.state !== "idle";
 
-  const fmt = (minor: string | null, pending = "—") =>
+  const fmt = (minor: string | null, pending = "-") =>
     minor == null ? pending : formatMinor(BigInt(minor), d.currency);
   const fmtDate = (iso: string) =>
     new Date(iso).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short" });
@@ -255,7 +255,7 @@ export default function PnlPage() {
               Cost data is complete for <strong>{comp.pct}%</strong> of orders ({comp.fullyComplete}/{comp.total}).
               {comp.total - comp.shippingBilled > 0 && ` Shipping pending on ${comp.total - comp.shippingBilled}.`}
               {comp.total - comp.cogsComplete > 0 && ` Cost-per-item missing on ${comp.total - comp.cogsComplete}.`}
-              {" "}Costs are never estimated — pending figures are shown as “—”.
+              {" "}Costs are never estimated: pending figures are shown as “-”.
             </Banner>
 
             <Tabs
@@ -313,7 +313,7 @@ export default function PnlPage() {
                     >
                       {d.perOrder.map((o, i) => (
                         <IndexTable.Row id={String(i)} key={i} position={i}>
-                          <IndexTable.Cell>{o.name || "—"}</IndexTable.Cell>
+                          <IndexTable.Cell>{o.name || "-"}</IndexTable.Cell>
                           <IndexTable.Cell>{fmtDate(o.at as unknown as string)}</IndexTable.Cell>
                           <IndexTable.Cell>{fmt(o.revenue)}</IndexTable.Cell>
                           <IndexTable.Cell>{o.cogs == null ? <Badge tone="attention">Set cost</Badge> : fmt(o.cogs)}</IndexTable.Cell>
@@ -329,7 +329,7 @@ export default function PnlPage() {
                             )}
                           </IndexTable.Cell>
                           <IndexTable.Cell>
-                            {o.margin == null ? <Text as="span" tone="subdued">—</Text> : <strong>{fmt(o.margin)}</strong>}
+                            {o.margin == null ? <Text as="span" tone="subdued">-</Text> : <strong>{fmt(o.margin)}</strong>}
                           </IndexTable.Cell>
                         </IndexTable.Row>
                       ))}
@@ -363,7 +363,7 @@ export default function PnlPage() {
                             <IndexTable.Cell>{fmt(p.revenueMinor)}</IndexTable.Cell>
                             <IndexTable.Cell>{p.cogsMinor == null ? <Badge tone="attention">Set cost</Badge> : fmt(p.cogsMinor)}</IndexTable.Cell>
                             <IndexTable.Cell>
-                              {p.marginMinor == null ? <Text as="span" tone="subdued">—</Text> : <strong>{fmt(p.marginMinor)}</strong>}
+                              {p.marginMinor == null ? <Text as="span" tone="subdued">-</Text> : <strong>{fmt(p.marginMinor)}</strong>}
                             </IndexTable.Cell>
                           </IndexTable.Row>
                         ))}
@@ -383,7 +383,7 @@ export default function PnlPage() {
                       <Text as="p">
                         The P&amp;L reads your orders to work out revenue, COGS and shipping. Shopify gates all order
                         access behind <strong>Protected Customer Data (PCD)</strong> approval, and this app isn&apos;t
-                        approved yet — so <strong>Sync now</strong> will fail until it is. This is the same approval
+                        approved yet: so <strong>Sync now</strong> will fail until it is. This is the same approval
                         that order cancellation is waiting on.
                       </Text>
                       <Text as="p" variant="bodySm">
@@ -401,7 +401,7 @@ export default function PnlPage() {
                   <Divider />
                   <Text as="p" tone="subdued" variant="bodySm">
                     Actual shipping cost is billed by the courier a few days after dispatch, so recent orders show
-                    “Pending” until then — the figure is never estimated. Ad spend arrives in Phase 2.
+                    “Pending” until then: the figure is never estimated. Ad spend arrives in Phase 2.
                   </Text>
                 </BlockStack>
               </Card>
