@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useActionData, useLoaderData, useSubmit } from "@remix-run/react";
+import { useActionData, useLoaderData, useSubmit, useNavigation } from "@remix-run/react";
 import { useState, useEffect } from "react";
 import {
   Page,
@@ -72,6 +72,10 @@ export default function StickyCartSettings() {
   const { cart } = useLoaderData<typeof loader>();
   const actionData = useActionData<{ success?: boolean; error?: string }>();
   const submit = useSubmit();
+  // Without this the page looks frozen on a slow connection: the button
+  // stays live and nothing acknowledges the click until the loader returns.
+  const nav = useNavigation();
+  const busy = nav.state !== "idle";
 
   const initial = {
     buttonText: cart?.buttonText || "Add to Cart",
@@ -160,7 +164,7 @@ export default function StickyCartSettings() {
     <Page fullWidth>
       <TitleBar title="Sticky Add to Cart">
         <button onClick={handleDiscard}>Discard</button>
-        <button variant="primary" onClick={handleSave} disabled={!isDirty}>Save</button>
+        <button variant="primary" onClick={handleSave} disabled={!isDirty || busy} loading={busy ? "" : undefined}>Save</button>
       </TitleBar>
       <Layout>
         <Layout.Section>

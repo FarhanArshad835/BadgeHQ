@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useLoaderData, useNavigate, useSubmit } from "@remix-run/react";
+import { useLoaderData, useNavigate, useSubmit, useNavigation } from "@remix-run/react";
 import { useState, useCallback } from "react";
 import {
   Page,
@@ -86,6 +86,10 @@ export default function TrustBadgeList() {
   const { badges } = useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const submit = useSubmit();
+  // Without this the page looks frozen on a slow connection: the button
+  // stays live and nothing acknowledges the click until the loader returns.
+  const nav = useNavigation();
+  const busy = nav.state !== "idle";
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
   const handleToggle = useCallback(
@@ -198,6 +202,7 @@ export default function TrustBadgeList() {
                         <InlineStack gap="200">
                           <Button
                             size="slim"
+                            disabled={busy}
                             onClick={() => handleToggle(badge.id)}
                           >
                             {badge.isEnabled ? "Disable" : "Enable"}
@@ -205,6 +210,7 @@ export default function TrustBadgeList() {
                           <Button
                             size="slim"
                             tone="critical"
+                            disabled={busy}
                             onClick={() => setDeleteId(badge.id)}
                           >
                             Delete
@@ -234,6 +240,7 @@ export default function TrustBadgeList() {
         primaryAction={{
           content: "Delete",
           destructive: true,
+          loading: busy,
           onAction: handleDelete,
         }}
         secondaryActions={[

@@ -167,7 +167,7 @@ const features = [
   },
   {
     title: "Back in Stock",
-    description: "Email shoppers when a sold-out product is available again",
+    description: "Message shoppers on WhatsApp when a sold-out product is back",
     route: "/app/back-in-stock",
     key: "backInStock" as const,
   },
@@ -207,7 +207,7 @@ export default function Dashboard() {
                   {isEnabled ? "Widget Active" : "Setup Required"}
                 </Badge>
                 <Badge tone={currentPlan === "free" ? "info" : "success"}>
-                  {planName} Plan
+                  {`${planName} Plan`}
                 </Badge>
               </BlockStack>
             </InlineGrid>

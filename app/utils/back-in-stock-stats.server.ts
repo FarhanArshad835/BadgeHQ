@@ -89,3 +89,50 @@ export async function recentBackInStockActivity(shop: string, limit = 50) {
     select: { id: true, createdAt: true, phone: true, productId: true, variantId: true, notifiedAt: true },
   });
 }
+
+/**
+ * Resolve variant gids to "Product - Variant" labels so the merchant reads a
+ * product name instead of a numeric id. Best effort: a deleted variant falls
+ * back to its id rather than failing the page.
+ */
+export async function variantLabels(
+  admin: { graphql: (q: string, o?: { variables?: any }) => Promise<Response> },
+  variantIds: string[],
+): Promise<Map<string, { label: string; productId: string }>> {
+  const out = new Map<string, { label: string; productId: string }>();
+  const ids = Array.from(new Set(variantIds.filter(Boolean))).map((v) =>
+    v.startsWith("gid://") ? v : `gid://shopify/ProductVariant/${v}`,
+  );
+  if (!ids.length) return out;
+
+  const CHUNK = 50;
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    try {
+      const res = await admin.graphql(
+        `query BisVariants($ids: [ID!]!) {
+          nodes(ids: $ids) {
+            ... on ProductVariant { id title product { id title handle } }
+          }
+        }`,
+        { variables: { ids: ids.slice(i, i + CHUNK) } },
+      );
+      const body: any = await res.json();
+      for (const n of body?.data?.nodes ?? []) {
+        if (!n?.id) continue;
+        const product = String(n.product?.title ?? "");
+        const variant = String(n.title ?? "");
+        // "Default Title" is Shopify's placeholder for products with no options;
+        // showing it would be noise on every single-variant product.
+        const label =
+          variant && variant !== "Default Title" ? `${product} - ${variant}` : product;
+        const raw = String(n.id).split("/").pop() ?? "";
+        const entry = { label: label || raw, productId: String(n.product?.handle ?? "") };
+        out.set(String(n.id), entry);
+        if (raw) out.set(raw, entry);
+      }
+    } catch {
+      // Leave these unresolved; the caller falls back to the raw id.
+    }
+  }
+  return out;
+}

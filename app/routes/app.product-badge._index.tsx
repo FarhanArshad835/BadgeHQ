@@ -1,6 +1,7 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useLoaderData, useNavigate, useSubmit } from "@remix-run/react";
+import { useLoaderData, useNavigate, useSubmit, useNavigation } from "@remix-run/react";
+import { useState } from "react";
 import {
   Page,
   Layout,
@@ -13,6 +14,7 @@ import {
   EmptyState,
   InlineStack,
   Box,
+  Modal,
 } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
@@ -76,17 +78,37 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   return json({ error: "Unknown action" }, { status: 400 });
 };
 
+/** "top-left" reads as a code value; merchants see a phrase. */
+function positionLabel(pos: string): string {
+  const map: Record<string, string> = {
+    "top-left": "Top left",
+    "top-right": "Top right",
+    "bottom-left": "Bottom left",
+    "bottom-right": "Bottom right",
+  };
+  return map[pos] ?? pos;
+}
+
 export default function ProductBadgeList() {
   const { badges } = useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const submit = useSubmit();
+  // Without this the page looks frozen on a slow connection: the button
+  // stays live and nothing acknowledges the click until the loader returns.
+  const nav = useNavigation();
+  const busy = nav.state !== "idle";
 
   const handleToggle = (id: string) => {
     submit({ action: "toggle", id }, { method: "POST" });
   };
 
-  const handleDelete = (id: string) => {
-    submit({ action: "delete", id }, { method: "POST" });
+  // Deleting used to fire straight from the row with no confirmation and no
+  // undo. Trust Badges already asks; this now matches.
+  const [deleteId, setDeleteId] = useState<string | null>(null);
+  const handleDelete = () => {
+    if (!deleteId) return;
+    submit({ action: "delete", id: deleteId }, { method: "POST" });
+    setDeleteId(null);
   };
 
   return (
@@ -158,7 +180,7 @@ export default function ProductBadgeList() {
                         <Text as="span" variant="bodyMd" tone="subdued">Manual</Text>
                       )}
                     </IndexTable.Cell>
-                    <IndexTable.Cell>{badge.position}</IndexTable.Cell>
+                    <IndexTable.Cell>{positionLabel(badge.position)}</IndexTable.Cell>
                     <IndexTable.Cell>
                       <InlineStack gap="100">
                         <Badge tone={badge.isActive ? "success" : undefined}>
@@ -171,10 +193,10 @@ export default function ProductBadgeList() {
                     </IndexTable.Cell>
                     <IndexTable.Cell>
                       <InlineStack gap="200">
-                        <Button size="slim" onClick={() => handleToggle(badge.id)}>
+                        <Button size="slim" disabled={busy} onClick={() => handleToggle(badge.id)}>
                           {badge.isActive ? "Disable" : "Enable"}
                         </Button>
-                        <Button size="slim" tone="critical" onClick={() => handleDelete(badge.id)}>
+                        <Button size="slim" tone="critical" disabled={busy} onClick={() => setDeleteId(badge.id)}>
                           Delete
                         </Button>
                       </InlineStack>
@@ -193,6 +215,17 @@ export default function ProductBadgeList() {
           <Box paddingBlockEnd="800" />
         </Layout.Section>
       </Layout>
+      <Modal
+        open={deleteId !== null}
+        onClose={() => setDeleteId(null)}
+        title="Delete product badge?"
+        primaryAction={{ content: "Delete", destructive: true, loading: busy, onAction: handleDelete }}
+        secondaryActions={[{ content: "Cancel", onAction: () => setDeleteId(null) }]}
+      >
+        <Modal.Section>
+          <Text as="p">This removes the badge from your storefront. It cannot be undone.</Text>
+        </Modal.Section>
+      </Modal>
     </Page>
   );
 }
