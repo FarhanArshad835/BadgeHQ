@@ -14,6 +14,7 @@ import {
   Button,
   Badge,
   InlineStack,
+  InlineGrid,
 } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";

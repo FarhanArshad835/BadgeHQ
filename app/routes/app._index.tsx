@@ -194,9 +194,9 @@ export default function Dashboard() {
   const { stats, isEnabled, themeEditorUrl, currentPlan, planName } = useLoaderData<typeof loader>();
   const navigate = useNavigate();
 
+  // fullWidth: Polaris caps a plain Page at ~998px, which left most of a desktop
+  // monitor empty while the feature grid stayed three-across.
   return (
-    {/* fullWidth: Polaris caps a plain Page at ~998px, which left most of a
-        desktop monitor empty while the feature grid stayed three-across. */}
     <Page fullWidth>
       <TitleBar title="BadgeHQ" />
       <BlockStack gap="300">
