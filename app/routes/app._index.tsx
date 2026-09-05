@@ -180,14 +180,9 @@ const features = [
     route: "/app/ai-replies",
     key: "aiReplies" as const,
   },
-  {
-    title: "Profit & Loss",
-    description: "See real profit per day, per order and per product — revenue minus actual costs",
-    route: "/app/pnl",
-    key: "pnl" as const,
-    // Not a widget feature — show a plain "Dashboard" badge instead of a count.
-    badge: "Dashboard",
-  },
+  // Profit & Loss is deliberately absent: it is an internal tool, not something
+  // merchants should discover. It lives outside Shopify at /pnl-app behind its
+  // own password; /app/pnl still resolves for anyone with the link.
 ];
 
 export default function Dashboard() {
@@ -311,8 +306,8 @@ export default function Dashboard() {
                 <InlineGrid columns={2} alignItems="center">
                   <Badge>
                     {(() => {
-                      const override = "badge" in feature ? feature.badge : undefined;
-                      if (override) return override;
+                      // The badge override existed only for the P&L card, which is
+                      // no longer listed; every remaining feature shows a count.
                       const count = (stats as Record<string, number>)[feature.key] ?? 0;
                       return `${count} ${count === 1 ? "widget" : "widgets"}`;
                     })()}

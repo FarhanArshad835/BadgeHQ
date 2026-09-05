@@ -60,7 +60,10 @@ export default function App() {
         <Link to="/app/wishlist">Wishlist</Link>
         <Link to="/app/back-in-stock">Back in Stock</Link>
         <Link to="/app/ai-replies">Automated Replies</Link>
-        <Link to="/app/pnl">Profit &amp; Loss</Link>
+        {/* Profit & Loss is deliberately NOT listed: it is an internal tool, not
+            a merchant feature. It lives outside Shopify at /pnl-app, behind its
+            own password. The /app/pnl route still exists for anyone with the
+            link, it is just not advertised in the nav. */}
         <Link to="/app/usd-checkout">USD Checkout</Link>
         <Link to="/app/global-settings">Settings</Link>
         <Link to="/app/pricing">Pricing</Link>
