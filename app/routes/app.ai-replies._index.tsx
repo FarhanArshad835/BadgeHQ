@@ -269,7 +269,7 @@ export default function AiRepliesActivityPage() {
 
         <Card>
           <BlockStack gap="300">
-            <Text as="h2" variant="headingMd">Bot and team, day by day</Text>
+            <Text as="h2" variant="headingMd">Customers handled, day by day</Text>
             <div style={dim}>
               <SplitTrend points={s.split} />
             </div>

@@ -96,12 +96,18 @@ export async function aiReplyStats(
     }),
   ]);
 
+  // Replies per day, for the volume figure. Counts messages.
   const byDay = new Map<string, number>();
+  // Distinct customers the bot answered each day. Kept separate from byDay
+  // because the chart compares this against handovers, which are per customer:
+  // plotting messages against people put two units on one axis.
+  const botCustomersByDay = new Map<string, Set<string>>();
   // Handovers per day, so the split can be plotted rather than only totalled.
   const handoverByDay = new Map<string, number>();
   for (let t = Date.parse(`${fromDay}T00:00:00Z`); t <= Date.parse(`${toDay}T00:00:00Z`); t += DAY_MS) {
     const day = new Date(t).toISOString().slice(0, 10);
     byDay.set(day, 0);
+    botCustomersByDay.set(day, new Set());
     handoverByDay.set(day, 0);
   }
 
@@ -116,7 +122,7 @@ export async function aiReplyStats(
   const latencies: number[] = [];
 
   const tally = (
-    rows: Array<{ createdAt: Date; updatedAt: Date; status: string }>,
+    rows: Array<{ createdAt: Date; updatedAt: Date; status: string; who: string }>,
     onDone: () => void,
   ) => {
     for (const r of rows) {
@@ -126,6 +132,7 @@ export async function aiReplyStats(
         latencies.push((r.updatedAt.getTime() - r.createdAt.getTime()) / 1000);
         const day = new Date(r.createdAt.getTime() + IST_OFFSET_MS).toISOString().slice(0, 10);
         if (byDay.has(day)) byDay.set(day, (byDay.get(day) ?? 0) + 1);
+        if (botCustomersByDay.has(day)) botCustomersByDay.get(day)!.add(r.who);
       } else if (r.status === "failed") {
         failed++;
       } else {
@@ -143,8 +150,8 @@ export async function aiReplyStats(
   // what pinned the split at 100% bot.
   for (const k of waSkips) if (k.reason === "muted") shoppers.add(`wa:${k.phone}`);
   for (const k of igSkips) if (k.reason === "muted") shoppers.add(`ig:${k.customerId}`);
-  tally(waJobs, () => waAnswered++);
-  tally(igJobs, () => igAnswered++);
+  tally(waJobs.map((j) => ({ ...j, who: `wa:${j.phone}` })), () => waAnswered++);
+  tally(igJobs.map((j) => ({ ...j, who: `ig:${j.customerId}` })), () => igAnswered++);
 
   // A shopper was finished by the bot unless they were handed to a person. That
   // is the whole question this card exists to answer, so it is measured on the
@@ -213,14 +220,19 @@ export async function aiReplyStats(
 
   return {
     days: Array.from(byDay.entries()).map(([day, adds]) => ({ day, adds })),
-    split: Array.from(byDay.entries()).map(([day, bot]) => ({
-      day,
-      bot,
+    split: Array.from(botCustomersByDay.entries()).map(([day, botSet]) => {
       // Whichever source saw more that day. Recorded handovers win once they
       // exist; before that, muted-message days stand in. Never summed: on a day
       // with both they describe the same conversations.
-      human: Math.max(handoverByDay.get(day) ?? 0, mutedByDay.get(day)?.size ?? 0),
-    })),
+      const humanSet = mutedByDay.get(day) ?? new Set<string>();
+      const human = Math.max(handoverByDay.get(day) ?? 0, humanSet.size);
+      // A customer the bot answered AND who was then handed over belongs to the
+      // team for that day, not to both. Without this the two series overlap and
+      // the day's total exceeds the customers who actually wrote in.
+      let bot = 0;
+      for (const id of botSet) if (!humanSet.has(id)) bot++;
+      return { day, bot, human };
+    }),
     received: waJobs.length + igJobs.length + skipped,
     answered,
     failed,

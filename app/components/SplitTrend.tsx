@@ -1,5 +1,6 @@
 /**
- * Bot vs team, day by day. Same line-and-area style as DailyTrend, drawn twice.
+ * Bot vs team, day by day: CUSTOMERS on both series, never messages on one and
+ * customers on the other. Same line-and-area style as DailyTrend, drawn twice.
  *
  * Two series, so unlike DailyTrend this carries a legend and names both series
  * in the tooltip: identity never rests on colour alone. One shared crosshair
@@ -50,11 +51,11 @@ export function SplitTrend({ points }: { points: Point[] }) {
         <div style={{ display: "flex", justifyContent: "center", gap: 32 }}>
           <div>
             <div style={{ fontSize: 32, fontWeight: 650, color: BOT }}>{p.bot}</div>
-            <div style={{ fontSize: 13, color: INK_MUTED }}>by the bot</div>
+            <div style={{ fontSize: 13, color: INK_MUTED }}>finished by the bot</div>
           </div>
           <div>
             <div style={{ fontSize: 32, fontWeight: 650, color: HUMAN }}>{p.human}</div>
-            <div style={{ fontSize: 13, color: INK_MUTED }}>to your team</div>
+            <div style={{ fontSize: 13, color: INK_MUTED }}>handed to your team</div>
           </div>
         </div>
         <div style={{ fontSize: 13, color: INK_MUTED, marginTop: 8 }}>on {shortDay(p.day)}</div>
@@ -65,7 +66,7 @@ export function SplitTrend({ points }: { points: Point[] }) {
   const plotW = W - PAD.left - PAD.right;
   const plotH = H - PAD.top - PAD.bottom;
   // One shared scale for both series: two y-scales would let a handful of
-  // handovers look the same size as hundreds of bot replies.
+  // handovers look the same size as hundreds of bot-handled customers.
   const max = Math.max(1, ...points.map((p) => Math.max(p.bot, p.human)));
   const niceMax = max <= 5 ? 5 : Math.ceil(max / 5) * 5;
 
@@ -86,8 +87,9 @@ export function SplitTrend({ points }: { points: Point[] }) {
   return (
     <div>
       <div style={{ display: "flex", gap: 16, marginBottom: 8 }}>
-        <Swatch color={BOT} label="Bot" />
+        <Swatch color={BOT} label="Finished by the bot" />
         <Swatch color={HUMAN} label="Handed to your team" />
+        <span style={{ fontSize: 12, color: INK_MUTED, marginLeft: "auto" }}>customers per day</span>
       </div>
 
       <div style={{ position: "relative" }}>
@@ -95,7 +97,7 @@ export function SplitTrend({ points }: { points: Point[] }) {
           viewBox={`0 0 ${W} ${H}`}
           width="100%"
           role="img"
-          aria-label={`Replies by the bot and chats handed to your team, per day. ${points
+          aria-label={`Customers finished by the bot and customers handed to your team, per day. ${points
             .map((p) => `${shortDay(p.day)}: bot ${p.bot}, team ${p.human}`)
             .join(". ")}`}
           style={{ display: "block", overflow: "visible" }}
@@ -146,7 +148,7 @@ export function SplitTrend({ points }: { points: Point[] }) {
                 fill="transparent"
                 tabIndex={0}
                 role="button"
-                aria-label={`${shortDay(p.day)}: bot ${p.bot}, handed to your team ${p.human}`}
+                aria-label={`${shortDay(p.day)}: ${p.bot} customers finished by the bot, ${p.human} handed to your team`}
                 onMouseEnter={() => setHover(i)}
                 onFocus={() => setHover(i)}
                 onBlur={() => setHover(null)}
@@ -180,10 +182,10 @@ export function SplitTrend({ points }: { points: Point[] }) {
           >
             <div style={{ opacity: 0.75, marginBottom: 2 }}>{shortDay(points[hover].day)}</div>
             <div>
-              <strong style={{ fontSize: 14 }}>{points[hover].bot}</strong> by the bot
+              <strong style={{ fontSize: 14 }}>{points[hover].bot}</strong> finished by the bot
             </div>
             <div>
-              <strong style={{ fontSize: 14 }}>{points[hover].human}</strong> to your team
+              <strong style={{ fontSize: 14 }}>{points[hover].human}</strong> handed to your team
             </div>
           </div>
         )}
