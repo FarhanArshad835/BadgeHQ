@@ -195,9 +195,11 @@ export default function Dashboard() {
   const navigate = useNavigate();
 
   return (
-    <Page>
+    {/* fullWidth: Polaris caps a plain Page at ~998px, which left most of a
+        desktop monitor empty while the feature grid stayed three-across. */}
+    <Page fullWidth>
       <TitleBar title="BadgeHQ" />
-      <BlockStack gap="500">
+      <BlockStack gap="300">
         <Card>
           <BlockStack gap="400">
             {/* Header row */}
@@ -294,14 +296,16 @@ export default function Dashboard() {
           </Card>
         )}
 
-        <InlineGrid columns={{ xs: 1, sm: 2, md: 3 }} gap="400">
+        {/* Wider screens now get 4 columns, so the whole feature set is visible
+            at a glance instead of scrolling past three-at-a-time. */}
+        <InlineGrid columns={{ xs: 1, sm: 2, md: 3, lg: 4 }} gap="300">
           {features.map((feature) => (
             <Card key={feature.key}>
-              <BlockStack gap="300">
+              <BlockStack gap="200">
                 <Text as="h3" variant="headingMd">
                   {feature.title}
                 </Text>
-                <Text as="p" variant="bodyMd" tone="subdued">
+                <Text as="p" variant="bodySm" tone="subdued">
                   {feature.description}
                 </Text>
                 <InlineGrid columns={2} alignItems="center">

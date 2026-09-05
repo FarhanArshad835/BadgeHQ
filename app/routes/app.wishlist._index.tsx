@@ -4,7 +4,6 @@ import { useActionData, useLoaderData, useSubmit } from "@remix-run/react";
 import { useState, useEffect } from "react";
 import {
   Page,
-  Layout,
   Card,
   BlockStack,
   Text,
@@ -203,28 +202,23 @@ export default function WishlistSettingsPage() {
     submit({ intent: "test-capi" }, { method: "POST" });
   };
 
+  // Two columns on a wide screen: settings left, integrations right. A single
+  // stacked column left most of the display empty and pushed Meta and the CSV
+  // export below the fold.
   return (
-    <Page>
+    <Page fullWidth>
       <TitleBar title="Wishlist">
         <button onClick={handleDiscard}>Discard</button>
         <button variant="primary" onClick={handleSave} disabled={!isDirty}>Save</button>
       </TitleBar>
-      <Layout>
-        <Layout.Section>
-          <BlockStack gap="400">
-            {showSuccess && <Banner tone="success">Settings saved successfully.</Banner>}
-            {actionData?.error && <Banner tone="critical">{actionData.error}</Banner>}
+      <BlockStack gap="300">
+        {showSuccess && <Banner tone="success">Settings saved successfully.</Banner>}
+        {actionData?.error && <Banner tone="critical">{actionData.error}</Banner>}
 
-            <Banner tone="info">
-              Everything appears automatically: hearts on product cards, a wishlist
-              button on product pages, and a header icon that opens the wishlist page at
-              /apps/badgehq/wishlist. Guests keep their wishlist on their device;
-              logged-in customers sync across devices. Changes reach your storefront in
-              about a minute.
-            </Banner>
-
+        <InlineGrid columns={{ xs: 1, md: 2 }} gap="300">
+          <BlockStack gap="300">
             <Card>
-              <BlockStack gap="400">
+              <BlockStack gap="300">
                 <Text as="h2" variant="headingMd">Wishlist</Text>
                 <Checkbox
                   label="Enable wishlist"
@@ -284,7 +278,10 @@ export default function WishlistSettingsPage() {
                 />
               </BlockStack>
             </Card>
+          </BlockStack>
 
+          {/* Right column: the two things merchants buy this for. */}
+          <BlockStack gap="300">
             <Card>
               <BlockStack gap="300">
                 <InlineStack align="space-between" blockAlign="center">
@@ -364,9 +361,17 @@ export default function WishlistSettingsPage() {
                 </InlineStack>
               </BlockStack>
             </Card>
+
+            {/* Moved below the settings it explains, rather than above them. */}
+            <Banner tone="info">
+              Everything appears automatically: hearts on product cards, a wishlist button on
+              product pages, and a header icon that opens the wishlist page at
+              /apps/badgehq/wishlist. Guests keep their wishlist on their device; logged-in
+              customers sync across devices. Changes reach your storefront in about a minute.
+            </Banner>
           </BlockStack>
-        </Layout.Section>
-      </Layout>
+        </InlineGrid>
+      </BlockStack>
     </Page>
   );
 }
