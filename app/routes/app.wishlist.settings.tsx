@@ -15,6 +15,7 @@ import {
   Badge,
   InlineStack,
   InlineGrid,
+  Box,
 } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
@@ -357,6 +358,9 @@ export default function WishlistSettingsPage() {
             </Banner>
           </BlockStack>
         </InlineGrid>
+
+        {/* Breathing room: the embedded frame clips at the last element. */}
+        <Box paddingBlockEnd="800" />
       </BlockStack>
     </Page>
   );

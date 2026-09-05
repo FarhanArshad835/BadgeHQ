@@ -338,6 +338,9 @@ export default function Dashboard() {
             </Card>
           ))}
         </InlineGrid>
+
+        {/* Breathing room: the embedded frame clips at the last element. */}
+        <Box paddingBlockEnd="800" />
       </BlockStack>
     </Page>
   );

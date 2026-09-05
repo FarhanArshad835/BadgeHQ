@@ -214,6 +214,10 @@ export default function WishlistActivityPage() {
             ))}
           </IndexTable>
         </Card>
+
+        {/* The embedded frame clips at the last element, so the table sat flush
+            against the bottom edge with nothing to breathe into. */}
+        <Box paddingBlockEnd="800" />
       </BlockStack>
     </Page>
   );
