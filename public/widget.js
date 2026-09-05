@@ -2571,6 +2571,9 @@
   var WL_KEY = "badgehq_wishlist";
   var WL_SYNC = "/apps/badgehq/wishlist-sync";
   var WL_PAGE = "/apps/badgehq/wishlist";
+  // Cross-origin, unlike WL_SYNC: this one accepts GUESTS, who never get a
+  // logged_in_customer_id and so can't use the app proxy.
+  var WL_EVENT = API_ORIGIN + "/api/wishlist-event";
   var wlSyncTimer = null;
   var wlCfg = null;
 
@@ -2585,13 +2588,66 @@
     wlOnChange();
   }
   function wlHas(handle) { return wlGet().indexOf(handle) !== -1; }
+
+  // Meta's own first-party cookies. They are the only way to match a GUEST, who
+  // never reaches the app proxy and so is invisible to the server otherwise.
+  // Ad-blockers strip these for some shoppers; the event still sends and matches
+  // on IP + user agent, just less precisely.
+  function wlCookie(name) {
+    try {
+      var m = document.cookie.match("(^|;)\\s*" + name + "\\s*=\\s*([^;]+)");
+      return m ? decodeURIComponent(m[2]) : "";
+    } catch (e) { return ""; }
+  }
+
+  // Report a save to the server so it can be recorded for the CSV export and
+  // forwarded to Meta as AddToWishlist. Fire-and-forget: the wishlist itself has
+  // already been written to localStorage, so this must never block or fail it.
+  function wlReportEvent(handle, action) {
+    if (!SHOP) return;
+    try {
+      var body = {
+        shop: SHOP,
+        handle: handle,
+        action: action,
+        customerId: wlCustomerId() || "",
+        fbp: wlCookie("_fbp"),
+        fbc: wlCookie("_fbc"),
+        pageUrl: location.href,
+      };
+      // Product id and price make the Meta event far more useful for retargeting
+      // (it can show the exact product), but they are optional: never hold up
+      // the event waiting for them.
+      fetch("/products/" + encodeURIComponent(handle) + ".js", { headers: { Accept: "application/json" } })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .catch(function () { return null; })
+        .then(function (p) {
+          if (p) {
+            body.productId = String(p.id || "");
+            if (p.price != null) body.value = Number(p.price) / 100;
+            body.currency = (window.Shopify && window.Shopify.currency && window.Shopify.currency.active) || "";
+          }
+          fetch(WL_EVENT, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+            keepalive: true, // survives the shopper navigating away immediately
+          }).catch(function () {});
+        });
+    } catch (e) {}
+  }
+
   function wlToggle(handle) {
     if (!handle) return;
     var list = wlGet();
     var i = list.indexOf(handle);
-    if (i === -1) list.push(handle); else list.splice(i, 1);
+    var added = i === -1;
+    if (added) list.push(handle); else list.splice(i, 1);
     wlSave(list);
     wlScheduleSync();
+    // Only adds are reported to Meta: there is no "un-wishlist" event, and a
+    // removal should not retarget anyone.
+    if (added) wlReportEvent(handle, "add");
   }
 
   function wlCustomerId() {
