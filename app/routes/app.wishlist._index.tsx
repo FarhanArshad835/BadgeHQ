@@ -21,6 +21,7 @@ import {
   IndexTable,
   Banner,
   Box,
+  Link,
 } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
@@ -42,6 +43,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   return json({
     windowKey,
+    // Shop handle, for deep links into the Shopify admin and storefront.
+    shopHandle: session.shop.replace(".myshopify.com", ""),
+    shopDomain: session.shop,
     stats,
     activity: activity.map((a) => ({
       id: a.id,
@@ -116,6 +120,31 @@ export default function WishlistActivityPage() {
           </Banner>
         )}
 
+        {/* Saves are landing but nothing is reaching Meta: the single most useful
+            thing to say here, with the fix one click away rather than described. */}
+        {s.totalAdds > 0 && s.sentToMeta === 0 && (
+          <Banner
+            tone="warning"
+            title="These saves are not reaching Meta"
+            action={{ content: "Set up Meta", url: "/app/wishlist/settings" }}
+          >
+            <p>
+              Wishlist saves are being recorded, but Meta is not receiving them, so shoppers are not
+              being retargeted. Add your dataset id and access token to turn it on.
+            </p>
+          </Banner>
+        )}
+
+        {s.failedToMeta > 0 && (
+          <Banner
+            tone="critical"
+            title={`${n(s.failedToMeta)} ${s.failedToMeta === 1 ? "event" : "events"} could not be sent to Meta`}
+            action={{ content: "Check settings", url: "/app/wishlist/settings" }}
+          >
+            <p>Usually an expired or invalid access token. Generate a new one in Events Manager.</p>
+          </Banner>
+        )}
+
         <InlineGrid columns={{ xs: 1, sm: 2, md: 3, lg: 5 }} gap="300">
           <Stat label="Wishlist saves" value={n(s.totalAdds)} sub={`${n(s.removes)} removed`} />
           <Stat label="Customers" value={n(s.customers)} sub={`${n(s.guestAdds)} guest saves`} />
@@ -144,7 +173,16 @@ export default function WishlistActivityPage() {
                 <BlockStack gap="200">
                   {s.topProducts.map((p) => (
                     <InlineStack key={p.handle} align="space-between" blockAlign="center">
-                      <Text as="span" truncate>{p.handle}</Text>
+                      {/* Opens the live product page: we store the handle, and a
+                          handle addresses the storefront directly without needing
+                          a product-id lookup. */}
+                      <Link
+                        url={`https://${d.shopDomain}/products/${p.handle}`}
+                        target="_blank"
+                        removeUnderline
+                      >
+                        {p.handle}
+                      </Link>
                       <Text as="span" fontWeight="semibold">{n(p.count)}</Text>
                     </InlineStack>
                   ))}
@@ -166,8 +204,16 @@ export default function WishlistActivityPage() {
                   {s.topCustomers.map((c) => (
                     <InlineStack key={c.customerId} align="space-between" blockAlign="center">
                       {/* Customer NAMES are Shopify Protected Customer Data Level 2,
-                          which this app does not hold, so the id is what we can show. */}
-                      <Text as="span">Customer {c.customerId}</Text>
+                          which this app does not hold. Linking into the admin is the
+                          honest answer: the merchant sees the name there, where they
+                          are already entitled to it. */}
+                      <Link
+                        url={`https://admin.shopify.com/store/${d.shopHandle}/customers/${c.customerId}`}
+                        target="_blank"
+                        removeUnderline
+                      >
+                        Customer {c.customerId}
+                      </Link>
                       <Text as="span" fontWeight="semibold">{n(c.count)}</Text>
                     </InlineStack>
                   ))}
@@ -195,9 +241,31 @@ export default function WishlistActivityPage() {
           >
             {d.activity.map((a, i) => (
               <IndexTable.Row id={a.id} key={a.id} position={i}>
-                <IndexTable.Cell>{a.customerId ? `Customer ${a.customerId}` : "Guest"}</IndexTable.Cell>
-                <IndexTable.Cell>{a.handle}</IndexTable.Cell>
-                <IndexTable.Cell>{ago(a.when)}</IndexTable.Cell>
+                <IndexTable.Cell>
+                  {a.customerId ? (
+                    <Link
+                      url={`https://admin.shopify.com/store/${d.shopHandle}/customers/${a.customerId}`}
+                      target="_blank"
+                      removeUnderline
+                    >
+                      Customer {a.customerId}
+                    </Link>
+                  ) : (
+                    // A guest has no Shopify record to open, so this stays plain
+                    // text rather than a link that would go nowhere.
+                    <Text as="span" tone="subdued">Guest</Text>
+                  )}
+                </IndexTable.Cell>
+                <IndexTable.Cell>
+                  <Link url={`https://${d.shopDomain}/products/${a.handle}`} target="_blank" removeUnderline>
+                    {a.handle}
+                  </Link>
+                </IndexTable.Cell>
+                {/* Exact time on hover: "2 hours ago" is easier to scan, but the
+                    real timestamp is what someone reconciling against Meta needs. */}
+                <IndexTable.Cell>
+                  <span title={new Date(a.when).toLocaleString("en-IN")}>{ago(a.when)}</span>
+                </IndexTable.Cell>
                 <IndexTable.Cell>{a.action === "add" ? "Saved" : "Removed"}</IndexTable.Cell>
                 <IndexTable.Cell>
                   {a.metaStatus === "sent" ? (
