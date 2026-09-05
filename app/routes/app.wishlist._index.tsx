@@ -7,7 +7,8 @@
  */
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { useLoaderData, useSearchParams } from "@remix-run/react";
+import { useLoaderData, useSearchParams, useNavigation } from "@remix-run/react";
+import { useState } from "react";
 import {
   Page,
   Card,
@@ -22,6 +23,8 @@ import {
   Banner,
   Box,
   Link,
+  TextField,
+  Spinner,
 } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
@@ -29,20 +32,45 @@ import { wishlistStats, recentWishlistActivity } from "../utils/wishlist-stats.s
 import { WishlistTrend } from "../components/WishlistTrend";
 
 const WINDOWS: Record<string, number> = { "7d": 7, "30d": 30, "90d": 90 };
+const DAY_MS = 24 * 60 * 60 * 1000;
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Today in IST, as YYYY-MM-DD. */
+function istToday(): string {
+  return new Date(Date.now() + IST_OFFSET_MS).toISOString().slice(0, 10);
+}
+function addDays(day: string, n: number): string {
+  return new Date(Date.parse(`${day}T00:00:00Z`) + n * DAY_MS).toISOString().slice(0, 10);
+}
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
-  const requested = new URL(request.url).searchParams.get("window") || "";
-  // Whitelist rather than trusting the param: it drives a query bound.
-  const windowKey = WINDOWS[requested] ? requested : "7d";
+  const params = new URL(request.url).searchParams;
+  const requested = params.get("window") || "";
+  const from = params.get("from") || "";
+  const to = params.get("to") || "";
+
+  // A custom range wins when both ends are well-formed; anything else falls back
+  // to a preset. Both are validated: these values become query bounds.
+  const custom = ISO_DAY.test(from) && ISO_DAY.test(to) && from <= to;
+  const windowKey = custom ? "custom" : WINDOWS[requested] ? requested : "7d";
+
+  const today = istToday();
+  const fromDay = custom ? from : addDays(today, -(WINDOWS[windowKey] - 1));
+  // Never let a custom range run past today: future days would plot as a flat
+  // zero tail and read as a collapse in activity.
+  const toDay = custom ? (to > today ? today : to) : today;
 
   const [stats, activity] = await Promise.all([
-    wishlistStats(session.shop, WINDOWS[windowKey]),
+    wishlistStats(session.shop, fromDay, toDay),
     recentWishlistActivity(session.shop, 50),
   ]);
 
   return json({
     windowKey,
+    fromDay,
+    toDay,
     // Shop handle, for deep links into the Shopify admin and storefront.
     shopHandle: session.shop.replace(".myshopify.com", ""),
     shopDomain: session.shop,
@@ -86,28 +114,94 @@ function Stat({ label, value, sub }: { label: string; value: string; sub?: strin
 export default function WishlistActivityPage() {
   const d = useLoaderData<typeof loader>();
   const [, setSearchParams] = useSearchParams();
+  const nav = useNavigation();
   const s = d.stats;
   const n = (v: number) => v.toLocaleString("en-IN");
+
+  // The loader re-runs on every range change, so on a slow connection the page
+  // sat there looking broken. This drives a spinner and dims the stale figures.
+  const loading = nav.state === "loading";
+
+  const [customFrom, setCustomFrom] = useState(d.fromDay);
+  const [customTo, setCustomTo] = useState(d.toDay);
+  const [showCustom, setShowCustom] = useState(d.windowKey === "custom");
+
+  const applyCustom = () => {
+    if (customFrom && customTo && customFrom <= customTo) {
+      setSearchParams({ from: customFrom, to: customTo });
+    }
+  };
 
   return (
     <Page fullWidth>
       <TitleBar title="Wishlist" />
       <BlockStack gap="300">
         <InlineStack align="space-between" blockAlign="center">
-          <Select
-            label="Period"
-            labelHidden
-            options={[
-              { label: "Last 7 days", value: "7d" },
-              { label: "Last 30 days", value: "30d" },
-              { label: "Last 90 days", value: "90d" },
-            ]}
-            value={d.windowKey}
-            onChange={(v) => setSearchParams({ window: v })}
-          />
+          <InlineStack gap="200" blockAlign="center">
+            <Select
+              label="Period"
+              labelHidden
+              disabled={loading}
+              options={[
+                { label: "Last 7 days", value: "7d" },
+                { label: "Last 30 days", value: "30d" },
+                { label: "Last 90 days", value: "90d" },
+                { label: "Custom range", value: "custom" },
+              ]}
+              value={d.windowKey}
+              onChange={(v) => {
+                if (v === "custom") {
+                  setShowCustom(true); // reveal the fields; don't reload yet
+                } else {
+                  setShowCustom(false);
+                  setSearchParams({ window: v });
+                }
+              }}
+            />
+            {showCustom && (
+              <>
+                <TextField
+                  label="From"
+                  labelHidden
+                  type="date"
+                  value={customFrom}
+                  onChange={setCustomFrom}
+                  autoComplete="off"
+                  max={d.toDay}
+                />
+                <TextField
+                  label="To"
+                  labelHidden
+                  type="date"
+                  value={customTo}
+                  onChange={setCustomTo}
+                  autoComplete="off"
+                  min={customFrom}
+                />
+                <Button
+                  onClick={applyCustom}
+                  loading={loading}
+                  disabled={!customFrom || !customTo || customFrom > customTo}
+                >
+                  Apply
+                </Button>
+              </>
+            )}
+            {/* Something must acknowledge the click, or a slow load reads as a
+                dead control and gets clicked again. */}
+            {loading && <Spinner accessibilityLabel="Loading" size="small" />}
+          </InlineStack>
           <InlineStack gap="200">
             <Button url="/app/wishlist/settings">Settings</Button>
-            <Button variant="primary" url="/app/wishlist/export" download disabled={s.totalAdds === 0}>
+            {/* target=_blank, not `download`: the app runs in the Shopify admin's
+                iframe, where a same-frame download is blocked by the sandbox and
+                simply does nothing. Opening outside the frame lets it save. */}
+            <Button
+              variant="primary"
+              url={`/app/wishlist/export?from=${d.fromDay}&to=${d.toDay}`}
+              target="_blank"
+              disabled={s.totalAdds === 0}
+            >
               Export to CSV
             </Button>
           </InlineStack>
@@ -145,6 +239,9 @@ export default function WishlistActivityPage() {
           </Banner>
         )}
 
+        {/* Dim what is about to be replaced: showing the previous period's
+            numbers at full strength during a load invites misreading them. */}
+        <div style={{ opacity: loading ? 0.5 : 1, transition: "opacity 150ms" }}>
         <InlineGrid columns={{ xs: 1, sm: 2, md: 3, lg: 5 }} gap="300">
           <Stat label="Wishlist saves" value={n(s.totalAdds)} sub={`${n(s.removes)} removed`} />
           <Stat label="Customers" value={n(s.customers)} sub={`${n(s.guestAdds)} guest saves`} />
@@ -155,11 +252,14 @@ export default function WishlistActivityPage() {
             value={s.customers > 0 ? (s.totalAdds / s.customers).toFixed(1) : "0"}
           />
         </InlineGrid>
+        </div>
 
         <Card>
           <BlockStack gap="300">
             <Text as="h2" variant="headingMd">Wishlist saves per day</Text>
-            <WishlistTrend points={s.days} />
+            <div style={{ opacity: loading ? 0.5 : 1, transition: "opacity 150ms" }}>
+              <WishlistTrend points={s.days} />
+            </div>
           </BlockStack>
         </Card>
 

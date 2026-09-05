@@ -53,11 +53,28 @@ async function titlesByHandle(
   return out;
 }
 
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, admin } = await authenticate.admin(request);
 
+  // Honour the range the page is showing, so the file matches what was on screen
+  // when the merchant pressed Export. No range means everything.
+  const params = new URL(request.url).searchParams;
+  const from = params.get("from") || "";
+  const to = params.get("to") || "";
+  const ranged = ISO_DAY.test(from) && ISO_DAY.test(to) && from <= to;
+  const when = ranged
+    ? {
+        gte: new Date(Date.parse(`${from}T00:00:00Z`) - IST_OFFSET_MS),
+        lt: new Date(Date.parse(`${to}T00:00:00Z`) - IST_OFFSET_MS + DAY_MS),
+      }
+    : undefined;
+
   const events = await prisma.wishlistEvent.findMany({
-    where: { shop: session.shop },
+    where: { shop: session.shop, ...(when ? { createdAt: when } : {}) },
     orderBy: { createdAt: "desc" },
     take: MAX_ROWS,
     select: { createdAt: true, customerId: true, handle: true, productId: true, action: true },
@@ -80,11 +97,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     ),
   ].join("\n");
 
-  const today = new Date().toISOString().slice(0, 10);
+  // Name the file after what is in it, so several exports don't collide in the
+  // downloads folder under one filename.
+  const stamp = ranged ? `${from}-to-${to}` : new Date().toISOString().slice(0, 10);
   return new Response(csv, {
     headers: {
       "Content-Type": "text/csv; charset=utf-8",
-      "Content-Disposition": `attachment; filename="wishlist-${today}.csv"`,
+      "Content-Disposition": `attachment; filename="wishlist-${stamp}.csv"`,
       "Cache-Control": "no-store",
     },
   });

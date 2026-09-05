@@ -34,21 +34,28 @@ export type WishlistStats = {
  * One pass over the window's events: the volumes here are small enough that
  * grouping in memory beats six round trips to Neon.
  */
-export async function wishlistStats(shop: string, windowDays = 7): Promise<WishlistStats> {
-  const since = new Date(Date.now() - (windowDays - 1) * DAY_MS);
-  // Start from IST midnight of the earliest day, so the first bucket is whole.
-  since.setUTCHours(0, 0, 0, 0);
+export async function wishlistStats(
+  shop: string,
+  /** Inclusive IST day bounds, "YYYY-MM-DD". Presets and custom ranges both
+      resolve to these, so there is one code path rather than two. */
+  fromDay: string,
+  toDay: string,
+): Promise<WishlistStats> {
+  // IST day boundaries expressed as UTC instants: the IST day starts 5:30 before
+  // UTC midnight, and ends the instant the next one starts.
+  const since = new Date(Date.parse(`${fromDay}T00:00:00Z`) - IST_OFFSET_MS);
+  const until = new Date(Date.parse(`${toDay}T00:00:00Z`) - IST_OFFSET_MS + DAY_MS);
 
   const events = await prisma.wishlistEvent.findMany({
-    where: { shop, createdAt: { gte: since } },
+    where: { shop, createdAt: { gte: since, lt: until } },
     select: { createdAt: true, customerId: true, handle: true, action: true, metaStatus: true },
   });
 
-  // Seed every day in the window so a quiet day plots as zero rather than
+  // Seed every day in the range so a quiet day plots as zero rather than
   // vanishing and distorting the shape of the line.
   const byDay = new Map<string, number>();
-  for (let i = 0; i < windowDays; i++) {
-    byDay.set(istDay(new Date(Date.now() - (windowDays - 1 - i) * DAY_MS)), 0);
+  for (let t = Date.parse(`${fromDay}T00:00:00Z`); t <= Date.parse(`${toDay}T00:00:00Z`); t += DAY_MS) {
+    byDay.set(new Date(t).toISOString().slice(0, 10), 0);
   }
 
   const byProduct = new Map<string, number>();
