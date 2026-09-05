@@ -15,6 +15,7 @@ import {
   InlineStack,
   Modal,
   Thumbnail,
+  Box,
 } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
@@ -109,7 +110,7 @@ export default function TrustBadgeList() {
   };
 
   return (
-    <Page>
+    <Page fullWidth>
       <TitleBar title="Trust Badges">
         <button
           variant="primary"
@@ -216,6 +217,13 @@ export default function TrustBadgeList() {
               </IndexTable>
             </Card>
           )}
+        </Layout.Section>
+
+        {/* The embedded frame clips at the last element, so without this the
+            final control sits flush against the bottom edge. Wrapped in a
+            Section because Layout only accepts Layout.Section children. */}
+        <Layout.Section>
+          <Box paddingBlockEnd="800" />
         </Layout.Section>
       </Layout>
 

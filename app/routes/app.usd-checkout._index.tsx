@@ -189,6 +189,13 @@ export default function UsdCheckoutSettings() {
             </Card>
           </BlockStack>
         </Layout.Section>
+
+        {/* The embedded frame clips at the last element, so without this the
+            final control sits flush against the bottom edge. Wrapped in a
+            Section because Layout only accepts Layout.Section children. */}
+        <Layout.Section>
+          <Box paddingBlockEnd="800" />
+        </Layout.Section>
       </Layout>
     </Page>
   );

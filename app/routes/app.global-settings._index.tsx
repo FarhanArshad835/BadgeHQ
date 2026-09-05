@@ -11,6 +11,7 @@ import {
   Select,
   Checkbox,
   Banner,
+  Box,
 } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
@@ -153,6 +154,13 @@ export default function GlobalSettings() {
               </BlockStack>
             </Card>
           </BlockStack>
+        </Layout.Section>
+
+        {/* The embedded frame clips at the last element, so without this the
+            final control sits flush against the bottom edge. Wrapped in a
+            Section because Layout only accepts Layout.Section children. */}
+        <Layout.Section>
+          <Box paddingBlockEnd="800" />
         </Layout.Section>
       </Layout>
     </Page>

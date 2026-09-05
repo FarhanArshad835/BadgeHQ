@@ -29,7 +29,7 @@ import {
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import { wishlistStats, recentWishlistActivity } from "../utils/wishlist-stats.server";
-import { WishlistTrend } from "../components/WishlistTrend";
+import { DailyTrend } from "../components/DailyTrend";
 
 const WINDOWS: Record<string, number> = { "7d": 7, "30d": 30, "90d": 90 };
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -258,7 +258,7 @@ export default function WishlistActivityPage() {
           <BlockStack gap="300">
             <Text as="h2" variant="headingMd">Wishlist saves per day</Text>
             <div style={{ opacity: loading ? 0.5 : 1, transition: "opacity 150ms" }}>
-              <WishlistTrend points={s.days} />
+              <DailyTrend points={s.days} noun="saves" />
             </div>
           </BlockStack>
         </Card>

@@ -1,5 +1,5 @@
 /**
- * Daily wishlist-saves trend. Hand-rolled inline SVG: this is the app's only
+ * Daily trend for any counted event (wishlist saves, signups, replies). Hand-rolled inline SVG: this is the app's only
  * chart, so a charting dependency would be a lot of weight for one area plot.
  *
  * Single series, so no legend (the heading names it) and a sequential blue
@@ -27,7 +27,7 @@ function shortDay(iso: string): string {
   return `${d.getUTCDate()} ${d.toLocaleString("en-GB", { month: "short", timeZone: "UTC" })}`;
 }
 
-export function WishlistTrend({ points }: { points: Point[] }) {
+export function DailyTrend({ points, noun = "saves" }: { points: Point[]; noun?: string }) {
   const [hover, setHover] = useState<number | null>(null);
 
   if (!points.length) return null;
@@ -53,7 +53,7 @@ export function WishlistTrend({ points }: { points: Point[] }) {
         viewBox={`0 0 ${W} ${H}`}
         width="100%"
         role="img"
-        aria-label={`Wishlist saves per day. ${points.map((p) => `${shortDay(p.day)}: ${p.adds}`).join(". ")}`}
+        aria-label={`${noun} per day. ${points.map((p) => `${shortDay(p.day)}: ${p.adds}`).join(". ")}`}
         style={{ display: "block", overflow: "visible" }}
         onMouseLeave={() => setHover(null)}
       >
@@ -94,7 +94,7 @@ export function WishlistTrend({ points }: { points: Point[] }) {
               fill="transparent"
               tabIndex={0}
               role="button"
-              aria-label={`${shortDay(p.day)}: ${p.adds} saves`}
+              aria-label={`${shortDay(p.day)}: ${p.adds} ${noun}`}
               onMouseEnter={() => setHover(i)}
               onFocus={() => setHover(i)}
               onBlur={() => setHover(null)}
@@ -127,7 +127,7 @@ export function WishlistTrend({ points }: { points: Point[] }) {
           }}
         >
           {/* Value leads, label follows: the reader already knows the series. */}
-          <strong style={{ fontSize: 14 }}>{points[hover].adds}</strong> saves
+          <strong style={{ fontSize: 14 }}>{points[hover].adds}</strong> {noun}
           <div style={{ opacity: 0.75 }}>{shortDay(points[hover].day)}</div>
         </div>
       )}

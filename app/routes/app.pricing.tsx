@@ -194,9 +194,9 @@ export default function PricingPage() {
   const plans: Plan[] = [PLANS.FREE, PLANS.GROWTH, PLANS.PRO];
 
   return (
-    <Page>
+    <Page fullWidth>
       <TitleBar title="Pricing" />
-      <BlockStack gap="500">
+      <BlockStack gap="300">
         {actionData?.error && (
           <Banner tone="critical">
             <p>{actionData.error}</p>
@@ -290,6 +290,10 @@ export default function PricingPage() {
             );
           })}
         </InlineGrid>
+
+        {/* The embedded frame clips at the last element, so without this the
+            final control sits flush against the bottom edge. */}
+        <Box paddingBlockEnd="800" />
       </BlockStack>
     </Page>
   );

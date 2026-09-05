@@ -23,6 +23,7 @@ import {
   Badge,
   List,
   Divider,
+  Box,
 } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
@@ -694,14 +695,14 @@ export default function AiRepliesPage() {
   const handleRotateIgToken = () => submit({ intent: "rotate-ig-token" }, { method: "POST" });
 
   return (
-    <Page>
+    <Page fullWidth>
       <TitleBar title="Automated Replies">
         <button onClick={handleDiscard}>Discard</button>
         <button variant="primary" onClick={handleSave} disabled={!isDirty}>Save</button>
       </TitleBar>
       <Layout>
         <Layout.Section>
-          <BlockStack gap="400">
+          <BlockStack gap="300">
             {showSuccess && !actionData?.warning && (
               <Banner tone="success">Settings saved successfully.</Banner>
             )}
@@ -1516,6 +1517,13 @@ export default function AiRepliesPage() {
               </BlockStack>
             </Card>
           </BlockStack>
+        </Layout.Section>
+
+        {/* The embedded frame clips at the last element, so without this the
+            final control sits flush against the bottom edge. Wrapped in a
+            Section because Layout only accepts Layout.Section children. */}
+        <Layout.Section>
+          <Box paddingBlockEnd="800" />
         </Layout.Section>
       </Layout>
     </Page>

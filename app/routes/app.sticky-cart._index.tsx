@@ -157,14 +157,14 @@ export default function StickyCartSettings() {
   const isOutline = buttonStyle === "outline";
 
   return (
-    <Page>
+    <Page fullWidth>
       <TitleBar title="Sticky Add to Cart">
         <button onClick={handleDiscard}>Discard</button>
         <button variant="primary" onClick={handleSave} disabled={!isDirty}>Save</button>
       </TitleBar>
       <Layout>
         <Layout.Section>
-          <BlockStack gap="400">
+          <BlockStack gap="300">
             {showSuccess && <Banner tone="success">Sticky cart settings saved successfully.</Banner>}
             {actionData?.error && <Banner tone="critical">{actionData.error}</Banner>}
 
@@ -322,6 +322,13 @@ export default function StickyCartSettings() {
               </Box>
             </BlockStack>
           </Card>
+        </Layout.Section>
+
+        {/* The embedded frame clips at the last element, so without this the
+            final control sits flush against the bottom edge. Wrapped in a
+            Section because Layout only accepts Layout.Section children. */}
+        <Layout.Section>
+          <Box paddingBlockEnd="800" />
         </Layout.Section>
       </Layout>
     </Page>
