@@ -355,7 +355,8 @@ export default function WishlistSettingsPage() {
                     ? `${loaderData.eventCount.toLocaleString()} wishlist ${loaderData.eventCount === 1 ? "action" : "actions"} recorded: which customer saved which product, and when.`
                     : "No wishlist activity recorded yet. Saves are recorded from now on; anything wishlisted before today isn't included."}
                 </Text>
-                <InlineStack>
+                <InlineStack gap="200">
+                  <Button variant="primary" url="/app/wishlist/activity">View activity</Button>
                   <Button url="/app/wishlist/export" download disabled={loaderData.eventCount === 0}>
                     Download CSV
                   </Button>
