@@ -156,12 +156,9 @@ const features = [
     route: "/app/delivery-estimate",
     key: "deliveryEstimates" as const,
   },
-  {
-    title: "Order Management",
-    description: "Let customers cancel their own unfulfilled orders",
-    route: "/app/order-management",
-    key: "orderManagements" as const,
-  },
+  // Order Management is hidden: Shopify denies this app access to the Order
+  // object entirely (Protected Customer Data), so cancellation fails too --
+  // not just the address editing hidden earlier.
   {
     title: "Wishlist",
     description: "Let shoppers save products and sync their wishlist across devices",
