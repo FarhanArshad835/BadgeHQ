@@ -392,6 +392,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         // collected, so they carry no refund obligation.
         financialStatus: { equals: "PAID", mode: "insensitive" },
         refundsMinor: 0,
+        // ReturnHQ fee orders are not customer product sales: the return-fee
+        // carrier is deliveryStatus "returnhq-fee" (already excluded by the
+        // rto/rto_in_transit filter above) and the exchange-fee order carries
+        // isExchangeFee. Drop the latter so the list is only real refunds owed.
+        isExchangeFee: false,
         ...(window ? { orderCreatedAt: window } : {}),
       },
       select: {
