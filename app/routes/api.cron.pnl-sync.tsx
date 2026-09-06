@@ -364,6 +364,90 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     });
   }
 
+  // Read-only: ?rtoUnrefunded=1 lists PREPAID orders that came back RTO but have
+  // no refund recorded — real money still held from customers whose parcel was
+  // returned to us. COD RTOs are excluded: the customer never paid, so there is
+  // nothing to refund. Optional &month=YYYY-MM to scope; &format=csv to download.
+  if (new URL(request.url).searchParams.get("rtoUnrefunded") === "1") {
+    const app = await getPnlApp();
+    const shop = app.shopDomain;
+    if (!shop) return json({ error: "not-configured" }, { status: 400 });
+
+    const url2 = new URL(request.url);
+    const scopeMonth = url2.searchParams.get("month");
+    let window: { gte: Date; lt: Date } | undefined;
+    if (scopeMonth) {
+      const [ry, rm] = scopeMonth.split("-").map(Number);
+      window = {
+        gte: new Date(Date.UTC(ry, rm - 1, 1) - IST_OFFSET_MS),
+        lt: new Date(Date.UTC(ry, rm, 1) - IST_OFFSET_MS),
+      };
+    }
+
+    const rows = await prisma.orderFinancials.findMany({
+      where: {
+        shop,
+        deliveryStatus: { in: ["rto", "rto_in_transit"] },
+        // PAID = the customer's money is with us (prepaid). COD RTOs were never
+        // collected, so they carry no refund obligation.
+        financialStatus: { equals: "PAID", mode: "insensitive" },
+        refundsMinor: 0,
+        ...(window ? { orderCreatedAt: window } : {}),
+      },
+      select: {
+        orderName: true,
+        orderId: true,
+        orderCreatedAt: true,
+        grossRevenueMinor: true,
+        deliveryStatus: true,
+        awb: true,
+      },
+      orderBy: { orderCreatedAt: "asc" },
+      take: 5000,
+    });
+
+    let owedMinor = 0n;
+    for (const r of rows) owedMinor += r.grossRevenueMinor;
+
+    if (url2.searchParams.get("format") === "csv") {
+      const esc = (v: string) => `"${String(v).replace(/"/g, '""')}"`;
+      const csv = [
+        "order_name,order_id,created_at,amount_rupees,delivery_status,awb",
+        ...rows.map((r) =>
+          [
+            esc(r.orderName),
+            esc(r.orderId),
+            esc(r.orderCreatedAt.toISOString().slice(0, 10)),
+            (Number(r.grossRevenueMinor) / 100).toFixed(2),
+            esc(r.deliveryStatus),
+            esc(r.awb),
+          ].join(","),
+        ),
+      ].join("\n");
+      return new Response(csv, {
+        headers: {
+          "Content-Type": "text/csv; charset=utf-8",
+          "Content-Disposition": `attachment; filename="rto-unrefunded${scopeMonth ? "-" + scopeMonth : ""}.csv"`,
+        },
+      });
+    }
+
+    return json({
+      ok: true,
+      shop,
+      month: scopeMonth || "all",
+      count: rows.length,
+      totalOwedRupees: Number(owedMinor) / 100,
+      orders: rows.slice(0, 100).map((r) => ({
+        name: r.orderName,
+        date: r.orderCreatedAt.toISOString().slice(0, 10),
+        rupees: Number(r.grossRevenueMinor) / 100,
+        status: r.deliveryStatus,
+        awb: r.awb,
+      })),
+    });
+  }
+
   const results: Record<string, unknown> = {};
 
   // 1) Standalone P&L app (custom-app token) — this is the one that actually
