@@ -18,6 +18,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     hasMetaToken: Boolean(app.metaAccessToken),
     deliverySheetUrl: app.deliverySheetUrl,
     stockingMatch: app.stockingMatch,
+    reportStartMonth: app.reportStartMonth,
     stockingUnitCost: (Number(app.stockingUnitCostMinor) / 100).toString(),
     gstOutputRatePct: (app.gstOutputRateBp / 100).toString(),
   });
@@ -39,6 +40,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const metaAccessToken = String(form.get("metaAccessToken") || "").trim();
   const deliverySheetUrl = String(form.get("deliverySheetUrl") || "").trim();
   const stockingMatch = String(form.get("stockingMatch") || "").trim();
+  // "YYYY-MM", or blank to show every month. Anything else is ignored rather
+  // than stored: a malformed value would silently hide months.
+  const reportStartRaw = String(form.get("reportStartMonth") || "").trim();
+  const reportStartMonth =
+    reportStartRaw === "" || /^\d{4}-(0[1-9]|1[0-2])$/.test(reportStartRaw) ? reportStartRaw : null;
   // Rupees in the field, paise in the column. Blank keeps the current value.
   const gstRaw = String(form.get("gstOutputRatePct") || "").trim();
   const gstNum = Number(gstRaw);
@@ -70,6 +76,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       metaAdAccountId,
       deliverySheetUrl,
       stockingMatch,
+      ...(reportStartMonth != null ? { reportStartMonth } : {}),
       ...(stockingUnitCostMinor != null ? { stockingUnitCostMinor } : {}),
       ...(gstOutputRateBp != null ? { gstOutputRateBp } : {}),
       ...(adminToken ? { adminToken } : {}),
@@ -164,6 +171,15 @@ export default function PnlSettings() {
           </div>
           <Field label="Product title contains" name="stockingMatch" defaultValue={d.stockingMatch} placeholder="stocking" />
           <Field label="Cost per unit (₹)" name="stockingUnitCost" defaultValue={d.stockingUnitCost} placeholder="60" />
+          <hr className="pnl-rule" />
+          <div className="pnl-section-label">Reporting window</div>
+          <div className="pnl-help" style={{ marginBottom: 12 }}>
+            Hides everything before this month from the dropdown, the comparison and the
+            month-on-month change. Useful when an early month is incomplete enough to distort a
+            comparison. The orders are still synced and still stored, so clearing this brings
+            those months straight back. Leave blank to show everything.
+          </div>
+          <Field label="Show months from (YYYY-MM)" name="reportStartMonth" defaultValue={d.reportStartMonth} placeholder="2026-05" />
           <hr className="pnl-rule" />
           <div className="pnl-section-label">Delivery status sheet (auto-fetch)</div>
           <div className="pnl-help" style={{ marginBottom: 12 }}>

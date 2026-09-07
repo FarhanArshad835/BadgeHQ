@@ -56,8 +56,15 @@ function currentIstMonth(): string {
   return `${ist.getUTCFullYear()}-${String(ist.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
-/** Months (newest first) that actually have order data, plus the current month. */
-async function availableMonths(shop: string): Promise<string[]> {
+/**
+ * Months (newest first) that actually have order data, plus the current month.
+ *
+ * `from` hides everything before it (PnlApp.reportStartMonth). The orders are
+ * still synced and still in the database; they just stop appearing in the
+ * dropdown, the comparison and the month-on-month change, so one unrepresentative
+ * month cannot distort a comparison. Clearing the setting brings it all back.
+ */
+async function availableMonths(shop: string, from = ""): Promise<string[]> {
   const rows = await prisma.orderFinancials.findMany({
     where: { shop },
     select: { orderCreatedAt: true },
@@ -68,7 +75,12 @@ async function availableMonths(shop: string): Promise<string[]> {
     const ist = new Date(r.orderCreatedAt.getTime() + IST_OFFSET_MS);
     set.add(`${ist.getUTCFullYear()}-${String(ist.getUTCMonth() + 1).padStart(2, "0")}`);
   }
-  return Array.from(set).sort().reverse();
+  // "YYYY-MM" sorts correctly as a string, so a plain comparison is enough.
+  const all = Array.from(set).sort().reverse();
+  const kept = from ? all.filter((m) => m >= from) : all;
+  // Never hide everything: a floor set past the last month with data would leave
+  // the dashboard with no month to select and nothing to show.
+  return kept.length ? kept : all;
 }
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -77,7 +89,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const shop = app.shopDomain;
   const configured = Boolean(app.shopDomain && app.adminToken);
 
-  const months = shop ? await availableMonths(shop) : [currentIstMonth()];
+  const months = shop ? await availableMonths(shop, app.reportStartMonth) : [currentIstMonth()];
   const url = new URL(request.url);
   const requested = url.searchParams.get("month") || "";
   const month = months.includes(requested) ? requested : months[0];

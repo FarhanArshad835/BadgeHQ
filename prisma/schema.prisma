@@ -701,6 +701,12 @@ model PnlApp {
   // months from here to now — NOT a rolling 90-day window (which would cut off
   // the start of older months and drift later every day). Default Apr 2026.
   backfillStartMonth        String    @default("2026-04")
+  // Earliest month the DASHBOARD shows ("YYYY-MM"; blank = show everything).
+  // Deliberately separate from backfillStartMonth: a month can be incomplete or
+  // unrepresentative enough that including it distorts a comparison, without
+  // that being a reason to stop syncing it or to delete the orders. Hiding is
+  // reversible; deleting the rows is not.
+  reportStartMonth          String    @default("2026-05")
   // Published-to-web CSV URL of the delivery-status sheet (AWB tab). The app
   // fetches this directly (no Google auth) to set delivery outcome by AWB.
   deliverySheetUrl          String    @default("")
