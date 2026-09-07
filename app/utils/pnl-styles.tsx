@@ -92,6 +92,23 @@ export const CSS = `
 }
 @keyframes pnl-spin { to { transform: rotate(360deg); } }
 
+
+/* month picker: a toggle per month, so choosing which columns to compare is one
+   click each rather than a multi-select nobody can operate with a mouse */
+.pnl-monthpick { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 12px; }
+.pnl-chip {
+  font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+  padding: 4px 10px; border-radius: 999px;
+  background: var(--panel); color: var(--ink-soft); border: 1px solid var(--line);
+  transition: background 140ms var(--ease), border-color 140ms var(--ease), color 140ms var(--ease);
+}
+.pnl-chip:hover:not(:disabled) { border-color: var(--ink-faint); color: var(--ink); }
+.pnl-chip[aria-pressed="true"] {
+  background: var(--accent-wash); border-color: var(--accent); color: var(--accent-ink);
+}
+.pnl-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.pnl-chip:disabled { opacity: 0.5; cursor: default; }
+
 /* select */
 .pnl-select {
   font: inherit; font-size: 13px; color: var(--ink); background: var(--panel);

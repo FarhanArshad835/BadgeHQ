@@ -95,11 +95,30 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   // Comparison shouldn't be a separate mode you have to know to switch on.
   const prevMonth = months[months.indexOf(month) + 1] ?? null;
 
-  // Month-by-month comparison: compute up to the 6 most recent months in PARALLEL
-  // (ad spend is a live Meta call per month, so parallel keeps this ~1 call's time).
+  // Month-by-month comparison: computed in PARALLEL (ad spend is a live Meta
+  // call per month, so parallel keeps this to roughly one call's time).
   // Opt-in via ?compare=1 so a normal single-month load stays light.
   const compareOn = url.searchParams.get("compare") === "1";
-  const compareMonths = compareOn ? months.slice(0, 6) : [];
+
+  // Which months to put side by side. ?months=2026-04,2026-07 picks them
+  // explicitly; without it the six most recent stand in, which is what this
+  // did before the picker existed.
+  //
+  // Filtered against `months` rather than trusted: these become query bounds,
+  // and an unknown month would compute an empty column that reads as a real
+  // zero. Capped because each column is a live ad-spend call.
+  const MAX_COMPARE = 12;
+  const requestedMonths = (url.searchParams.get("months") || "")
+    .split(",")
+    .map((m) => m.trim())
+    .filter((m) => months.includes(m));
+  const chosenMonths = Array.from(new Set(requestedMonths));
+  // Newest first, matching the single-month dropdown, so column order never
+  // depends on the order they were ticked. An empty or unrecognised ?months=
+  // falls back to the default rather than rendering a panel with no columns,
+  // which would hide the picker and leave no way to choose again.
+  const picked = months.filter((m) => chosenMonths.includes(m)).slice(0, MAX_COMPARE);
+  const compareMonths = !compareOn ? [] : picked.length ? picked : months.slice(0, 6);
 
   const [report, prevReport, compareReports] = await Promise.all([
     shop ? computeMonth(shop, month) : null,
@@ -175,6 +194,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   return json({
     configured,
     months,
+    compareMonths,
     monthLabels,
     month,
     shopDomain: shop || "",
@@ -953,6 +973,55 @@ of which ${fmt(r.deliveredRevenue)} delivered`} value={fmt(r.grossSale)} strong
           <div className="pnl-panel" style={{ marginBottom: 20, overflowX: "auto" }}>
             <div className="pnl-section-label">
               Month comparison <span className="pnl-save-note">— highlighted rows are editable; press Enter to save</span>
+            </div>
+
+            {/* Which months to compare. Toggles rather than a multi-select: a
+                multi-select needs ctrl-click to add one and silently drops the
+                rest if you forget, which is a bad way to lose a column you were
+                reading. */}
+            <div className="pnl-monthpick">
+              {d.months.map((m) => {
+                const on = d.compareMonths.includes(m);
+                return (
+                  <button
+                    key={m}
+                    type="button"
+                    className="pnl-chip"
+                    aria-pressed={on}
+                    // Turning off the last column would leave the panel blank
+                    // with no way back except the toggle above it.
+                    disabled={on && d.compareMonths.length === 1}
+                    onClick={() => {
+                      const next = on
+                        ? d.compareMonths.filter((x) => x !== m)
+                        : [...d.compareMonths, m];
+                      const p = new URLSearchParams(searchParams);
+                      p.set("compare", "1");
+                      p.set("months", next.join(","));
+                      p.delete("status");
+                      setSearchParams(p);
+                    }}
+                  >
+                    {monthLabel(m)}
+                  </button>
+                );
+              })}
+              {d.months.length > 1 && (
+                <button
+                  type="button"
+                  className="pnl-btn"
+                  style={{ fontSize: 12, padding: "4px 10px" }}
+                  onClick={() => {
+                    const p = new URLSearchParams(searchParams);
+                    p.set("compare", "1");
+                    p.delete("months"); // back to the six most recent
+                    p.delete("status");
+                    setSearchParams(p);
+                  }}
+                >
+                  Reset
+                </button>
+              )}
             </div>
             <table className="pnl-table pnl-compare">
               <thead>
