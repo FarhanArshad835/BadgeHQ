@@ -1942,6 +1942,26 @@
     return "";
   }
 
+  /**
+   * Readable text colour for a given background.
+   *
+   * The button is filled with the merchant's progress colour, which they can
+   * set to anything. White on a pale yellow bar would be unreadable, so the
+   * label flips to near-black over light fills. Standard luminance, same rule
+   * browsers and contrast tools use.
+   */
+  function bundleInkOn(bg) {
+    var hex = String(bg || "").trim().replace("#", "");
+    if (hex.length === 3) hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
+    if (!/^[0-9a-f]{6}$/i.test(hex)) return "#fff"; // named or rgb() colour: assume dark
+    var r = parseInt(hex.slice(0, 2), 16) / 255;
+    var g = parseInt(hex.slice(2, 4), 16) / 255;
+    var b = parseInt(hex.slice(4, 6), 16) / 255;
+    var lin = function (v) { return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+    var L = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+    return L > 0.45 ? "#1a1a19" : "#fff";
+  }
+
   /** Merchant-authored text reaching innerHTML, so it is escaped. */
   function bundleEscape(t) {
     return String(t)
@@ -1982,7 +2002,7 @@
       "transition:background .35s ease,transform .35s cubic-bezier(.34,1.56,.64,1);}" +
       // A filled block lifts very slightly. Enough to feel earned, not enough
       // to look like it is floating away.
-      ".badgehq-bundle__seg--on{transform:translateY(-1px);}" +
+      ".badgehq-bundle__seg--on{transform:translateY(-1px);background-image:linear-gradient(180deg,rgba(255,255,255,.18),rgba(0,0,0,.06)) !important;}" +
       // A slow sheen travels across the filled blocks, so the bar is alive even
       // while the shopper is not doing anything.
       ".badgehq-bundle__seg--on::after{content:'';position:absolute;inset:0;" +
@@ -2004,17 +2024,21 @@
       // The call to action: a button, because it is the one thing on this
       // widget the shopper can act on, and an underlined text link beside a
       // progress bar reads as a footnote.
-      ".badgehq-bundle__cta{display:inline-block !important;margin:10px 0 0 !important;" +
-      "padding:8px 18px !important;border-radius:999px !important;font-size:13px !important;" +
+      // Solid, in the SAME colour as the filled bar. currentColor was the bug:
+      // it inherits the theme's link colour, so a green bar sat under a blue
+      // outline button and the two read as unrelated widgets. The colour is
+      // set inline per offer, from the merchant's own progress colour.
+      ".badgehq-bundle__cta{display:inline-block !important;margin:12px 0 0 !important;" +
+      "padding:9px 20px !important;border-radius:999px !important;font-size:13px !important;" +
       "font-weight:600 !important;text-decoration:none !important;cursor:pointer;" +
-      "border:1.5px solid currentColor !important;background:transparent !important;" +
-      "transition:transform .18s cubic-bezier(.34,1.56,.64,1),background .18s ease,color .18s ease;}" +
-      ".badgehq-bundle__cta:hover{transform:translateY(-1px);}" +
-      ".badgehq-bundle__cta:active{transform:translateY(0);}" +
-      // Outline by default so it never fights the merchant's own buttons. On
-      // hover it takes a faint tint rather than a solid fill: the text colour
-      // is the merchant's, and filling with the same colour would erase it.
-      ".badgehq-bundle__cta:hover{background:rgba(0,0,0,.06) !important;}" +
+      "border:0 !important;line-height:1.2 !important;" +
+      "box-shadow:0 1px 2px rgba(0,0,0,.16),inset 0 1px 0 rgba(255,255,255,.25);" +
+      "transition:transform .18s cubic-bezier(.34,1.56,.64,1),box-shadow .18s ease,filter .18s ease;}" +
+      // Lift and brighten on hover: same language as the bar's filled blocks.
+      ".badgehq-bundle__cta:hover{transform:translateY(-1px);filter:brightness(1.08);" +
+      "box-shadow:0 3px 8px rgba(0,0,0,.18),inset 0 1px 0 rgba(255,255,255,.25);}" +
+      ".badgehq-bundle__cta:active{transform:translateY(0);box-shadow:0 1px 2px rgba(0,0,0,.16);}" +
+      ".badgehq-bundle__cta:focus-visible{outline:2px solid currentColor;outline-offset:2px;}" +
 
       // The unlock is the payoff, so it gets the only large motion on the page.
       ".badgehq-bundle--won .badgehq-bundle__msg{animation:badgehq-bundle-won .6s ease;}" +
@@ -2120,7 +2144,9 @@
       // that already says that.
       var linkText = offer.ctaText
         || (offer.scope === "collection" ? "Shop eligible products" : "View product");
-      html += '<a class="badgehq-bundle__cta" href="' + shopUrl + '">' + bundleEscape(linkText) + "</a>";
+      var ctaBg = c.progressBg || "#4caf50";
+      html += '<a class="badgehq-bundle__cta" href="' + shopUrl + '" style="background:' + ctaBg +
+        ";color:" + bundleInkOn(ctaBg) + '">' + bundleEscape(linkText) + "</a>";
     }
 
     el.innerHTML = html;
