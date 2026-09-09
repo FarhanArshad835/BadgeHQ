@@ -2023,7 +2023,7 @@
       // OVER a sticky checkout bar, and the offer must never cover the button
       // the shopper is trying to press.
       ".badgehq-bundle{position:relative !important;z-index:auto !important;display:block !important;" +
-      "width:100% !important;box-sizing:border-box !important;margin:22px 0 10px !important;" +
+      "width:auto !important;box-sizing:border-box !important;margin:22px 0 18px !important;" +
       "padding:22px 18px 16px !important;border-radius:14px !important;border:1.5px solid !important;" +
       "text-align:left !important;float:none !important;visibility:visible !important;opacity:1 !important;" +
       "overflow:visible !important;pointer-events:auto !important;}" +
@@ -2079,7 +2079,7 @@
       // shrinks instead. Everything else tightens by a few pixels rather than
       // shrinking the type, which is what has to stay readable.
       "@media (max-width:599px){" +
-      ".badgehq-bundle{padding:18px 12px 12px !important;margin:20px 0 8px !important;border-radius:12px !important;}" +
+      ".badgehq-bundle{padding:18px 12px 12px !important;margin:20px 0 14px !important;border-radius:12px !important;}" +
       ".badgehq-bundle__row{gap:10px !important;flex-wrap:nowrap !important;}" +
       ".badgehq-bundle__left{gap:10px !important;flex:1 1 auto !important;}" +
       ".badgehq-bundle__pics{height:34px !important;}" +
@@ -2230,24 +2230,37 @@
     var inserted = false;
 
     if (pg === "cart") {
-      // Above the ITEMS, not the footer. Footer-first put the offer down by the
-      // totals, below everything the shopper has to scroll past, which is the
-      // wrong place for something asking them to go add another item.
-      var cartSelectors = [
-        "cart-items",
-        ".cart__items",
-        ".cart-items",
-        "#main-cart-items",
-        'form[action="/cart"]',
-        // Fallbacks: only if a theme exposes no item container at all.
-        "cart-footer",
-        ".cart__footer",
-        ".cart-footer",
-        ".cart__summary",
-      ];
-      for (var i = 0; i < cartSelectors.length; i++) {
-        var t = document.querySelector(cartSelectors[i]);
-        if (t) { t.parentNode.insertBefore(el, t); inserted = true; break; }
+      // INSIDE the theme's centred column, at the top.
+      //
+      // Inserting before <cart-items> looked right but put the card outside
+      // that column: <cart-items> is a full-bleed section wrapper, so the card
+      // spanned the whole viewport while the cart sat in a narrow centre. The
+      // page-width div inside it is the element that actually defines the
+      // column, so prepending there makes the card line up with the cart by
+      // construction rather than by guessing a max-width.
+      var host = document.querySelector(
+        "cart-items .page-width, #main-cart-items .page-width, .cart .page-width, cart-items .cart__items, #main-cart-items",
+      );
+      if (host) {
+        host.insertBefore(el, host.firstChild);
+        inserted = true;
+      }
+
+      if (!inserted) {
+        // No recognisable column: fall back to sitting above the items, which
+        // is at least the right position even if the width is the theme's.
+        var cartSelectors = [
+          ".cart__items",
+          'form[action="/cart"]',
+          "cart-items",
+          "cart-footer",
+          ".cart__footer",
+          ".cart__summary",
+        ];
+        for (var i = 0; i < cartSelectors.length; i++) {
+          var t = document.querySelector(cartSelectors[i]);
+          if (t) { t.parentNode.insertBefore(el, t); inserted = true; break; }
+        }
       }
     }
 
