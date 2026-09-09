@@ -1962,6 +1962,25 @@
     return L > 0.45 ? "#1a1a19" : "#fff";
   }
 
+  /**
+   * A pale wash of the accent, for the strip's background and border.
+   *
+   * Mixed toward white in sRGB rather than using rgba(), because the widget
+   * can land on a dark or patterned cart surface where a translucent fill
+   * would pick up whatever is behind it.
+   */
+  function bundleTint(hex, stronger) {
+    var h = String(hex || "").trim().replace("#", "");
+    if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+    if (!/^[0-9a-f]{6}$/i.test(h)) return stronger ? "#e3e3e0" : "#f7f7f5";
+    var mix = stronger ? 0.78 : 0.93; // how far toward white
+    var ch = function (i) {
+      var v = parseInt(h.slice(i, i + 2), 16);
+      return Math.round(v + (255 - v) * mix);
+    };
+    return "rgb(" + ch(0) + "," + ch(2) + "," + ch(4) + ")";
+  }
+
   /** Merchant-authored text reaching innerHTML, so it is escaped. */
   function bundleEscape(t) {
     return String(t)
@@ -1979,77 +1998,67 @@
     var style = document.createElement("style");
     style.id = "badgehq-bundle-css";
     style.textContent =
-      ".badgehq-bundle{display:block !important;width:100% !important;box-sizing:border-box !important;" +
-      "padding:12px 16px !important;margin:8px 0 !important;text-align:center !important;" +
+      // A horizontal strip, not a stacked block: on a cart page this sits among
+      // line items and totals, where a tall centred panel interrupts the flow.
+      // Message left, action right, the shape every coupon row in the category
+      // already uses, so shoppers recognise it without being taught.
+      ".badgehq-bundle{display:flex !important;align-items:center !important;gap:12px !important;" +
+      "width:100% !important;box-sizing:border-box !important;padding:12px 14px !important;" +
+      "margin:10px 0 !important;border-radius:10px !important;text-align:left !important;" +
       "float:none !important;position:static !important;visibility:visible !important;opacity:1 !important;" +
-      "max-height:none !important;overflow:visible !important;}" +
-      ".badgehq-bundle__msg{margin:0 0 8px !important;padding:0 !important;font-size:14px !important;" +
-      "font-weight:500 !important;line-height:1.4 !important;text-align:center !important;}" +
-      // The count is what changes, so it is the one thing that moves. A number
-      // that pops when it drops tells the shopper their action registered.
+      "max-height:none !important;overflow:visible !important;flex-wrap:wrap !important;}" +
+
+      // The icon carries the offer colour, so the row is recognisably ours
+      // without tinting the whole strip loudly.
+      ".badgehq-bundle__icon{flex:0 0 auto !important;width:26px !important;height:26px !important;" +
+      "border-radius:50% !important;display:flex !important;align-items:center !important;" +
+      "justify-content:center !important;color:#fff !important;font-size:14px !important;" +
+      "line-height:1 !important;}" +
+
+      ".badgehq-bundle__body{flex:1 1 180px !important;min-width:0 !important;}" +
+      ".badgehq-bundle__msg{margin:0 !important;padding:0 !important;font-size:14px !important;" +
+      "font-weight:500 !important;line-height:1.35 !important;text-align:left !important;}" +
       ".badgehq-bundle__n{display:inline-block;font-weight:700;}" +
       ".badgehq-bundle--bump .badgehq-bundle__n{animation:badgehq-bundle-pop .45s cubic-bezier(.34,1.56,.64,1);}" +
       "@keyframes badgehq-bundle-pop{0%{transform:scale(1)}40%{transform:scale(1.35)}100%{transform:scale(1)}}" +
 
-      ".badgehq-bundle__track{display:flex !important;gap:4px !important;width:100% !important;" +
-      "margin:0 !important;padding:0 !important;list-style:none !important;}" +
-      ".badgehq-bundle__seg{flex:1 1 0 !important;display:block !important;height:20px !important;" +
-      "min-height:20px !important;border-radius:6px !important;margin:0 !important;padding:0 !important;" +
-      "position:relative !important;overflow:hidden !important;" +
-      // Depth: a soft inner highlight on top and a shadow underneath, so a
-      // filled block reads as a solid object rather than a painted rectangle.
-      "box-shadow:inset 0 1px 0 rgba(255,255,255,.35),0 1px 2px rgba(0,0,0,.12);" +
-      "transition:background .35s ease,transform .35s cubic-bezier(.34,1.56,.64,1);}" +
-      // A filled block lifts very slightly. Enough to feel earned, not enough
-      // to look like it is floating away.
-      ".badgehq-bundle__seg--on{transform:translateY(-1px);background-image:linear-gradient(180deg,rgba(255,255,255,.18),rgba(0,0,0,.06)) !important;}" +
-      // A slow sheen travels across the filled blocks, so the bar is alive even
-      // while the shopper is not doing anything.
-      ".badgehq-bundle__seg--on::after{content:'';position:absolute;inset:0;" +
-      "background:linear-gradient(100deg,transparent 20%,rgba(255,255,255,.45) 50%,transparent 80%);" +
-      "transform:translateX(-100%);animation:badgehq-bundle-sheen 2.6s ease-in-out infinite;}" +
-      "@keyframes badgehq-bundle-sheen{0%{transform:translateX(-100%)}55%,100%{transform:translateX(100%)}}" +
-      // The next block to fill breathes gently: it is the one the shopper is
-      // being asked to earn, so it is the only empty block that draws attention.
+      // Progress sits under the message, thinner than before: at this size it
+      // is a supporting detail, not the headline.
+      ".badgehq-bundle__track{display:flex !important;gap:3px !important;width:100% !important;" +
+      "margin:7px 0 0 !important;padding:0 !important;list-style:none !important;}" +
+      ".badgehq-bundle__seg{flex:1 1 0 !important;display:block !important;height:6px !important;" +
+      "min-height:6px !important;border-radius:3px !important;margin:0 !important;padding:0 !important;" +
+      "position:relative !important;overflow:hidden !important;transition:background .35s ease;}" +
       ".badgehq-bundle__seg--next{animation:badgehq-bundle-breathe 1.9s ease-in-out infinite;}" +
-      "@keyframes badgehq-bundle-breathe{0%,100%{opacity:1}50%{opacity:.55}}" +
-
-      ".badgehq-bundle__barwrap{display:block !important;width:100% !important;height:20px !important;" +
-      "min-height:20px !important;border-radius:10px !important;overflow:hidden !important;margin:0 !important;" +
-      "box-shadow:inset 0 1px 2px rgba(0,0,0,.12);}" +
-      ".badgehq-bundle__fill{display:block !important;height:100% !important;border-radius:10px !important;" +
-      "box-shadow:inset 0 1px 0 rgba(255,255,255,.35);" +
+      "@keyframes badgehq-bundle-breathe{0%,100%{opacity:1}50%{opacity:.5}}" +
+      ".badgehq-bundle__barwrap{display:block !important;width:100% !important;height:6px !important;" +
+      "min-height:6px !important;border-radius:3px !important;overflow:hidden !important;margin:7px 0 0 !important;}" +
+      ".badgehq-bundle__fill{display:block !important;height:100% !important;border-radius:3px !important;" +
       "transition:width .5s cubic-bezier(.34,1.4,.64,1);}" +
 
-      // The call to action: a button, because it is the one thing on this
-      // widget the shopper can act on, and an underlined text link beside a
-      // progress bar reads as a footnote.
-      // Solid, in the SAME colour as the filled bar. currentColor was the bug:
-      // it inherits the theme's link colour, so a green bar sat under a blue
-      // outline button and the two read as unrelated widgets. The colour is
-      // set inline per offer, from the merchant's own progress colour.
-      ".badgehq-bundle__cta{display:inline-block !important;margin:12px 0 0 !important;" +
-      "padding:9px 20px !important;border-radius:999px !important;font-size:13px !important;" +
-      "font-weight:600 !important;text-decoration:none !important;cursor:pointer;" +
-      "border:0 !important;line-height:1.2 !important;" +
-      "box-shadow:0 1px 2px rgba(0,0,0,.16),inset 0 1px 0 rgba(255,255,255,.25);" +
-      "transition:transform .18s cubic-bezier(.34,1.56,.64,1),box-shadow .18s ease,filter .18s ease;}" +
-      // Lift and brighten on hover: same language as the bar's filled blocks.
-      ".badgehq-bundle__cta:hover{transform:translateY(-1px);filter:brightness(1.08);" +
-      "box-shadow:0 3px 8px rgba(0,0,0,.18),inset 0 1px 0 rgba(255,255,255,.25);}" +
-      ".badgehq-bundle__cta:active{transform:translateY(0);box-shadow:0 1px 2px rgba(0,0,0,.16);}" +
+      // Right-aligned action. Outlined, because a solid button here would
+      // outrank the merchant's own checkout button sitting inches away.
+      ".badgehq-bundle__cta{flex:0 0 auto !important;display:inline-block !important;margin:0 !important;" +
+      "padding:8px 14px !important;border-radius:8px !important;font-size:12px !important;" +
+      "font-weight:700 !important;letter-spacing:.02em !important;text-transform:uppercase !important;" +
+      "text-decoration:none !important;cursor:pointer;line-height:1.2 !important;white-space:nowrap !important;" +
+      "border:1.5px solid !important;background:transparent !important;" +
+      "transition:transform .18s cubic-bezier(.34,1.56,.64,1),background .18s ease;}" +
+      ".badgehq-bundle__cta:hover{transform:translateY(-1px);}" +
+      ".badgehq-bundle__cta:active{transform:translateY(0);}" +
       ".badgehq-bundle__cta:focus-visible{outline:2px solid currentColor;outline-offset:2px;}" +
 
-      // The unlock is the payoff, so it gets the only large motion on the page.
       ".badgehq-bundle--won .badgehq-bundle__msg{animation:badgehq-bundle-won .6s ease;}" +
-      "@keyframes badgehq-bundle-won{0%{transform:scale(1)}30%{transform:scale(1.08)}100%{transform:scale(1)}}" +
+      "@keyframes badgehq-bundle-won{0%{transform:scale(1)}30%{transform:scale(1.06)}100%{transform:scale(1)}}" +
 
-      // Motion is decoration here; every value is still readable without it.
+      // Narrow carts: the button drops to its own line rather than squeezing
+      // the message into a column of single words.
+      "@media (max-width:479px){.badgehq-bundle__cta{flex:1 1 100% !important;text-align:center !important;}}" +
+
       "@media (prefers-reduced-motion:reduce){" +
-      ".badgehq-bundle__seg--on::after,.badgehq-bundle__seg--next," +
-      ".badgehq-bundle--bump .badgehq-bundle__n,.badgehq-bundle--won .badgehq-bundle__msg{animation:none !important;}" +
-      ".badgehq-bundle__cta{transition:none !important;}" +
-      ".badgehq-bundle__seg,.badgehq-bundle__fill{transition:none !important;}}";
+      ".badgehq-bundle__seg--next,.badgehq-bundle--bump .badgehq-bundle__n," +
+      ".badgehq-bundle--won .badgehq-bundle__msg{animation:none !important;}" +
+      ".badgehq-bundle__seg,.badgehq-bundle__fill,.badgehq-bundle__cta{transition:none !important;}}";
     (document.head || document.documentElement).appendChild(style);
   }
 
@@ -2102,18 +2111,29 @@
 
     ensureBundleStyles();
 
+    var accent = c.progressBg || "#4caf50";
     var el = document.createElement("div");
     el.id = "badgehq-bundle-" + offer.id;
     el.className = "badgehq-bundle";
+    // A tint of the accent for the strip, so the row is clearly one unit
+    // without a heavy fill competing with the cart's own surfaces.
+    el.style.background = bundleTint(accent);
+    el.style.border = "1px solid " + bundleTint(accent, true);
 
-    // Only the merchant's colours stay inline; every layout property lives in
-    // the stylesheet above, where one rule covers all of them.
-    var html = '<p class="badgehq-bundle__msg" style="color:' + (c.text || "#333") + '">' + msg + "</p>";
+    // Discount mark. Inline SVG rather than an emoji: emoji render differently
+    // on every platform and some fall back to a hollow box.
+    var html = '<span class="badgehq-bundle__icon" style="background:' + accent + '" aria-hidden="true">' +
+      '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" ' +
+      'stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><circle cx="7.5" cy="7.5" r="2.2"/>' +
+      '<circle cx="16.5" cy="16.5" r="2.2"/></svg></span>';
+
+    html += '<div class="badgehq-bundle__body">' +
+      '<p class="badgehq-bundle__msg" style="color:' + (c.text || "#333") + '">' + msg + "</p>";
+
     if (offer.showProgress) {
       // Segmented, one block per item needed: the shopper is counting ITEMS,
-      // and "1 of 2 filled" is read straight off the blocks. A single smear
-      // makes them estimate a percentage to learn the same thing. Above ~8
-      // items that becomes slivers, so it falls back to one continuous bar.
+      // and "1 of 2 filled" is read straight off the blocks. Above ~8 items
+      // that becomes slivers, so it falls back to one continuous bar.
       var bar;
       if (need <= 8) {
         bar = '<div class="badgehq-bundle__track">';
@@ -2121,18 +2141,19 @@
           var on = seg < have;
           // Exactly one empty block is marked "next": the one they earn by
           // adding a single item. Highlighting all of them would just be noise.
-          var cls = "badgehq-bundle__seg" + (on ? " badgehq-bundle__seg--on" : (seg === have ? " badgehq-bundle__seg--next" : ""));
+          var cls = "badgehq-bundle__seg" + (on ? "" : (seg === have ? " badgehq-bundle__seg--next" : ""));
           bar += '<div class="' + cls + '" style="background:' +
-            (on ? (c.progressBg || "#4caf50") : (c.barBg || "#f0f0f0")) + '"></div>';
+            (on ? accent : (c.barBg || "#f0f0f0")) + '"></div>';
         }
         bar += "</div>";
       } else {
         bar = '<div class="badgehq-bundle__barwrap" style="background:' + (c.barBg || "#f0f0f0") + '">' +
-          '<div class="badgehq-bundle__fill" style="background:' + (c.progressBg || "#4caf50") +
+          '<div class="badgehq-bundle__fill" style="background:' + accent +
           ";width:" + pct + '%"></div></div>';
       }
       html += bar;
     }
+    html += "</div>";
 
     // Only while the offer is unearned: once unlocked, pushing them to add more
     // is the wrong message, and the cart is where they should be heading.
@@ -2140,13 +2161,11 @@
     if (shopUrl) {
       // The merchant's own wording wins. Otherwise avoid "Shop <collection>":
       // collections are often named after the promotion itself ("2 FOR 1299"),
-      // which makes the button read "Shop 2 FOR 1299" right under a heading
-      // that already says that.
+      // which makes the button repeat the message beside it.
       var linkText = offer.ctaText
-        || (offer.scope === "collection" ? "Shop eligible products" : "View product");
-      var ctaBg = c.progressBg || "#4caf50";
-      html += '<a class="badgehq-bundle__cta" href="' + shopUrl + '" style="background:' + ctaBg +
-        ";color:" + bundleInkOn(ctaBg) + '">' + bundleEscape(linkText) + "</a>";
+        || (offer.scope === "collection" ? "Shop more" : "View product");
+      html += '<a class="badgehq-bundle__cta" href="' + shopUrl + '" style="color:' + accent +
+        ";border-color:" + accent + '">' + bundleEscape(linkText) + "</a>";
     }
 
     el.innerHTML = html;
