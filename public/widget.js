@@ -1912,6 +1912,38 @@
     return true; // "all"
   }
 
+  /**
+   * One stylesheet for every bundle offer, injected once.
+   *
+   * Inline styles were the wrong tool: themes style p and div inside cart
+   * regions, and matching every property by hand meant one missed string left
+   * the wrapper collapsible (which is exactly what happened). Selectors rooted
+   * at the widget's own class beat theme rules on specificity, and the few
+   * !important flags cover themes that use their own.
+   */
+  function ensureBundleStyles() {
+    if (document.getElementById("badgehq-bundle-css")) return;
+    var style = document.createElement("style");
+    style.id = "badgehq-bundle-css";
+    style.textContent =
+      ".badgehq-bundle{display:block !important;width:100% !important;box-sizing:border-box !important;" +
+      "padding:12px 16px !important;margin:8px 0 !important;text-align:center !important;" +
+      "float:none !important;position:static !important;visibility:visible !important;opacity:1 !important;" +
+      "max-height:none !important;overflow:visible !important;}" +
+      ".badgehq-bundle__msg{margin:0 0 8px !important;padding:0 !important;font-size:14px !important;" +
+      "font-weight:500 !important;line-height:1.4 !important;text-align:center !important;}" +
+      ".badgehq-bundle__track{display:flex !important;gap:4px !important;width:100% !important;" +
+      "margin:0 !important;padding:0 !important;list-style:none !important;}" +
+      ".badgehq-bundle__seg{flex:1 1 0 !important;display:block !important;height:20px !important;" +
+      "min-height:20px !important;border-radius:6px !important;margin:0 !important;padding:0 !important;" +
+      "transition:background .3s;}" +
+      ".badgehq-bundle__barwrap{display:block !important;width:100% !important;height:20px !important;" +
+      "min-height:20px !important;border-radius:10px !important;overflow:hidden !important;margin:0 !important;}" +
+      ".badgehq-bundle__fill{display:block !important;height:100% !important;border-radius:10px !important;" +
+      "transition:width .3s;}";
+    (document.head || document.documentElement).appendChild(style);
+  }
+
   function renderBundleOffer(offer, cart, page, currencySymbol) {
     if (!shouldShowOnPage(offer.pages, page)) return;
 
@@ -1957,17 +1989,15 @@
       });
     }
 
+    ensureBundleStyles();
+
     var el = document.createElement("div");
     el.id = "badgehq-bundle-" + offer.id;
-    el.style.cssText = "padding:12px 16px;text-align:center;margin:8px 0;width:100%;box-sizing:border-box;display:block;flex-shrink:0;";
+    el.className = "badgehq-bundle";
 
-    // !important on the layout-deciding properties: themes style p and div
-    // inside cart and product regions, and a plain inline rule loses to a
-    // theme rule of higher specificity. This was left-aligning the message and
-    // collapsing the bar's height in some themes.
-    var pStyle = "color:" + (c.text || "#333") + ";margin:0 0 8px !important;font-size:14px !important;" +
-      "font-weight:500 !important;text-align:center !important;line-height:1.4 !important;padding:0 !important;";
-    var html = '<p style="' + pStyle + '">' + msg + "</p>";
+    // Only the merchant's colours stay inline; every layout property lives in
+    // the stylesheet above, where one rule covers all of them.
+    var html = '<p class="badgehq-bundle__msg" style="color:' + (c.text || "#333") + '">' + msg + "</p>";
     if (offer.showProgress) {
       // Segmented, one block per item needed: the shopper is counting ITEMS,
       // and "1 of 2 filled" is read straight off the blocks. A single smear
@@ -1975,20 +2005,18 @@
       // items that becomes slivers, so it falls back to one continuous bar.
       var bar;
       if (need <= 8) {
-        bar = '<div style="display:flex !important;gap:4px !important;width:100% !important;margin:0 !important;padding:0 !important;">';
+        bar = '<div class="badgehq-bundle__track">';
         for (var seg = 0; seg < need; seg++) {
-          bar += '<div style="flex:1 1 0 !important;height:20px !important;min-height:20px !important;' +
-            'border-radius:6px !important;margin:0 !important;transition:background 0.3s;background:' +
-            (seg < have ? (c.progressBg || "#4caf50") : (c.barBg || "#f0f0f0")) + ' !important;"></div>';
+          bar += '<div class="badgehq-bundle__seg" style="background:' +
+            (seg < have ? (c.progressBg || "#4caf50") : (c.barBg || "#f0f0f0")) + '"></div>';
         }
         bar += "</div>";
       } else {
-        bar = '<div style="background:' + (c.barBg || "#f0f0f0") + ' !important;border-radius:10px !important;' +
-          'height:20px !important;min-height:20px !important;overflow:hidden !important;width:100% !important;display:block !important;margin:0 !important;">' +
-          '<div style="background:' + (c.progressBg || "#4caf50") + ' !important;height:100% !important;width:' + pct +
-          '% !important;border-radius:10px !important;transition:width 0.3s;display:block !important;"></div></div>';
+        bar = '<div class="badgehq-bundle__barwrap" style="background:' + (c.barBg || "#f0f0f0") + '">' +
+          '<div class="badgehq-bundle__fill" style="background:' + (c.progressBg || "#4caf50") +
+          ";width:" + pct + '%"></div></div>';
       }
-      html = '<p style="' + pStyle + '">' + msg + "</p>" + bar;
+      html += bar;
     }
     el.innerHTML = html;
 
