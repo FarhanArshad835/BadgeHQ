@@ -53,6 +53,7 @@ export default function App() {
         <Link to="/app/product-badge">Product Badges</Link>
         <Link to="/app/announcement-bar">Announcement Bar</Link>
         <Link to="/app/free-shipping-bar">Free Shipping Bar</Link>
+        <Link to="/app/bundle-offers">Bundle Offers</Link>
         <Link to="/app/sticky-cart">Sticky Add to Cart</Link>
         <Link to="/app/countdown-timer">Countdown Timer</Link>
         <Link to="/app/delivery-estimate">Delivery Estimate</Link>

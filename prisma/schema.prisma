@@ -105,6 +105,42 @@ model FreeShippingBar {
   @@index([shop])
 }
 
+/// A "2 for Rs1299" style bundle offer, shown to shoppers so they know a
+/// discount is within reach.
+///
+/// PROMOTIONAL ONLY. The discount itself is a Shopify automatic discount the
+/// merchant already configured; this never changes a price, because a price
+/// changed in the cart is recalculated at checkout and the shopper is charged
+/// the full amount anyway. Showing an offer we cannot honour is worse than not
+/// showing one.
+model BundleOffer {
+  id               String   @id @default(cuid())
+  shop             String
+  /// Shown on the widget, e.g. "2 for Rs1299".
+  title            String   @default("")
+  /// How many qualifying items unlock the offer.
+  quantity         Int      @default(2)
+  /// Which items count. "all" = anything in the cart; "collection" = only items
+  /// in collectionHandle; "products" = only the listed product handles.
+  scope            String   @default("all")
+  collectionHandle String   @default("")
+  /// JSON array of product handles, used when scope is "products".
+  productHandles   String   @default("[]")
+  /// {"below": "...", "reached": "..."} with {{remaining}} and {{title}} tokens.
+  messages         String   @default("{\"below\":\"Add {{remaining}} more to unlock {{title}}\",\"reached\":\"{{title}} unlocked!\"}")
+  colors           String   @default("{\"barBg\":\"#f0f0f0\",\"progressBg\":\"#4caf50\",\"text\":\"#333333\"}")
+  /// Draw the progress bar. Some merchants want the message alone.
+  showProgress     Boolean  @default(true)
+  isActive         Boolean  @default(false)
+  pages            String   @default("[\"cart\",\"product\"]")
+  /// Lower numbers show first when several offers qualify at once.
+  priority         Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([shop])
+}
+
 model StickyCart {
   id           String   @id @default(cuid())
   shop         String

@@ -83,11 +83,14 @@
         renderTrustBadge(badge, page, gs);
       });
     if (w.productBadges) renderProductBadges(w.productBadges, page);
-    if (w.freeShippingBars) {
-      w.freeShippingBars.forEach(function (bar) {
+    if (w.bundleOffers) renderBundleOffers(w.bundleOffers, page, currencySymbol);
+    // Started even with no shipping bars, because bundle offers need the same
+    // cart-change refresh and this is the only place it is wired.
+    if (w.freeShippingBars || w.bundleOffers) {
+      (w.freeShippingBars || []).forEach(function (bar) {
         renderFreeShippingBar(bar, page, currencySymbol);
       });
-      setupCartChangeListener(w.freeShippingBars, page, currencySymbol);
+      setupCartChangeListener(w.freeShippingBars || [], page, currencySymbol, w.bundleOffers || []);
     }
     if (w.stickyCarts)
       w.stickyCarts.forEach(function (cart) {
@@ -1654,8 +1657,12 @@
       '<div style="background:' + (c.progressBg || "#4caf50") + ";height:100%;width:" + pct + '%;border-radius:10px;transition:width 0.3s;display:block;"></div></div>';
   }
 
-  // Listen for cart mutations and refresh all free shipping bars live
-  function setupCartChangeListener(bars, page, currencySymbol) {
+  // Listen for cart mutations and refresh the cart-driven widgets live.
+  //
+  // Free shipping bars and bundle offers share ONE listener on purpose: this
+  // patches window.fetch, and a second patch would wrap the first, firing both
+  // refreshes on every cart call and leaving no way to unwind either.
+  function setupCartChangeListener(bars, page, currencySymbol, bundles) {
     var cartMutationPattern = /\/cart\/(change|add|update|clear)(\.js)?/;
     var refreshScheduled = false;
 
@@ -1671,6 +1678,11 @@
             bars.forEach(function (bar) {
               updateFreeShippingBarContent(bar, total, currencySymbol);
             });
+            if (bundles) {
+              bundles.forEach(function (offer) {
+                renderBundleOffer(offer, cart, page, currencySymbol);
+              });
+            }
           })
           .catch(function () {});
       }, 300);
@@ -1810,6 +1822,125 @@
           document.body.prepend(el);
         }
       }
+    }
+  }
+
+  /* ===================== BUNDLE OFFERS ===================== */
+  /**
+   * "2 for Rs1299" style offers. PROMOTIONAL ONLY: the discount is a Shopify
+   * automatic discount the merchant already set up, so nothing here touches a
+   * price. Showing an offer we cannot honour would be worse than showing none.
+   *
+   * Counts qualifying UNITS, not line items: two of the same product in one line
+   * is two units toward a "2 for" offer, which is exactly what a shopper expects.
+   */
+  function renderBundleOffers(offers, page, currencySymbol) {
+    if (!offers || !offers.length) return;
+
+    fetch("/cart.js")
+      .then(function (r) { return r.json(); })
+      .then(function (cart) { renderAll(cart); })
+      .catch(function () { renderAll({ items: [] }); });
+
+    function renderAll(cart) {
+      offers.forEach(function (offer) {
+        renderBundleOffer(offer, cart, page, currencySymbol);
+      });
+    }
+  }
+
+  /** Units in the cart that count toward this offer. */
+  function bundleQualifyingUnits(offer, cart) {
+    var items = (cart && cart.items) || [];
+    var total = 0;
+    for (var i = 0; i < items.length; i++) {
+      var it = items[i];
+      if (bundleItemQualifies(offer, it)) total += it.quantity || 0;
+    }
+    return total;
+  }
+
+  function bundleItemQualifies(offer, item) {
+    if (offer.scope === "products") {
+      var handles = offer.productHandles || [];
+      return handles.indexOf(item.handle) !== -1;
+    }
+    if (offer.scope === "collection") {
+      // /cart.js does not report collections, so match on the handle Shopify
+      // does expose. A cart line carries no collection membership, so this
+      // relies on the merchant naming the collection in the product's type or
+      // on the product being listed explicitly.
+      var want = (offer.collectionHandle || "").toLowerCase();
+      if (!want) return false;
+      var type = (item.product_type || "").toLowerCase().replace(/\s+/g, "-");
+      return type === want;
+    }
+    return true; // "all"
+  }
+
+  function renderBundleOffer(offer, cart, page, currencySymbol) {
+    if (!shouldShowOnPage(offer.pages, page)) return;
+
+    var existing = document.getElementById("badgehq-bundle-" + offer.id);
+    if (existing) existing.remove();
+
+    var need = parseInt(offer.quantity, 10) || 2;
+    var have = bundleQualifyingUnits(offer, cart);
+    var remaining = Math.max(need - have, 0);
+    var pct = need > 0 ? Math.min((have / need) * 100, 100) : 0;
+
+    var c = offer.colors || {};
+    var m = offer.messages || {};
+    var title = offer.title || "this offer";
+    var msg = remaining === 0
+      ? (m.reached || "{{title}} unlocked!")
+      : (m.below || "Add {{remaining}} more to unlock {{title}}");
+    msg = msg
+      .replace(/\{\{remaining\}\}/g, String(remaining))
+      // "1 item" rather than "1 items": the offer copy is the shop's voice and
+      // a plural bug there reads as carelessness.
+      .replace(/\{\{items\}\}/g, remaining === 1 ? "item" : "items")
+      .replace(/\{\{title\}\}/g, title)
+      .replace(/\{\{quantity\}\}/g, String(need));
+
+    var el = document.createElement("div");
+    el.id = "badgehq-bundle-" + offer.id;
+    el.style.cssText = "padding:12px 16px;text-align:center;margin:8px 0;width:100%;box-sizing:border-box;display:block;flex-shrink:0;";
+
+    var html = '<p style="color:' + (c.text || "#333") + ';margin:0;font-size:14px;font-weight:500;">' + msg + "</p>";
+    if (offer.showProgress) {
+      html = '<p style="color:' + (c.text || "#333") + ';margin:0 0 8px;font-size:14px;font-weight:500;">' + msg + "</p>" +
+        '<div style="background:' + (c.barBg || "#f0f0f0") + ';border-radius:10px;height:20px;overflow:hidden;width:100%;display:block;">' +
+        '<div style="background:' + (c.progressBg || "#4caf50") + ";height:100%;width:" + pct + '%;border-radius:10px;transition:width 0.3s;display:block;"></div></div>';
+    }
+    el.innerHTML = html;
+
+    insertBundleEl(el, page);
+  }
+
+  /** Same placement the free shipping bar uses, which is theme-tested. */
+  function insertBundleEl(el, pg) {
+    var inserted = false;
+
+    if (pg === "cart") {
+      var cartSelectors = ["cart-footer", ".cart__footer", ".cart-footer", ".cart__summary", "cart-items", ".cart__items", 'form[action="/cart"]'];
+      for (var i = 0; i < cartSelectors.length; i++) {
+        var t = document.querySelector(cartSelectors[i]);
+        if (t) { t.parentNode.insertBefore(el, t); inserted = true; break; }
+      }
+    }
+
+    if (!inserted && pg === "product") {
+      var prodSelectors = [".product-form__buttons", ".product__info-container", 'form[action*="/cart/add"]', ".product-form", ".product__info"];
+      for (var j = 0; j < prodSelectors.length; j++) {
+        var p = document.querySelector(prodSelectors[j]);
+        if (p) { p.parentNode.insertBefore(el, p); inserted = true; break; }
+      }
+    }
+
+    if (!inserted) {
+      var main = document.querySelector("main, #MainContent, .main-content, #main-content");
+      if (main) main.prepend(el); else document.body.prepend(el);
     }
   }
 
