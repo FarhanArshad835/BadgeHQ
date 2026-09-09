@@ -1942,6 +1942,21 @@
       .replace(/\{\{title\}\}/g, title)
       .replace(/\{\{quantity\}\}/g, String(need));
 
+    if (window.location.search.indexOf("badgehq_debug=1") !== -1) {
+      console.log("[badgehq bundle]", {
+        title: offer.title,
+        page: page,
+        showProgress: offer.showProgress,
+        typeofShowProgress: typeof offer.showProgress,
+        need: need,
+        have: have,
+        scope: offer.scope,
+        collectionLoaded: offer.scope === "collection"
+          ? Boolean(_collectionMembers[offer.collectionHandle] && _collectionMembers[offer.collectionHandle].loaded)
+          : "n/a",
+      });
+    }
+
     var el = document.createElement("div");
     el.id = "badgehq-bundle-" + offer.id;
     el.style.cssText = "padding:12px 16px;text-align:center;margin:8px 0;width:100%;box-sizing:border-box;display:block;flex-shrink:0;";
