@@ -13,7 +13,7 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useActionData, useLoaderData, useSubmit, useNavigation } from "@remix-run/react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Page,
   Layout,
@@ -32,7 +32,7 @@ import {
   ChoiceList,
   Modal,
 } from "@shopify/polaris";
-import { TitleBar } from "@shopify/app-bridge-react";
+import { TitleBar, useAppBridge } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { bumpConfigVersion } from "../utils/config-version.server";
@@ -56,6 +56,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       quantity: o.quantity,
       scope: o.scope,
       collectionHandle: o.collectionHandle,
+      collectionTitle: o.collectionTitle,
       productHandles: JSON.parse(o.productHandles) as string[],
       messages: JSON.parse(o.messages) as Record<string, string>,
       colors: JSON.parse(o.colors) as Record<string, string>,
@@ -101,6 +102,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       quantity,
       scope,
       collectionHandle: String(data.collectionHandle || "").trim().slice(0, 200),
+      collectionTitle: String(data.collectionTitle || "").trim().slice(0, 200),
       productHandles: JSON.stringify(
         String(data.productHandles || "")
           .split(",")
@@ -139,6 +141,7 @@ const BLANK = {
   quantity: "2",
   scope: "all",
   collectionHandle: "",
+  collectionTitle: "",
   productHandles: "",
   below: "Add {{remaining}} more {{items}} to unlock {{title}}",
   reached: "{{title}} unlocked!",
@@ -155,6 +158,7 @@ export default function BundleOffersPage() {
   const actionData = useActionData<{ success?: boolean; error?: string }>();
   const submit = useSubmit();
   const nav = useNavigation();
+  const shopify = useAppBridge();
   const busy = nav.state !== "idle";
 
   const [editing, setEditing] = useState<typeof BLANK | null>(null);
@@ -177,6 +181,7 @@ export default function BundleOffersPage() {
       quantity: String(o.quantity),
       scope: o.scope,
       collectionHandle: o.collectionHandle,
+      collectionTitle: o.collectionTitle,
       productHandles: o.productHandles.join(", "),
       below: o.messages?.below ?? BLANK.below,
       reached: o.messages?.reached ?? BLANK.reached,
@@ -198,6 +203,7 @@ export default function BundleOffersPage() {
           quantity: editing.quantity,
           scope: editing.scope,
           collectionHandle: editing.collectionHandle,
+          collectionTitle: editing.collectionTitle,
           productHandles: editing.productHandles,
           messages: { below: editing.below, reached: editing.reached },
           colors: { barBg: editing.barBg, progressBg: editing.progressBg, text: editing.textCol },
@@ -212,6 +218,17 @@ export default function BundleOffersPage() {
 
   const set = <K extends keyof typeof BLANK>(key: K, value: (typeof BLANK)[K]) =>
     setEditing((e) => (e ? { ...e, [key]: value } : e));
+
+  // Shopify's own picker, the same one the product badges use, so the merchant
+  // browses real collections instead of typing a handle they have to look up.
+  const pickCollection = useCallback(async () => {
+    const selected = await shopify.resourcePicker({ type: "collection", multiple: false });
+    if (selected && selected[0]) {
+      const col = selected[0] as any;
+      const handle = col.handle || String(col.id).replace("gid://shopify/Collection/", "");
+      setEditing((e) => (e ? { ...e, collectionHandle: handle, collectionTitle: col.title || "" } : e));
+    }
+  }, [shopify]);
 
   // What the shopper sees at the halfway point, so copy tokens can be checked
   // before the offer goes live rather than on the storefront.
@@ -291,7 +308,7 @@ export default function BundleOffersPage() {
                     options={[
                       { label: "Anything in the cart", value: "all" },
                       { label: "Only specific products", value: "products" },
-                      { label: "Only one product type", value: "collection" },
+                      { label: "Only a collection", value: "collection" },
                     ]}
                     value={editing.scope}
                     onChange={(v) => set("scope", v)}
@@ -309,14 +326,24 @@ export default function BundleOffersPage() {
                   )}
 
                   {editing.scope === "collection" && (
-                    <TextField
-                      label="Product type"
-                      value={editing.collectionHandle}
-                      onChange={(v) => set("collectionHandle", v)}
-                      autoComplete="off"
-                      placeholder="Flip Flops"
-                      helpText="Matches the product type set on the product in Shopify. The cart does not tell us collections, so type is what can be checked reliably."
-                    />
+                    <BlockStack gap="200">
+                      <Text as="h3" variant="headingSm">Collection</Text>
+                      <InlineStack gap="300" blockAlign="center">
+                        <Button onClick={pickCollection}>
+                          {editing.collectionHandle ? "Change collection" : "Browse collections"}
+                        </Button>
+                        {editing.collectionHandle ? (
+                          <Text as="span">
+                            {editing.collectionTitle || editing.collectionHandle}
+                          </Text>
+                        ) : (
+                          <Text as="span" tone="subdued">No collection chosen yet.</Text>
+                        )}
+                      </InlineStack>
+                      <Text as="p" tone="subdued" variant="bodySm">
+                        Only items from this collection count toward the offer.
+                      </Text>
+                    </BlockStack>
                   )}
 
                   <TextField
@@ -422,7 +449,7 @@ export default function BundleOffersPage() {
                           {o.scope === "products"
                             ? ` from ${o.productHandles.length} chosen ${o.productHandles.length === 1 ? "product" : "products"}`
                             : o.scope === "collection"
-                              ? ` of type ${o.collectionHandle || "(not set)"}`
+                              ? ` from ${o.collectionTitle || o.collectionHandle || "(no collection chosen)"}`
                               : " from anywhere in the cart"}
                           {o.pages.length ? `, on ${o.pages.join(" and ")}` : ""}
                         </Text>

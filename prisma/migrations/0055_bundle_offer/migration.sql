@@ -8,6 +8,7 @@ CREATE TABLE "BundleOffer" (
     "quantity" INTEGER NOT NULL DEFAULT 2,
     "scope" TEXT NOT NULL DEFAULT 'all',
     "collectionHandle" TEXT NOT NULL DEFAULT '',
+    "collectionTitle" TEXT NOT NULL DEFAULT '',
     "productHandles" TEXT NOT NULL DEFAULT '[]',
     "messages" TEXT NOT NULL DEFAULT '{"below":"Add {{remaining}} more to unlock {{title}}","reached":"{{title}} unlocked!"}',
     "colors" TEXT NOT NULL DEFAULT '{"barBg":"#f0f0f0","progressBg":"#4caf50","text":"#333333"}',

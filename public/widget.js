@@ -1837,10 +1837,31 @@
   function renderBundleOffers(offers, page, currencySymbol) {
     if (!offers || !offers.length) return;
 
-    fetch("/cart.js")
-      .then(function (r) { return r.json(); })
-      .then(function (cart) { renderAll(cart); })
-      .catch(function () { renderAll({ items: [] }); });
+    // A collection-scoped offer cannot be evaluated until its product list is
+    // known: /cart.js reports handles but never collection membership. Load
+    // those first, so the bar is right on its first paint rather than counting
+    // zero and correcting itself a moment later.
+    var pending = 0;
+    var done = false;
+    offers.forEach(function (o) {
+      if (o.scope === "collection" && o.collectionHandle) pending++;
+    });
+
+    if (!pending) { loadCart(); return; }
+
+    offers.forEach(function (o) {
+      if (o.scope !== "collection" || !o.collectionHandle) return;
+      prefetchCollectionMembers(o.collectionHandle, function () {
+        if (--pending <= 0 && !done) { done = true; loadCart(); }
+      });
+    });
+
+    function loadCart() {
+      fetch("/cart.js")
+        .then(function (r) { return r.json(); })
+        .then(function (cart) { renderAll(cart); })
+        .catch(function () { renderAll({ items: [] }); });
+    }
 
     function renderAll(cart) {
       offers.forEach(function (offer) {
@@ -1866,14 +1887,15 @@
       return handles.indexOf(item.handle) !== -1;
     }
     if (offer.scope === "collection") {
-      // /cart.js does not report collections, so match on the handle Shopify
-      // does expose. A cart line carries no collection membership, so this
-      // relies on the merchant naming the collection in the product's type or
-      // on the product being listed explicitly.
-      var want = (offer.collectionHandle || "").toLowerCase();
-      if (!want) return false;
-      var type = (item.product_type || "").toLowerCase().replace(/\s+/g, "-");
-      return type === want;
+      var handle = offer.collectionHandle || "";
+      if (!handle) return false;
+      // Membership comes from the collection's own product list, fetched once
+      // and cached, because a cart line never carries its collections. An
+      // unloaded list counts nothing rather than guessing: a bar that briefly
+      // over-counts would promise an unlock the cart has not earned.
+      var col = _collectionMembers[handle];
+      if (!col || !col.loaded) return false;
+      return Boolean(col.products[item.handle]);
     }
     return true; // "all"
   }

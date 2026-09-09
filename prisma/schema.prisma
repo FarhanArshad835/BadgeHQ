@@ -124,6 +124,9 @@ model BundleOffer {
   /// in collectionHandle; "products" = only the listed product handles.
   scope            String   @default("all")
   collectionHandle String   @default("")
+  /// The collection's display name, so the admin can show what was picked
+  /// instead of echoing a handle back at the merchant.
+  collectionTitle  String   @default("")
   /// JSON array of product handles, used when scope is "products".
   productHandles   String   @default("[]")
   /// {"below": "...", "reached": "..."} with {{remaining}} and {{title}} tokens.
