@@ -42,9 +42,19 @@ const CACHE_TTL_BY_PATH = {
 };
 const DEFAULT_CACHE_TTL = 300;
 
+// The theme requests a bare /widget.js with no version in the URL, so the URL
+// alone can never tell a new build from an old one. With a 24h s-maxage that
+// meant a deployed widget change took up to a DAY to reach storefronts, and the
+// only workaround was a manual purge.
+//
+// ETag fixes it without giving up the cache: the hash changes on every build,
+// so a revalidation after a deploy returns fresh bytes while an unchanged build
+// still answers 304. must-revalidate keeps caches from serving a stale copy
+// past its age without asking.
 const HEADERS_JS = {
   "Content-Type": "application/javascript; charset=utf-8",
-  "Cache-Control": "public, max-age=3600, s-maxage=86400",
+  "Cache-Control": "public, max-age=300, s-maxage=3600, must-revalidate",
+  ETag: '"' + WIDGET_HASH + '"',
   "Access-Control-Allow-Origin": "*",
   "Cross-Origin-Resource-Policy": "cross-origin",
   "X-Source": "cloudflare-worker",
@@ -269,6 +279,12 @@ export default {
       (request.method === "GET" || request.method === "HEAD") &&
       (url.pathname === "/widget.js" || url.pathname.endsWith("/widget.js"))
     ) {
+      // Answer a revalidation cheaply: an unchanged build sends no body at all.
+      // This is what makes the shorter TTL above affordable.
+      const inm = request.headers.get("If-None-Match");
+      if (inm && inm.replace(/^W\//, "") === HEADERS_JS.ETag) {
+        return new Response(null, { status: 304, headers: HEADERS_JS });
+      }
       return new Response(request.method === "HEAD" ? null : WIDGET_SOURCE, {
         status: 200,
         headers: HEADERS_JS,
