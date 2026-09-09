@@ -1870,6 +1870,18 @@
     }
   }
 
+  /**
+   * Whether the product currently being viewed counts toward this offer.
+   *
+   * Reads the handle from the URL rather than any theme markup: /products/<h>
+   * is the one thing every theme agrees on.
+   */
+  function bundleCurrentProductQualifies(offer) {
+    var match = window.location.pathname.match(/\/products\/([^/?#]+)/);
+    if (!match) return false;
+    return bundleItemQualifies(offer, { handle: decodeURIComponent(match[1]), quantity: 1 });
+  }
+
   /** Units in the cart that count toward this offer. */
   function bundleQualifyingUnits(offer, cart) {
     var items = (cart && cart.items) || [];
@@ -1903,6 +1915,11 @@
   function renderBundleOffer(offer, cart, page, currencySymbol) {
     if (!shouldShowOnPage(offer.pages, page)) return;
 
+    // On a product page a scoped offer is only relevant if THIS product counts
+    // toward it. Without this, a "2 for 1299 on heels" offer appeared on every
+    // sneaker in the store, promoting a deal that product cannot unlock.
+    if (page === "product" && offer.scope !== "all" && !bundleCurrentProductQualifies(offer)) return;
+
     var existing = document.getElementById("badgehq-bundle-" + offer.id);
     if (existing) existing.remove();
 
@@ -1931,9 +1948,23 @@
 
     var html = '<p style="color:' + (c.text || "#333") + ';margin:0;font-size:14px;font-weight:500;">' + msg + "</p>";
     if (offer.showProgress) {
-      html = '<p style="color:' + (c.text || "#333") + ';margin:0 0 8px;font-size:14px;font-weight:500;">' + msg + "</p>" +
-        '<div style="background:' + (c.barBg || "#f0f0f0") + ';border-radius:10px;height:20px;overflow:hidden;width:100%;display:block;">' +
-        '<div style="background:' + (c.progressBg || "#4caf50") + ";height:100%;width:" + pct + '%;border-radius:10px;transition:width 0.3s;display:block;"></div></div>';
+      // Segmented, one block per item needed: the shopper is counting ITEMS,
+      // and "1 of 2 filled" is read straight off the blocks. A single smear
+      // makes them estimate a percentage to learn the same thing. Above ~8
+      // items that becomes slivers, so it falls back to one continuous bar.
+      var bar;
+      if (need <= 8) {
+        bar = '<div style="display:flex;gap:4px;width:100%;">';
+        for (var seg = 0; seg < need; seg++) {
+          bar += '<div style="flex:1;height:20px;border-radius:6px;transition:background 0.3s;background:' +
+            (seg < have ? (c.progressBg || "#4caf50") : (c.barBg || "#f0f0f0")) + ';"></div>';
+        }
+        bar += "</div>";
+      } else {
+        bar = '<div style="background:' + (c.barBg || "#f0f0f0") + ';border-radius:10px;height:20px;overflow:hidden;width:100%;display:block;">' +
+          '<div style="background:' + (c.progressBg || "#4caf50") + ";height:100%;width:" + pct + '%;border-radius:10px;transition:width 0.3s;display:block;"></div></div>';
+      }
+      html = '<p style="color:' + (c.text || "#333") + ';margin:0 0 8px;font-size:14px;font-weight:500;">' + msg + "</p>" + bar;
     }
     el.innerHTML = html;
 
