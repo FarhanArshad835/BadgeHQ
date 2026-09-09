@@ -2068,10 +2068,31 @@
       ".badgehq-bundle--won .badgehq-bundle__title{animation:badgehq-bundle-won .6s ease;}" +
       "@keyframes badgehq-bundle-won{0%{transform:scale(1)}30%{transform:scale(1.05)}100%{transform:scale(1)}}" +
 
-      // Narrow carts: the button takes its own line rather than crushing the
-      // title into a column of single words.
-      "@media (max-width:479px){.badgehq-bundle__cta{flex:1 1 100% !important;justify-content:center !important;}" +
-      ".badgehq-bundle__title{font-size:16px !important;}}" +
+      // Mobile. The button used to wrap to its own full-width line, which
+      // turned a compact card into a tall block for no gain: it is a secondary
+      // action sitting beside a shorter message, so it stays on the row and
+      // shrinks instead. Everything else tightens by a few pixels rather than
+      // shrinking the type, which is what has to stay readable.
+      "@media (max-width:599px){" +
+      ".badgehq-bundle{padding:18px 12px 12px !important;margin:20px 0 8px !important;border-radius:12px !important;}" +
+      ".badgehq-bundle__row{gap:10px !important;flex-wrap:nowrap !important;}" +
+      ".badgehq-bundle__left{gap:10px !important;flex:1 1 auto !important;}" +
+      ".badgehq-bundle__pics{height:34px !important;}" +
+      ".badgehq-bundle__pic{width:34px !important;height:34px !important;}" +
+      ".badgehq-bundle__title{font-size:15px !important;}" +
+      ".badgehq-bundle__sub{font-size:12.5px !important;}" +
+      ".badgehq-bundle__cta{padding:7px 12px !important;font-size:12.5px !important;border-radius:7px !important;}" +
+      ".badgehq-bundle__progress{margin-top:10px !important;}" +
+      ".badgehq-bundle__labels{font-size:11px !important;margin-bottom:5px !important;}" +
+      ".badgehq-bundle__track{height:6px !important;}" +
+      ".badgehq-bundle__flag{font-size:11.5px !important;padding:2px 10px !important;top:-12px !important;left:12px !important;}}" +
+
+      // Very narrow phones: the right-hand hint is the first thing to go. The
+      // bar and "1 of 2 added" already carry it, so it is the only line here
+      // that repeats something.
+      "@media (max-width:379px){" +
+      ".badgehq-bundle__labels span:last-child{display:none !important;}" +
+      ".badgehq-bundle__cta{padding:6px 10px !important;}}" +
 
       "@media (prefers-reduced-motion:reduce){" +
       ".badgehq-bundle--bump .badgehq-bundle__n,.badgehq-bundle--won .badgehq-bundle__title{animation:none !important;}" +
@@ -2157,8 +2178,10 @@
     html += "<div>";
     html += '<p class="badgehq-bundle__title" style="color:' + (c.text || "#1F1F1F") + '">' +
       bundleEscape(offer.title || "Bundle offer") + "</p>";
-    // The live status line, which is what actually changes as they shop.
-    html += '<p class="badgehq-bundle__sub">' + msg + "</p>";
+    // The live status line. The offer name is already the title directly
+    // above, so repeating it here wastes the width mobile has least of.
+    var subMsg = msg.replace(" to unlock " + bundleEscape(offer.title || ""), "").replace(/\s+$/, "");
+    html += '<p class="badgehq-bundle__sub">' + (subMsg || msg) + "</p>";
     html += "</div></div>";
 
     // Only while the offer is unearned: once unlocked, pushing them to add more
@@ -2202,7 +2225,21 @@
     var inserted = false;
 
     if (pg === "cart") {
-      var cartSelectors = ["cart-footer", ".cart__footer", ".cart-footer", ".cart__summary", "cart-items", ".cart__items", 'form[action="/cart"]'];
+      // Above the ITEMS, not the footer. Footer-first put the offer down by the
+      // totals, below everything the shopper has to scroll past, which is the
+      // wrong place for something asking them to go add another item.
+      var cartSelectors = [
+        "cart-items",
+        ".cart__items",
+        ".cart-items",
+        "#main-cart-items",
+        'form[action="/cart"]',
+        // Fallbacks: only if a theme exposes no item container at all.
+        "cart-footer",
+        ".cart__footer",
+        ".cart-footer",
+        ".cart__summary",
+      ];
       for (var i = 0; i < cartSelectors.length; i++) {
         var t = document.querySelector(cartSelectors[i]);
         if (t) { t.parentNode.insertBefore(el, t); inserted = true; break; }
