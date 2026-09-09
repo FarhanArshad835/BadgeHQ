@@ -132,6 +132,9 @@ model BundleOffer {
   /// {"below": "...", "reached": "..."} with {{remaining}} and {{title}} tokens.
   messages         String   @default("{\"below\":\"Add {{remaining}} more to unlock {{title}}\",\"reached\":\"{{title}} unlocked!\"}")
   colors           String   @default("{\"barBg\":\"#f0f0f0\",\"progressBg\":\"#4caf50\",\"text\":\"#333333\"}")
+  /// Label for the link to the qualifying products. Blank uses a sensible
+  /// default, since collections are often named after the promotion itself.
+  ctaText          String   @default("")
   /// Draw the progress bar. Some merchants want the message alone.
   showProgress     Boolean  @default(true)
   isActive         Boolean  @default(false)

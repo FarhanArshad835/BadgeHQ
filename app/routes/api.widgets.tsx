@@ -141,6 +141,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       collectionHandle: b.collectionHandle,
       // Labels the shop link; the widget matches on handle, not this.
       collectionTitle: b.collectionTitle,
+      ctaText: b.ctaText,
       productHandles: JSON.parse(b.productHandles),
       messages: JSON.parse(b.messages),
       colors: JSON.parse(b.colors),

@@ -57,6 +57,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       scope: o.scope,
       collectionHandle: o.collectionHandle,
       collectionTitle: o.collectionTitle,
+      ctaText: o.ctaText,
       productHandles: JSON.parse(o.productHandles) as string[],
       messages: JSON.parse(o.messages) as Record<string, string>,
       colors: JSON.parse(o.colors) as Record<string, string>,
@@ -103,6 +104,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       scope,
       collectionHandle: String(data.collectionHandle || "").trim().slice(0, 200),
       collectionTitle: String(data.collectionTitle || "").trim().slice(0, 200),
+      ctaText: String(data.ctaText || "").trim().slice(0, 60),
       productHandles: JSON.stringify(
         String(data.productHandles || "")
           .split(",")
@@ -142,6 +144,7 @@ const BLANK = {
   scope: "all",
   collectionHandle: "",
   collectionTitle: "",
+  ctaText: "",
   productHandles: "",
   below: "Add {{remaining}} more {{items}} to unlock {{title}}",
   reached: "{{title}} unlocked!",
@@ -182,6 +185,7 @@ export default function BundleOffersPage() {
       scope: o.scope,
       collectionHandle: o.collectionHandle,
       collectionTitle: o.collectionTitle,
+      ctaText: o.ctaText,
       productHandles: o.productHandles.join(", "),
       below: o.messages?.below ?? BLANK.below,
       reached: o.messages?.reached ?? BLANK.reached,
@@ -204,6 +208,7 @@ export default function BundleOffersPage() {
           scope: editing.scope,
           collectionHandle: editing.collectionHandle,
           collectionTitle: editing.collectionTitle,
+          ctaText: editing.ctaText,
           productHandles: editing.productHandles,
           messages: { below: editing.below, reached: editing.reached },
           colors: { barBg: editing.barBg, progressBg: editing.progressBg, text: editing.textCol },
@@ -385,6 +390,15 @@ export default function BundleOffersPage() {
                       </div>
                     </BlockStack>
                   </Box>
+
+                  <TextField
+                    label="Button label"
+                    value={editing.ctaText}
+                    onChange={(v) => set("ctaText", v)}
+                    autoComplete="off"
+                    placeholder="Shop eligible products"
+                    helpText="The button under the bar, linking to the qualifying products. Leave blank for the default."
+                  />
 
                   <Checkbox
                     label="Show the progress bar"

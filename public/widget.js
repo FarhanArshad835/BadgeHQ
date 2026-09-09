@@ -2114,9 +2114,12 @@
     // is the wrong message, and the cart is where they should be heading.
     var shopUrl = remaining > 0 ? bundleShopUrl(offer) : "";
     if (shopUrl) {
-      var linkText = offer.scope === "collection"
-        ? "Shop " + (offer.collectionTitle || "the collection")
-        : "View product";
+      // The merchant's own wording wins. Otherwise avoid "Shop <collection>":
+      // collections are often named after the promotion itself ("2 FOR 1299"),
+      // which makes the button read "Shop 2 FOR 1299" right under a heading
+      // that already says that.
+      var linkText = offer.ctaText
+        || (offer.scope === "collection" ? "Shop eligible products" : "View product");
       html += '<a class="badgehq-bundle__cta" href="' + shopUrl + '">' + bundleEscape(linkText) + "</a>";
     }
 
