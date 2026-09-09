@@ -1921,6 +1921,36 @@
    * at the widget's own class beat theme rules on specificity, and the few
    * !important flags cover themes that use their own.
    */
+  /**
+   * Where the shopper goes to find a qualifying item.
+   *
+   * A collection-scoped offer has an obvious destination. A product-scoped one
+   * points at the single product when there is only one, because sending
+   * someone to a search page for one known product is worse than useless.
+   * Everything else returns "" and no link is drawn: a link that lands on a
+   * page full of items that do not count is worse than no link at all.
+   */
+  function bundleShopUrl(offer) {
+    if (offer.scope === "collection" && offer.collectionHandle) {
+      return "/collections/" + encodeURIComponent(offer.collectionHandle);
+    }
+    if (offer.scope === "products") {
+      var handles = offer.productHandles || [];
+      if (handles.length === 1) return "/products/" + encodeURIComponent(handles[0]);
+      if (handles.length > 1) return "";
+    }
+    return "";
+  }
+
+  /** Merchant-authored text reaching innerHTML, so it is escaped. */
+  function bundleEscape(t) {
+    return String(t)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
   /** Last count shown per offer, so motion fires on change only. */
   var _bundleLastHave = {};
 
@@ -1971,6 +2001,21 @@
       "box-shadow:inset 0 1px 0 rgba(255,255,255,.35);" +
       "transition:width .5s cubic-bezier(.34,1.4,.64,1);}" +
 
+      // The call to action: a button, because it is the one thing on this
+      // widget the shopper can act on, and an underlined text link beside a
+      // progress bar reads as a footnote.
+      ".badgehq-bundle__cta{display:inline-block !important;margin:10px 0 0 !important;" +
+      "padding:8px 18px !important;border-radius:999px !important;font-size:13px !important;" +
+      "font-weight:600 !important;text-decoration:none !important;cursor:pointer;" +
+      "border:1.5px solid currentColor !important;background:transparent !important;" +
+      "transition:transform .18s cubic-bezier(.34,1.56,.64,1),background .18s ease,color .18s ease;}" +
+      ".badgehq-bundle__cta:hover{transform:translateY(-1px);}" +
+      ".badgehq-bundle__cta:active{transform:translateY(0);}" +
+      // Outline by default so it never fights the merchant's own buttons. On
+      // hover it takes a faint tint rather than a solid fill: the text colour
+      // is the merchant's, and filling with the same colour would erase it.
+      ".badgehq-bundle__cta:hover{background:rgba(0,0,0,.06) !important;}" +
+
       // The unlock is the payoff, so it gets the only large motion on the page.
       ".badgehq-bundle--won .badgehq-bundle__msg{animation:badgehq-bundle-won .6s ease;}" +
       "@keyframes badgehq-bundle-won{0%{transform:scale(1)}30%{transform:scale(1.08)}100%{transform:scale(1)}}" +
@@ -1979,6 +2024,7 @@
       "@media (prefers-reduced-motion:reduce){" +
       ".badgehq-bundle__seg--on::after,.badgehq-bundle__seg--next," +
       ".badgehq-bundle--bump .badgehq-bundle__n,.badgehq-bundle--won .badgehq-bundle__msg{animation:none !important;}" +
+      ".badgehq-bundle__cta{transition:none !important;}" +
       ".badgehq-bundle__seg,.badgehq-bundle__fill{transition:none !important;}}";
     (document.head || document.documentElement).appendChild(style);
   }
@@ -2063,6 +2109,17 @@
       }
       html += bar;
     }
+
+    // Only while the offer is unearned: once unlocked, pushing them to add more
+    // is the wrong message, and the cart is where they should be heading.
+    var shopUrl = remaining > 0 ? bundleShopUrl(offer) : "";
+    if (shopUrl) {
+      var linkText = offer.scope === "collection"
+        ? "Shop " + (offer.collectionTitle || "the collection")
+        : "View product";
+      html += '<a class="badgehq-bundle__cta" href="' + shopUrl + '">' + bundleEscape(linkText) + "</a>";
+    }
+
     el.innerHTML = html;
 
     // Remember what this offer showed last time, so the bump fires on a real
