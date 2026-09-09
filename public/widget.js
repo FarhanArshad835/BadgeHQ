@@ -1921,6 +1921,9 @@
    * at the widget's own class beat theme rules on specificity, and the few
    * !important flags cover themes that use their own.
    */
+  /** Last count shown per offer, so motion fires on change only. */
+  var _bundleLastHave = {};
+
   function ensureBundleStyles() {
     if (document.getElementById("badgehq-bundle-css")) return;
     var style = document.createElement("style");
@@ -1932,15 +1935,51 @@
       "max-height:none !important;overflow:visible !important;}" +
       ".badgehq-bundle__msg{margin:0 0 8px !important;padding:0 !important;font-size:14px !important;" +
       "font-weight:500 !important;line-height:1.4 !important;text-align:center !important;}" +
+      // The count is what changes, so it is the one thing that moves. A number
+      // that pops when it drops tells the shopper their action registered.
+      ".badgehq-bundle__n{display:inline-block;font-weight:700;}" +
+      ".badgehq-bundle--bump .badgehq-bundle__n{animation:badgehq-bundle-pop .45s cubic-bezier(.34,1.56,.64,1);}" +
+      "@keyframes badgehq-bundle-pop{0%{transform:scale(1)}40%{transform:scale(1.35)}100%{transform:scale(1)}}" +
+
       ".badgehq-bundle__track{display:flex !important;gap:4px !important;width:100% !important;" +
       "margin:0 !important;padding:0 !important;list-style:none !important;}" +
       ".badgehq-bundle__seg{flex:1 1 0 !important;display:block !important;height:20px !important;" +
       "min-height:20px !important;border-radius:6px !important;margin:0 !important;padding:0 !important;" +
-      "transition:background .3s;}" +
+      "position:relative !important;overflow:hidden !important;" +
+      // Depth: a soft inner highlight on top and a shadow underneath, so a
+      // filled block reads as a solid object rather than a painted rectangle.
+      "box-shadow:inset 0 1px 0 rgba(255,255,255,.35),0 1px 2px rgba(0,0,0,.12);" +
+      "transition:background .35s ease,transform .35s cubic-bezier(.34,1.56,.64,1);}" +
+      // A filled block lifts very slightly. Enough to feel earned, not enough
+      // to look like it is floating away.
+      ".badgehq-bundle__seg--on{transform:translateY(-1px);}" +
+      // A slow sheen travels across the filled blocks, so the bar is alive even
+      // while the shopper is not doing anything.
+      ".badgehq-bundle__seg--on::after{content:'';position:absolute;inset:0;" +
+      "background:linear-gradient(100deg,transparent 20%,rgba(255,255,255,.45) 50%,transparent 80%);" +
+      "transform:translateX(-100%);animation:badgehq-bundle-sheen 2.6s ease-in-out infinite;}" +
+      "@keyframes badgehq-bundle-sheen{0%{transform:translateX(-100%)}55%,100%{transform:translateX(100%)}}" +
+      // The next block to fill breathes gently: it is the one the shopper is
+      // being asked to earn, so it is the only empty block that draws attention.
+      ".badgehq-bundle__seg--next{animation:badgehq-bundle-breathe 1.9s ease-in-out infinite;}" +
+      "@keyframes badgehq-bundle-breathe{0%,100%{opacity:1}50%{opacity:.55}}" +
+
       ".badgehq-bundle__barwrap{display:block !important;width:100% !important;height:20px !important;" +
-      "min-height:20px !important;border-radius:10px !important;overflow:hidden !important;margin:0 !important;}" +
+      "min-height:20px !important;border-radius:10px !important;overflow:hidden !important;margin:0 !important;" +
+      "box-shadow:inset 0 1px 2px rgba(0,0,0,.12);}" +
       ".badgehq-bundle__fill{display:block !important;height:100% !important;border-radius:10px !important;" +
-      "transition:width .3s;}";
+      "box-shadow:inset 0 1px 0 rgba(255,255,255,.35);" +
+      "transition:width .5s cubic-bezier(.34,1.4,.64,1);}" +
+
+      // The unlock is the payoff, so it gets the only large motion on the page.
+      ".badgehq-bundle--won .badgehq-bundle__msg{animation:badgehq-bundle-won .6s ease;}" +
+      "@keyframes badgehq-bundle-won{0%{transform:scale(1)}30%{transform:scale(1.08)}100%{transform:scale(1)}}" +
+
+      // Motion is decoration here; every value is still readable without it.
+      "@media (prefers-reduced-motion:reduce){" +
+      ".badgehq-bundle__seg--on::after,.badgehq-bundle__seg--next," +
+      ".badgehq-bundle--bump .badgehq-bundle__n,.badgehq-bundle--won .badgehq-bundle__msg{animation:none !important;}" +
+      ".badgehq-bundle__seg,.badgehq-bundle__fill{transition:none !important;}}";
     (document.head || document.documentElement).appendChild(style);
   }
 
@@ -1967,7 +2006,9 @@
       ? (m.reached || "{{title}} unlocked!")
       : (m.below || "Add {{remaining}} more to unlock {{title}}");
     msg = msg
-      .replace(/\{\{remaining\}\}/g, String(remaining))
+      // Wrapped so the number can pop on its own when it changes. Escaping is
+      // not a concern: this is a digit we generated, not merchant input.
+      .replace(/\{\{remaining\}\}/g, '<span class="badgehq-bundle__n">' + remaining + "</span>")
       // "1 item" rather than "1 items": the offer copy is the shop's voice and
       // a plural bug there reads as carelessness.
       .replace(/\{\{items\}\}/g, remaining === 1 ? "item" : "items")
@@ -2007,8 +2048,12 @@
       if (need <= 8) {
         bar = '<div class="badgehq-bundle__track">';
         for (var seg = 0; seg < need; seg++) {
-          bar += '<div class="badgehq-bundle__seg" style="background:' +
-            (seg < have ? (c.progressBg || "#4caf50") : (c.barBg || "#f0f0f0")) + '"></div>';
+          var on = seg < have;
+          // Exactly one empty block is marked "next": the one they earn by
+          // adding a single item. Highlighting all of them would just be noise.
+          var cls = "badgehq-bundle__seg" + (on ? " badgehq-bundle__seg--on" : (seg === have ? " badgehq-bundle__seg--next" : ""));
+          bar += '<div class="' + cls + '" style="background:' +
+            (on ? (c.progressBg || "#4caf50") : (c.barBg || "#f0f0f0")) + '"></div>';
         }
         bar += "</div>";
       } else {
@@ -2019,6 +2064,14 @@
       html += bar;
     }
     el.innerHTML = html;
+
+    // Remember what this offer showed last time, so the bump fires on a real
+    // change rather than on every render (the cart listener re-renders often).
+    var prev = _bundleLastHave[offer.id];
+    _bundleLastHave[offer.id] = have;
+    if (prev !== undefined && have !== prev) {
+      el.className += remaining === 0 ? " badgehq-bundle--won" : " badgehq-bundle--bump";
+    }
 
     insertBundleEl(el, page);
   }
