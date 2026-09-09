@@ -1946,7 +1946,13 @@
     el.id = "badgehq-bundle-" + offer.id;
     el.style.cssText = "padding:12px 16px;text-align:center;margin:8px 0;width:100%;box-sizing:border-box;display:block;flex-shrink:0;";
 
-    var html = '<p style="color:' + (c.text || "#333") + ';margin:0;font-size:14px;font-weight:500;">' + msg + "</p>";
+    // !important on the layout-deciding properties: themes style p and div
+    // inside cart and product regions, and a plain inline rule loses to a
+    // theme rule of higher specificity. This was left-aligning the message and
+    // collapsing the bar's height in some themes.
+    var pStyle = "color:" + (c.text || "#333") + ";margin:0 0 8px !important;font-size:14px !important;" +
+      "font-weight:500 !important;text-align:center !important;line-height:1.4 !important;padding:0 !important;";
+    var html = '<p style="' + pStyle + '">' + msg + "</p>";
     if (offer.showProgress) {
       // Segmented, one block per item needed: the shopper is counting ITEMS,
       // and "1 of 2 filled" is read straight off the blocks. A single smear
@@ -1954,17 +1960,20 @@
       // items that becomes slivers, so it falls back to one continuous bar.
       var bar;
       if (need <= 8) {
-        bar = '<div style="display:flex;gap:4px;width:100%;">';
+        bar = '<div style="display:flex !important;gap:4px !important;width:100% !important;margin:0 !important;padding:0 !important;">';
         for (var seg = 0; seg < need; seg++) {
-          bar += '<div style="flex:1;height:20px;border-radius:6px;transition:background 0.3s;background:' +
-            (seg < have ? (c.progressBg || "#4caf50") : (c.barBg || "#f0f0f0")) + ';"></div>';
+          bar += '<div style="flex:1 1 0 !important;height:20px !important;min-height:20px !important;' +
+            'border-radius:6px !important;margin:0 !important;transition:background 0.3s;background:' +
+            (seg < have ? (c.progressBg || "#4caf50") : (c.barBg || "#f0f0f0")) + ' !important;"></div>';
         }
         bar += "</div>";
       } else {
-        bar = '<div style="background:' + (c.barBg || "#f0f0f0") + ';border-radius:10px;height:20px;overflow:hidden;width:100%;display:block;">' +
-          '<div style="background:' + (c.progressBg || "#4caf50") + ";height:100%;width:" + pct + '%;border-radius:10px;transition:width 0.3s;display:block;"></div></div>';
+        bar = '<div style="background:' + (c.barBg || "#f0f0f0") + ' !important;border-radius:10px !important;' +
+          'height:20px !important;min-height:20px !important;overflow:hidden !important;width:100% !important;display:block !important;margin:0 !important;">' +
+          '<div style="background:' + (c.progressBg || "#4caf50") + ' !important;height:100% !important;width:' + pct +
+          '% !important;border-radius:10px !important;transition:width 0.3s;display:block !important;"></div></div>';
       }
-      html = '<p style="color:' + (c.text || "#333") + ';margin:0 0 8px;font-size:14px;font-weight:500;">' + msg + "</p>" + bar;
+      html = '<p style="' + pStyle + '">' + msg + "</p>" + bar;
     }
     el.innerHTML = html;
 
