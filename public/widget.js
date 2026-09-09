@@ -1981,6 +1981,24 @@
     return "rgb(" + ch(0) + "," + ch(2) + "," + ch(4) + ")";
   }
 
+  /**
+   * Thumbnails for the qualifying items already in the cart.
+   *
+   * Shopify's image URLs accept a size suffix, so this asks for a small one
+   * rather than pulling a full-size product photo into a 40px circle.
+   */
+  function bundleCartImages(offer, cart, max) {
+    var items = (cart && cart.items) || [];
+    var out = [];
+    for (var i = 0; i < items.length && out.length < Math.min(max, 3); i++) {
+      if (!bundleItemQualifies(offer, items[i])) continue;
+      var src = items[i].image || items[i].featured_image || "";
+      if (!src) continue;
+      out.push(src.replace(/(\.(?:png|jpe?g|webp|gif))(\?|$)/i, "_120x120$1$2"));
+    }
+    return out;
+  }
+
   /** Merchant-authored text reaching innerHTML, so it is escaped. */
   function bundleEscape(t) {
     return String(t)
@@ -1998,67 +2016,66 @@
     var style = document.createElement("style");
     style.id = "badgehq-bundle-css";
     style.textContent =
-      // A horizontal strip, not a stacked block: on a cart page this sits among
-      // line items and totals, where a tall centred panel interrupts the flow.
-      // Message left, action right, the shape every coupon row in the category
-      // already uses, so shoppers recognise it without being taught.
-      ".badgehq-bundle{display:flex !important;align-items:center !important;gap:12px !important;" +
-      "width:100% !important;box-sizing:border-box !important;padding:12px 14px !important;" +
-      "margin:10px 0 !important;border-radius:10px !important;text-align:left !important;" +
-      "float:none !important;position:static !important;visibility:visible !important;opacity:1 !important;" +
-      "max-height:none !important;overflow:visible !important;flex-wrap:wrap !important;}" +
+      // Card with a notched badge sitting on its top border. Accent colours are
+      // set inline per offer; only structure lives here.
+      ".badgehq-bundle{position:relative !important;display:block !important;width:100% !important;" +
+      "box-sizing:border-box !important;margin:22px 0 10px !important;padding:22px 18px 16px !important;" +
+      "border-radius:14px !important;border:1.5px solid !important;text-align:left !important;" +
+      "float:none !important;visibility:visible !important;opacity:1 !important;overflow:visible !important;}" +
 
-      // The icon carries the offer colour, so the row is recognisably ours
-      // without tinting the whole strip loudly.
-      ".badgehq-bundle__icon{flex:0 0 auto !important;width:26px !important;height:26px !important;" +
-      "border-radius:50% !important;display:flex !important;align-items:center !important;" +
-      "justify-content:center !important;color:#fff !important;font-size:14px !important;" +
-      "line-height:1 !important;}" +
+      ".badgehq-bundle__flag{position:absolute !important;top:-14px !important;left:18px !important;" +
+      "background:#fff !important;border:1.5px solid !important;border-radius:14px !important;" +
+      "padding:3px 14px !important;font-size:13px !important;font-weight:600 !important;" +
+      "line-height:1.4 !important;white-space:nowrap !important;}" +
 
-      ".badgehq-bundle__body{flex:1 1 180px !important;min-width:0 !important;}" +
-      ".badgehq-bundle__msg{margin:0 !important;padding:0 !important;font-size:14px !important;" +
-      "font-weight:500 !important;line-height:1.35 !important;text-align:left !important;}" +
+      ".badgehq-bundle__row{display:flex !important;align-items:center !important;" +
+      "justify-content:space-between !important;gap:12px !important;flex-wrap:wrap !important;}" +
+      ".badgehq-bundle__left{display:flex !important;align-items:center !important;gap:12px !important;" +
+      "min-width:0 !important;flex:1 1 200px !important;}" +
+
+      // Overlapping thumbnails of what is actually in the cart.
+      ".badgehq-bundle__pics{position:relative !important;height:40px !important;flex:none !important;}" +
+      ".badgehq-bundle__pic{position:absolute !important;top:0 !important;width:40px !important;" +
+      "height:40px !important;border-radius:50% !important;border:2px solid #fff !important;" +
+      "object-fit:cover !important;box-sizing:border-box !important;background:#eee !important;" +
+      "margin:0 !important;padding:0 !important;max-width:none !important;}" +
+
+      ".badgehq-bundle__title{display:flex !important;align-items:center !important;gap:6px !important;" +
+      "margin:0 !important;font-size:18px !important;font-weight:700 !important;line-height:1.3 !important;}" +
+      ".badgehq-bundle__sub{margin:0 !important;font-size:14px !important;font-weight:600 !important;" +
+      "color:#6B6B6B !important;line-height:1.3 !important;}" +
       ".badgehq-bundle__n{display:inline-block;font-weight:700;}" +
       ".badgehq-bundle--bump .badgehq-bundle__n{animation:badgehq-bundle-pop .45s cubic-bezier(.34,1.56,.64,1);}" +
-      "@keyframes badgehq-bundle-pop{0%{transform:scale(1)}40%{transform:scale(1.35)}100%{transform:scale(1)}}" +
+      "@keyframes badgehq-bundle-pop{0%{transform:scale(1)}40%{transform:scale(1.3)}100%{transform:scale(1)}}" +
 
-      // Progress sits under the message, thinner than before: at this size it
-      // is a supporting detail, not the headline.
-      ".badgehq-bundle__track{display:flex !important;gap:3px !important;width:100% !important;" +
-      "margin:7px 0 0 !important;padding:0 !important;list-style:none !important;}" +
-      ".badgehq-bundle__seg{flex:1 1 0 !important;display:block !important;height:6px !important;" +
-      "min-height:6px !important;border-radius:3px !important;margin:0 !important;padding:0 !important;" +
-      "position:relative !important;overflow:hidden !important;transition:background .35s ease;}" +
-      ".badgehq-bundle__seg--next{animation:badgehq-bundle-breathe 1.9s ease-in-out infinite;}" +
-      "@keyframes badgehq-bundle-breathe{0%,100%{opacity:1}50%{opacity:.5}}" +
-      ".badgehq-bundle__barwrap{display:block !important;width:100% !important;height:6px !important;" +
-      "min-height:6px !important;border-radius:3px !important;overflow:hidden !important;margin:7px 0 0 !important;}" +
-      ".badgehq-bundle__fill{display:block !important;height:100% !important;border-radius:3px !important;" +
-      "transition:width .5s cubic-bezier(.34,1.4,.64,1);}" +
-
-      // Right-aligned action. Outlined, because a solid button here would
-      // outrank the merchant's own checkout button sitting inches away.
-      ".badgehq-bundle__cta{flex:0 0 auto !important;display:inline-block !important;margin:0 !important;" +
-      "padding:8px 14px !important;border-radius:8px !important;font-size:12px !important;" +
-      "font-weight:700 !important;letter-spacing:.02em !important;text-transform:uppercase !important;" +
-      "text-decoration:none !important;cursor:pointer;line-height:1.2 !important;white-space:nowrap !important;" +
-      "border:1.5px solid !important;background:transparent !important;" +
-      "transition:transform .18s cubic-bezier(.34,1.56,.64,1),background .18s ease;}" +
-      ".badgehq-bundle__cta:hover{transform:translateY(-1px);}" +
+      ".badgehq-bundle__cta{flex:none !important;display:inline-flex !important;align-items:center !important;" +
+      "gap:6px !important;background:#fff !important;border:1.5px solid !important;border-radius:8px !important;" +
+      "padding:8px 16px !important;font-size:14px !important;font-weight:600 !important;" +
+      "text-decoration:none !important;cursor:pointer !important;line-height:1.2 !important;" +
+      "white-space:nowrap !important;transition:background .18s ease,transform .18s ease;}" +
+      ".badgehq-bundle__cta:hover{background:#F3F3F3 !important;transform:translateY(-1px);}" +
       ".badgehq-bundle__cta:active{transform:translateY(0);}" +
       ".badgehq-bundle__cta:focus-visible{outline:2px solid currentColor;outline-offset:2px;}" +
 
-      ".badgehq-bundle--won .badgehq-bundle__msg{animation:badgehq-bundle-won .6s ease;}" +
-      "@keyframes badgehq-bundle-won{0%{transform:scale(1)}30%{transform:scale(1.06)}100%{transform:scale(1)}}" +
+      ".badgehq-bundle__progress{margin-top:14px !important;}" +
+      ".badgehq-bundle__labels{display:flex !important;justify-content:space-between !important;" +
+      "gap:8px !important;margin:0 0 6px !important;font-size:12px !important;font-weight:600 !important;}" +
+      ".badgehq-bundle__track{height:8px !important;border-radius:99px !important;overflow:hidden !important;" +
+      "margin:0 !important;padding:0 !important;display:block !important;width:100% !important;}" +
+      ".badgehq-bundle__fill{height:100% !important;border-radius:99px !important;display:block !important;" +
+      "transition:width .45s cubic-bezier(.34,1.4,.64,1);}" +
 
-      // Narrow carts: the button drops to its own line rather than squeezing
-      // the message into a column of single words.
-      "@media (max-width:479px){.badgehq-bundle__cta{flex:1 1 100% !important;text-align:center !important;}}" +
+      ".badgehq-bundle--won .badgehq-bundle__title{animation:badgehq-bundle-won .6s ease;}" +
+      "@keyframes badgehq-bundle-won{0%{transform:scale(1)}30%{transform:scale(1.05)}100%{transform:scale(1)}}" +
+
+      // Narrow carts: the button takes its own line rather than crushing the
+      // title into a column of single words.
+      "@media (max-width:479px){.badgehq-bundle__cta{flex:1 1 100% !important;justify-content:center !important;}" +
+      ".badgehq-bundle__title{font-size:16px !important;}}" +
 
       "@media (prefers-reduced-motion:reduce){" +
-      ".badgehq-bundle__seg--next,.badgehq-bundle--bump .badgehq-bundle__n," +
-      ".badgehq-bundle--won .badgehq-bundle__msg{animation:none !important;}" +
-      ".badgehq-bundle__seg,.badgehq-bundle__fill,.badgehq-bundle__cta{transition:none !important;}}";
+      ".badgehq-bundle--bump .badgehq-bundle__n,.badgehq-bundle--won .badgehq-bundle__title{animation:none !important;}" +
+      ".badgehq-bundle__fill,.badgehq-bundle__cta{transition:none !important;}}";
     (document.head || document.documentElement).appendChild(style);
   }
 
@@ -2111,61 +2128,60 @@
 
     ensureBundleStyles();
 
-    var accent = c.progressBg || "#4caf50";
+    var accent = c.progressBg || "#6B21A8";
     var el = document.createElement("div");
     el.id = "badgehq-bundle-" + offer.id;
     el.className = "badgehq-bundle";
-    // A tint of the accent for the strip, so the row is clearly one unit
-    // without a heavy fill competing with the cart's own surfaces.
+    el.style.borderColor = accent;
     el.style.background = bundleTint(accent);
-    el.style.border = "1px solid " + bundleTint(accent, true);
 
-    // Discount mark. Inline SVG rather than an emoji: emoji render differently
-    // on every platform and some fall back to a hollow box.
-    var html = '<span class="badgehq-bundle__icon" style="background:' + accent + '" aria-hidden="true">' +
-      '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" ' +
-      'stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><circle cx="7.5" cy="7.5" r="2.2"/>' +
-      '<circle cx="16.5" cy="16.5" r="2.2"/></svg></span>';
+    // The notch on the border. Merchant text, so escaped.
+    var html = '<div class="badgehq-bundle__flag" style="color:' + accent + ";border-color:" + accent + '">' +
+      bundleEscape(offer.flagText || "Best Offer") + "</div>";
 
-    html += '<div class="badgehq-bundle__body">' +
-      '<p class="badgehq-bundle__msg" style="color:' + (c.text || "#333") + '">' + msg + "</p>";
+    html += '<div class="badgehq-bundle__row"><div class="badgehq-bundle__left">';
 
-    if (offer.showProgress) {
-      // Segmented, one block per item needed: the shopper is counting ITEMS,
-      // and "1 of 2 filled" is read straight off the blocks. Above ~8 items
-      // that becomes slivers, so it falls back to one continuous bar.
-      var bar;
-      if (need <= 8) {
-        bar = '<div class="badgehq-bundle__track">';
-        for (var seg = 0; seg < need; seg++) {
-          var on = seg < have;
-          // Exactly one empty block is marked "next": the one they earn by
-          // adding a single item. Highlighting all of them would just be noise.
-          var cls = "badgehq-bundle__seg" + (on ? "" : (seg === have ? " badgehq-bundle__seg--next" : ""));
-          bar += '<div class="' + cls + '" style="background:' +
-            (on ? accent : (c.barBg || "#f0f0f0")) + '"></div>';
-        }
-        bar += "</div>";
-      } else {
-        bar = '<div class="badgehq-bundle__barwrap" style="background:' + (c.barBg || "#f0f0f0") + '">' +
-          '<div class="badgehq-bundle__fill" style="background:' + accent +
-          ";width:" + pct + '%"></div></div>';
+    // Thumbnails of the QUALIFYING items already in the cart, so the shopper
+    // sees their own picks rather than generic placeholders. Nothing is drawn
+    // when the cart has none: two grey circles say less than no circles.
+    var pics = bundleCartImages(offer, cart, need);
+    if (pics.length) {
+      html += '<div class="badgehq-bundle__pics" style="width:' + (40 + (pics.length - 1) * 24) + 'px">';
+      for (var i = 0; i < pics.length; i++) {
+        html += '<img class="badgehq-bundle__pic" src="' + bundleEscape(pics[i]) +
+          '" alt="" loading="lazy" style="left:' + i * 24 + 'px;z-index:' + (pics.length - i) + '">';
       }
-      html += bar;
+      html += "</div>";
     }
-    html += "</div>";
+
+    html += "<div>";
+    html += '<p class="badgehq-bundle__title" style="color:' + (c.text || "#1F1F1F") + '">' +
+      bundleEscape(offer.title || "Bundle offer") + "</p>";
+    // The live status line, which is what actually changes as they shop.
+    html += '<p class="badgehq-bundle__sub">' + msg + "</p>";
+    html += "</div></div>";
 
     // Only while the offer is unearned: once unlocked, pushing them to add more
     // is the wrong message, and the cart is where they should be heading.
     var shopUrl = remaining > 0 ? bundleShopUrl(offer) : "";
     if (shopUrl) {
-      // The merchant's own wording wins. Otherwise avoid "Shop <collection>":
-      // collections are often named after the promotion itself ("2 FOR 1299"),
-      // which makes the button repeat the message beside it.
-      var linkText = offer.ctaText
-        || (offer.scope === "collection" ? "Shop more" : "View product");
-      html += '<a class="badgehq-bundle__cta" href="' + shopUrl + '" style="color:' + accent +
-        ";border-color:" + accent + '">' + bundleEscape(linkText) + "</a>";
+      var linkText = offer.ctaText || "Explore";
+      html += '<a class="badgehq-bundle__cta" href="' + shopUrl + '" style="color:' + (c.text || "#1F1F1F") +
+        ";border-color:" + (c.text || "#1F1F1F") + '">' + bundleEscape(linkText) +
+        '<span aria-hidden="true">&#8599;</span></a>';
+    }
+    html += "</div>";
+
+    if (offer.showProgress) {
+      var pctDone = need > 0 ? Math.min((have / need) * 100, 100) : 0;
+      html += '<div class="badgehq-bundle__progress">' +
+        '<div class="badgehq-bundle__labels" style="color:' + accent + '">' +
+        "<span>" + have + " of " + need + " added</span>" +
+        "<span>" + (remaining > 0 ? "Add " + remaining + " more to unlock" : "Offer unlocked") + "</span>" +
+        "</div>" +
+        '<div class="badgehq-bundle__track" style="background:' + bundleTint(accent, true) + '">' +
+        '<div class="badgehq-bundle__fill" style="background:' + accent + ";width:" + pctDone + '%"></div>' +
+        "</div></div>";
     }
 
     el.innerHTML = html;

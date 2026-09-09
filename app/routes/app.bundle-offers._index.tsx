@@ -58,6 +58,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       collectionHandle: o.collectionHandle,
       collectionTitle: o.collectionTitle,
       ctaText: o.ctaText,
+      flagText: o.flagText,
       productHandles: JSON.parse(o.productHandles) as string[],
       messages: JSON.parse(o.messages) as Record<string, string>,
       colors: JSON.parse(o.colors) as Record<string, string>,
@@ -105,6 +106,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       collectionHandle: String(data.collectionHandle || "").trim().slice(0, 200),
       collectionTitle: String(data.collectionTitle || "").trim().slice(0, 200),
       ctaText: String(data.ctaText || "").trim().slice(0, 60),
+      flagText: String(data.flagText || "").trim().slice(0, 40),
       productHandles: JSON.stringify(
         String(data.productHandles || "")
           .split(",")
@@ -145,6 +147,7 @@ const BLANK = {
   collectionHandle: "",
   collectionTitle: "",
   ctaText: "",
+  flagText: "Best Offer",
   productHandles: "",
   below: "Add {{remaining}} more {{items}} to unlock {{title}}",
   reached: "{{title}} unlocked!",
@@ -186,6 +189,7 @@ export default function BundleOffersPage() {
       collectionHandle: o.collectionHandle,
       collectionTitle: o.collectionTitle,
       ctaText: o.ctaText,
+      flagText: o.flagText,
       productHandles: o.productHandles.join(", "),
       below: o.messages?.below ?? BLANK.below,
       reached: o.messages?.reached ?? BLANK.reached,
@@ -209,6 +213,7 @@ export default function BundleOffersPage() {
           collectionHandle: editing.collectionHandle,
           collectionTitle: editing.collectionTitle,
           ctaText: editing.ctaText,
+          flagText: editing.flagText,
           productHandles: editing.productHandles,
           messages: { below: editing.below, reached: editing.reached },
           colors: { barBg: editing.barBg, progressBg: editing.progressBg, text: editing.textCol },
@@ -391,14 +396,24 @@ export default function BundleOffersPage() {
                     </BlockStack>
                   </Box>
 
-                  <TextField
-                    label="Button label"
+                  <InlineGrid columns={{ xs: 1, md: 2 }} gap="400">
+                    <TextField
+                      label="Corner label"
+                      value={editing.flagText}
+                      onChange={(v) => set("flagText", v)}
+                      autoComplete="off"
+                      placeholder="Best Offer"
+                      helpText="The small tag on the top edge of the card."
+                    />
+                    <TextField
+                      label="Button label"
                     value={editing.ctaText}
                     onChange={(v) => set("ctaText", v)}
                     autoComplete="off"
-                    placeholder="Shop eligible products"
-                    helpText="The button under the bar, linking to the qualifying products. Leave blank for the default."
-                  />
+                      placeholder="Explore"
+                      helpText="Links to the qualifying products."
+                    />
+                  </InlineGrid>
 
                   <Checkbox
                     label="Show the progress bar"

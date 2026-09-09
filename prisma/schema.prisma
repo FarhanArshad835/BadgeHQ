@@ -135,6 +135,8 @@ model BundleOffer {
   /// Label for the link to the qualifying products. Blank uses a sensible
   /// default, since collections are often named after the promotion itself.
   ctaText          String   @default("")
+  /// The small notched label on the card's top border.
+  flagText         String   @default("Best Offer")
   /// Draw the progress bar. Some merchants want the message alone.
   showProgress     Boolean  @default(true)
   isActive         Boolean  @default(false)
