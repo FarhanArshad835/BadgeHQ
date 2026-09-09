@@ -2018,12 +2018,17 @@
     style.textContent =
       // Card with a notched badge sitting on its top border. Accent colours are
       // set inline per offer; only structure lives here.
-      ".badgehq-bundle{position:relative !important;display:block !important;width:100% !important;" +
-      "box-sizing:border-box !important;margin:22px 0 10px !important;padding:22px 18px 16px !important;" +
-      "border-radius:14px !important;border:1.5px solid !important;text-align:left !important;" +
-      "float:none !important;visibility:visible !important;opacity:1 !important;overflow:visible !important;}" +
+      // position:relative only so the notched flag can hang off the top edge.
+      // z-index is deliberately auto: a value here would let this card paint
+      // OVER a sticky checkout bar, and the offer must never cover the button
+      // the shopper is trying to press.
+      ".badgehq-bundle{position:relative !important;z-index:auto !important;display:block !important;" +
+      "width:100% !important;box-sizing:border-box !important;margin:22px 0 10px !important;" +
+      "padding:22px 18px 16px !important;border-radius:14px !important;border:1.5px solid !important;" +
+      "text-align:left !important;float:none !important;visibility:visible !important;opacity:1 !important;" +
+      "overflow:visible !important;pointer-events:auto !important;}" +
 
-      ".badgehq-bundle__flag{position:absolute !important;top:-14px !important;left:18px !important;" +
+      ".badgehq-bundle__flag{position:absolute !important;z-index:1 !important;top:-14px !important;left:18px !important;" +
       "background:#fff !important;border:1.5px solid !important;border-radius:14px !important;" +
       "padding:3px 14px !important;font-size:13px !important;font-weight:600 !important;" +
       "line-height:1.4 !important;white-space:nowrap !important;}" +
@@ -2255,6 +2260,9 @@
     }
 
     if (!inserted) {
+      // Prepend, never append: appending to body would drop the card at the end
+      // of the document, where a fixed checkout bar (Shiprocket/GoKwik and
+      // friends pin one to the bottom) would sit straight on top of it.
       var main = document.querySelector("main, #MainContent, .main-content, #main-content");
       if (main) main.prepend(el); else document.body.prepend(el);
     }
