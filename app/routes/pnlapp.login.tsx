@@ -63,6 +63,16 @@ export default function PnlLogin() {
             {needsSetup ? "Set password and enter" : "Enter"}
           </button>
         </Form>
+
+        {/* Nothing to reset during first-time setup, so this only appears once
+            a password actually exists. */}
+        {!needsSetup && (
+          <p className="pnl-help" style={{ marginTop: 18 }}>
+            Forgot it? Open BadgeHQ in your Shopify admin, go to <strong>Profit &amp; Loss</strong>,
+            and click <strong>Reset dashboard password</strong>. Being signed into the store admin
+            is what proves it is you, so there is nothing extra to remember.
+          </p>
+        )}
       </div>
     </div>
   );

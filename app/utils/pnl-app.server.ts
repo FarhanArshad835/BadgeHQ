@@ -85,6 +85,60 @@ export function isAuthed(request: Request): boolean {
   return ok === "ok" && Number(expiry) > Date.now();
 }
 
+// ── password reset ───────────────────────────────────────────────────────────
+
+/**
+ * Short-lived, single-use reset tokens.
+ *
+ * There is no email on this tool and no account to send a link to, so the proof
+ * of identity is Shopify itself: only someone already authenticated in the
+ * store's admin can mint one of these, from /app/pnl. That means nothing extra
+ * to remember and no second secret to lose.
+ *
+ * The token is signed with the same app secret as the session, so it needs no
+ * new storage to be verifiable. What DOES get stored is a hash of the token on
+ * PnlApp, which is what makes it single-use: consuming a reset clears it, so a
+ * link that leaks after use is inert.
+ */
+const RESET_TTL_MS = 30 * 60 * 1000; // 30 minutes
+
+/** Mint a reset token. Returns the token to put in the link. */
+export function makeResetToken(): { token: string; hash: string; expiresAt: Date } {
+  const nonce = crypto.randomBytes(24).toString("hex");
+  const expiry = Date.now() + RESET_TTL_MS;
+  const payload = `${nonce}.${expiry}`;
+  const token = `${payload}.${sign(payload)}`;
+  return {
+    token,
+    hash: crypto.createHash("sha256").update(token).digest("hex"),
+    expiresAt: new Date(expiry),
+  };
+}
+
+/**
+ * Verify a reset token against what is stored. Checks the signature, the
+ * expiry, AND that it matches the one currently outstanding, so an old token
+ * cannot be replayed after a newer one is issued.
+ */
+export function verifyResetToken(token: string, storedHash: string, storedExpiry: Date | null): boolean {
+  if (!token || !storedHash || !storedExpiry) return false;
+  if (storedExpiry.getTime() < Date.now()) return false;
+
+  const parts = String(token).split(".");
+  if (parts.length !== 3) return false;
+  const [nonce, expiry, sig] = parts;
+  const expected = sign(`${nonce}.${expiry}`);
+  if (sig.length !== expected.length) return false;
+  if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return false;
+  if (Number(expiry) < Date.now()) return false;
+
+  const actual = crypto.createHash("sha256").update(token).digest("hex");
+  return (
+    actual.length === storedHash.length &&
+    crypto.timingSafeEqual(Buffer.from(actual), Buffer.from(storedHash))
+  );
+}
+
 /** Load the single config row (id="default"), creating it empty on first use. */
 export async function getPnlApp() {
   const existing = await prisma.pnlApp.findUnique({ where: { id: "default" } });

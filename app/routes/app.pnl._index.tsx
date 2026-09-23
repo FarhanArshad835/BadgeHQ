@@ -24,6 +24,7 @@ import { authenticate, unauthenticated } from "../shopify.server";
 import prisma from "../db.server";
 import { rollup, completeness, type OrderRow } from "../utils/pnl.server";
 import { syncRevenueAndCogs, backfillShipping } from "../utils/pnl-sync.server";
+import { makeResetToken } from "../utils/pnl-app.server";
 // formatMinor is a plain (non-.server) module — the client component renders
 // amounts with it, so it must NOT come from a .server file.
 import { formatMinor } from "../utils/money";
@@ -162,6 +163,30 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const shop = session.shop;
   const form = await request.formData();
+
+  // Mint a one-time link that lets someone set a new password on the
+  // standalone tool at /pnl-app.
+  //
+  // Being here IS the authorisation: this route is behind authenticate.admin,
+  // so only someone already signed into the store's Shopify admin can reach it.
+  // That tool has no email address to send a link to, and a recovery code would
+  // just be a second secret to lose, so Shopify's own session is the proof.
+  if (String(form.get("intent") || "") === "reset-password") {
+    const { token, hash, expiresAt } = makeResetToken();
+    // Only the HASH is stored, so a database read cannot be turned into a
+    // password reset, and writing a fresh one invalidates any earlier link.
+    await prisma.pnlApp.update({
+      where: { id: "default" },
+      data: { resetTokenHash: hash, resetTokenExpires: expiresAt },
+    });
+    const origin = new URL(request.url).origin;
+    return json({
+      ok: true,
+      resetUrl: `${origin}/pnl-app/reset?token=${encodeURIComponent(token)}`,
+      message: "Reset link created. It works once and expires in 30 minutes.",
+    });
+  }
+
   const windowKey = String(form.get("window") || "7d");
   const since = (WINDOWS[windowKey] || WINDOWS["7d"]).since();
   const until = new Date();
@@ -200,6 +225,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 export default function PnlPage() {
   const d = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
+  const resetUrl = (actionData as { resetUrl?: string } | undefined)?.resetUrl || "";
   const submit = useSubmit();
   const nav = useNavigation();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -406,6 +432,50 @@ export default function PnlPage() {
                 </BlockStack>
               </Card>
             )}
+            {/* Recovery for the standalone tool at /pnl-app, which has its own
+                password. Being on this page is the authorisation, so the link
+                is generated here rather than asking for a secret. */}
+            <Card>
+              <BlockStack gap="300">
+                <Text as="h2" variant="headingMd">Standalone dashboard password</Text>
+                <Text as="p" tone="subdued">
+                  The Profit and Loss tool outside Shopify has its own password. If it has been
+                  forgotten, create a one-time link here and set a new one. The link works once and
+                  expires in 30 minutes.
+                </Text>
+
+                {resetUrl ? (
+                  <BlockStack gap="200">
+                    <Banner tone="success" title="Reset link created">
+                      <Text as="p">Open this within 30 minutes. It can only be used once.</Text>
+                    </Banner>
+                    {/* Selectable text rather than a link: the embedded admin
+                        runs in an iframe, so opening it in place would trap the
+                        reset page inside the frame. */}
+                    <Box background="bg-surface-secondary" padding="300" borderRadius="200">
+                      <Text as="p" breakWord tone="subdued" variant="bodySm">{resetUrl}</Text>
+                    </Box>
+                    <InlineStack gap="200">
+                      <Button url={resetUrl} target="_blank" variant="primary">
+                        Open reset page
+                      </Button>
+                      <Button onClick={() => navigator.clipboard?.writeText(resetUrl)}>
+                        Copy link
+                      </Button>
+                    </InlineStack>
+                  </BlockStack>
+                ) : (
+                  <InlineStack>
+                    <Button
+                      onClick={() => submit({ intent: "reset-password" }, { method: "POST" })}
+                      loading={busy}
+                    >
+                      Reset dashboard password
+                    </Button>
+                  </InlineStack>
+                )}
+              </BlockStack>
+            </Card>
           </BlockStack>
         </Layout.Section>
       </Layout>

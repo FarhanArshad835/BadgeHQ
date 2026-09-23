@@ -16,6 +16,7 @@ const pnlAppRoutes = [
   route("/pnl-app", "routes/pnlapp.redirect.tsx"),
   route("/pnl-app/home", "routes/pnlapp.dashboard.tsx"),
   route("/pnl-app/login", "routes/pnlapp.login.tsx"),
+  route("/pnl-app/reset", "routes/pnlapp.reset.tsx"),
   route("/pnl-app/settings", "routes/pnlapp.settings.tsx"),
   route("/pnl-app/logout", "routes/pnlapp.logout.tsx"),
 ];

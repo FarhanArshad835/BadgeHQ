@@ -702,6 +702,11 @@ model PnlApp {
   id                 String @id @default("default")
   // Access gate for the standalone tool (it's not behind Shopify login).
   passwordHash       String @default("") // scrypt/pbkdf2 hash of the shared password
+  // Outstanding password-reset token, minted from the Shopify admin. Stored as
+  // a HASH so a database read cannot be used to reset the password, and cleared
+  // on use so a link that leaks afterwards is inert.
+  resetTokenHash     String    @default("")
+  resetTokenExpires  DateTime?
   // Shopify custom-app credentials.
   shopDomain         String @default("") // e.g. "b03304.myshopify.com"
   adminToken         String @default("") // shpat_… custom-app Admin API token
