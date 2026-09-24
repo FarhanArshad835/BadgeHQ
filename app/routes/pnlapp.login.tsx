@@ -13,7 +13,16 @@ import { PnlStyles } from "../utils/pnl-styles";
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (isAuthed(request)) return redirect("/pnl-app/home");
   const app = await getPnlApp();
-  return json({ needsSetup: !app.passwordHash });
+
+  // Build the exact Shopify admin URL for the P&L page, so recovery is one
+  // click rather than an instruction to go and find something. The store handle
+  // is the part before .myshopify.com.
+  const handle = app.shopDomain.replace(".myshopify.com", "");
+  const adminUrl = handle
+    ? `https://admin.shopify.com/store/${handle}/apps/badgehq/app/pnl`
+    : "";
+
+  return json({ needsSetup: !app.passwordHash, adminUrl });
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -38,7 +47,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function PnlLogin() {
-  const { needsSetup } = useLoaderData<typeof loader>();
+  const { needsSetup, adminUrl } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   return (
     <div className="pnl" style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
@@ -67,11 +76,31 @@ export default function PnlLogin() {
         {/* Nothing to reset during first-time setup, so this only appears once
             a password actually exists. */}
         {!needsSetup && (
-          <p className="pnl-help" style={{ marginTop: 18 }}>
-            Forgot it? Open BadgeHQ in your Shopify admin, go to <strong>Profit &amp; Loss</strong>,
-            and click <strong>Reset dashboard password</strong>. Being signed into the store admin
-            is what proves it is you, so there is nothing extra to remember.
-          </p>
+          <div className="pnl-help" style={{ marginTop: 18 }}>
+            {adminUrl ? (
+              <>
+                <p style={{ margin: "0 0 10px" }}>
+                  Forgot it? Being signed into the Shopify admin is what proves it is you, so
+                  there is nothing extra to remember.
+                </p>
+                {/* A real link, because the P&L page is intentionally not listed
+                    in the app's navigation: telling someone to "go to Profit and
+                    Loss" would send them looking for a tile that is not there. */}
+                <a className="pnl-btn" href={adminUrl} target="_blank" rel="noreferrer">
+                  Reset via Shopify admin
+                </a>
+                <p style={{ margin: "10px 0 0" }}>
+                  Sign in to the store if asked, then click{" "}
+                  <strong>Reset dashboard password</strong> at the bottom of that page.
+                </p>
+              </>
+            ) : (
+              <p style={{ margin: 0 }}>
+                Forgot it? Open the BadgeHQ app in your Shopify admin at{" "}
+                <strong>/app/pnl</strong> and click <strong>Reset dashboard password</strong>.
+              </p>
+            )}
+          </div>
         )}
       </div>
     </div>
