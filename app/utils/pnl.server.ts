@@ -43,7 +43,7 @@ const ORDER_PNL_FIELDS = `
       discountedUnitPriceSet { shopMoney { amount } }
       discountAllocations { allocatedAmountSet { shopMoney { amount } } }
       product { id title productType }
-      variant { id title inventoryItem { unitCost { amount currencyCode } } }
+      variant { id title sku inventoryItem { unitCost { amount currencyCode } } }
     }
   }
   fulfillments(first: 10) {
@@ -53,6 +53,8 @@ const ORDER_PNL_FIELDS = `
 
 export type LineFinancials = {
   productId: string;
+  /** Variant SKU: the merchant's own code, which is how stock is actually tracked. */
+  sku: string;
   variantId: string;
   productTitle: string;
   productType: string;
@@ -206,6 +208,7 @@ export function computeOrderFinancials(node: any): OrderFinancialsComputed {
       productTitle: String(li?.product?.title || ""),
       productType: String(li?.product?.productType || ""),
       variantTitle: String(li?.variant?.title || ""),
+      sku: String(li?.variant?.sku || ""),
       quantity,
       lineRevenueMinor,
       lineCogsMinor,

@@ -681,6 +681,9 @@ model OrderLineFinancials {
   // rate (handbags 18%, clothing and footwear 5%) instead of one blended rate.
   productType      String   @default("")
   variantTitle     String   @default("")
+  /// Variant SKU from Shopify: the merchant's own code, and how they identify
+  /// stock. Blank on lines synced before this was captured.
+  sku              String   @default("")
   quantity         Int      @default(0)
   lineRevenueMinor BigInt   @default(0)
   lineCogsMinor    BigInt?
