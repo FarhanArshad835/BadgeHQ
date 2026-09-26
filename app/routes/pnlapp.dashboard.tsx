@@ -170,7 +170,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     intransit: ["in_transit", "no-awb", "unknown", "lost"], // the catch-all bucket
   };
   const drillStatus = url.searchParams.get("status") || "";
-  let drillOrders: Array<{ name: string; id: string; status: string; created: string }> | null = null;
+  let drillOrders: Array<{ name: string; id: string; status: string; created: string; awb: string }> | null = null;
   if (shop && drillStatus && DRILL[drillStatus]) {
     const [dy, dm] = month.split("-").map(Number);
     const IST = 5.5 * 60 * 60 * 1000;
@@ -178,7 +178,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     const dEnd = new Date(Date.UTC(dy, dm, 1) - IST);
     const rows = await prisma.orderFinancials.findMany({
       where: { shop, orderCreatedAt: { gte: dStart, lt: dEnd }, deliveryStatus: { in: DRILL[drillStatus] } },
-      select: { orderName: true, orderId: true, deliveryStatus: true, orderCreatedAt: true },
+      select: { orderName: true, orderId: true, deliveryStatus: true, orderCreatedAt: true, awb: true },
       orderBy: { orderCreatedAt: "asc" },
       take: 5000,
     });
@@ -188,6 +188,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       id: o.orderId.replace(/^.*\//, ""),
       status: o.deliveryStatus,
       created: o.orderCreatedAt.toISOString().slice(0, 10),
+      awb: o.awb,
     }));
   }
 
@@ -508,6 +509,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     );
   }
 };
+
+/**
+ * Brand tracking page, which resolves an AWB from any carrier.
+ *
+ * Deliberately not carrier-specific: the stored `carrier` column is blank on
+ * most orders and mislabels the rest (13- and 14-digit AWBs are recorded as
+ * Delhivery, but Delhivery only resolves its own 13-char alphanumeric format),
+ * so branching on it would send half these links to the wrong carrier.
+ */
+const TRACKING_BASE = "https://jmlooks.shiprocket.co/tracking/";
 
 const DRILL_LABELS: Record<string, string> = {
   delivered: "Delivered",
@@ -938,6 +949,23 @@ of which ${fmt(r.deliveredRevenue)} delivered`} value={fmt(r.grossSale)} strong
                                 </a>
                               ) : (
                                 o.name || o.id
+                              )}
+                            </td>
+                            {/* The AWB is what you actually need when chasing a
+                                stuck parcel, and it was the one thing this list
+                                made you open Shopify to find. */}
+                            <td style={{ fontSize: 12 }}>
+                              {o.awb ? (
+                                <a
+                                  href={`${TRACKING_BASE}${encodeURIComponent(o.awb)}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  title="Open the tracking page"
+                                >
+                                  {o.awb}
+                                </a>
+                              ) : (
+                                <span className="pnl-muted">no AWB</span>
                               )}
                             </td>
                             <td className="pnl-num" style={{ fontSize: 12, opacity: 0.7 }}>{o.status}</td>
