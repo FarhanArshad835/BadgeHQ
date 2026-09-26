@@ -379,6 +379,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       inTransitRevenue: s(c.inTransitRevenueMinor),
       resolutionRate: c.resolutionRate,
       deliveredShareOfPlaced: c.deliveredShareOfPlaced,
+      // Per-delivered efficiency. These are the figures that actually explain a
+      // month-on-month profit swing: totals move with volume, these do not.
+      adPerDeliveredOrder: s(c.adPerDeliveredOrderMinor),
+      freightPerDeliveredOrder: s(c.freightPerDeliveredOrderMinor),
+      cogsPerPair: s(c.cogsPerPairMinor),
+      cogsMatchRate: c.cogsMatchRate,
     })),
   });
 };
@@ -1096,6 +1102,43 @@ of which ${fmt(r.deliveredRevenue)} delivered`} value={fmt(r.grossSale)} strong
                 <CmpRow label="Return/Exchange Fees" cols={d.compare} pick={(c) => fmt(c.returnExchangeFees)} />
                 <CmpRow label="P&L" cols={d.compare} pick={(c) => fmt(c.netPnl, "Pending")} explain={EXPLAIN.profit} strong hl />
                 <CmpRow label="Per Pair" cols={d.compare} pick={(c) => fmt(c.netPnlPerDeliveredPair, "Pending")} breakdown={colPerPair} explain={EXPLAIN.profitPerPair} />
+                {/* Per-delivered efficiency. Totals move with volume, so a
+                    bigger month can look worse and a smaller one better; these
+                    rows are what actually explain a swing between months. */}
+                <CmpRow label="—" cols={d.compare} pick={() => ""} />
+                <CmpRow
+                  label="Ad / delivered order"
+                  cols={d.compare}
+                  pick={(c) => fmt(c.adPerDeliveredOrder, "Pending")}
+                  breakdown={(c) => (c.adSpend != null && c.deliveredOrders
+                    ? `${fmt(c.adSpend)} / ${c.deliveredOrders.toLocaleString("en-IN")} delivered  =  ${fmt(c.adPerDeliveredOrder)}`
+                    : undefined)}
+                  explain={EXPLAIN.adPerOrder}
+                />
+                <CmpRow
+                  label="Freight / delivered order"
+                  cols={d.compare}
+                  pick={(c) => fmt(c.freightPerDeliveredOrder, "Pending")}
+                  breakdown={(c) => (c.freight != null && c.deliveredOrders
+                    ? `${fmt(c.freight)} / ${c.deliveredOrders.toLocaleString("en-IN")} delivered  =  ${fmt(c.freightPerDeliveredOrder)}`
+                    : undefined)}
+                  explain={EXPLAIN.freightPerOrder}
+                />
+                <CmpRow
+                  label="COGS / pair"
+                  cols={d.compare}
+                  pick={(c) => fmt(c.cogsPerPair, "Pending")}
+                  breakdown={(c) => (c.cogs != null && c.deliveredPairs
+                    ? `${fmt(c.cogs)} / ${c.deliveredPairs.toLocaleString("en-IN")} pairs  =  ${fmt(c.cogsPerPair)}`
+                    : undefined)}
+                  explain={EXPLAIN.cogsPerPair}
+                />
+                <CmpRow
+                  label="COGS cost-match rate"
+                  cols={d.compare}
+                  pick={(c) => pct(c.cogsMatchRate)}
+                  explain={EXPLAIN.cogsMatchRate}
+                />
                 <CmpRow label="—" cols={d.compare} pick={() => ""} />
                 <CmpRow label="Placed orders" cols={d.compare} pick={(c) => String(c.placedOrders)} />
                 <CmpRow label="Delivered" cols={d.compare} pick={(c) => String(c.deliveredOrders)} />
