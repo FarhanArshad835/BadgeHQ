@@ -151,13 +151,58 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const rows: string[] = [head.join(",")];
 
+  // Order-level discounts live on the ORDER, not the line, so a line synced
+  // before that was handled still carries its pre-discount price. Rather than
+  // wait for a re-sync to correct months already on disk, scale each line down
+  // so the order's lines sum to what was actually charged.
+  //
+  // grossRevenue is not used directly as the tax base because it can include
+  // shipping charged to the customer (#227949 is Rs100 of pure shipping on a
+  // fully discounted product), and a delivery charge must not be taxed at the
+  // footwear slab.
+  const lineTotalByOrder = new Map<string, bigint>();
   for (const l of allLines) {
+    lineTotalByOrder.set(l.orderId, (lineTotalByOrder.get(l.orderId) ?? 0n) + l.lineRevenueMinor);
+  }
+
+  // Scaling truncates, so an order's scaled lines can land a paisa or two under
+  // what was paid (#218077: 1248.99 against 1249.00). The shortfall goes to the
+  // order's first line, so each order reconciles exactly.
+  const scaledByOrder = new Map<string, bigint>();
+  const firstLineOfOrder = new Map<string, number>();
+  allLines.forEach((l, idx) => {
+    const lineTotal = lineTotalByOrder.get(l.orderId) ?? 0n;
+    const o = orderById.get(l.orderId);
+    if (!o) return;
+    if (!firstLineOfOrder.has(l.orderId)) firstLineOfOrder.set(l.orderId, idx);
+    const paid = o.grossRevenueMinor < lineTotal ? o.grossRevenueMinor : lineTotal;
+    const scaled = lineTotal > 0n ? (l.lineRevenueMinor * paid) / lineTotal : 0n;
+    scaledByOrder.set(l.orderId, (scaledByOrder.get(l.orderId) ?? 0n) + scaled);
+  });
+
+  for (let li = 0; li < allLines.length; li++) {
+    const l = allLines[li];
     const o = orderById.get(l.orderId);
     if (!o) continue;
     const qty = Math.max(0, l.quantity || 0);
     if (qty === 0) continue;
 
-    const rev = splitMinor(l.lineRevenueMinor, qty);
+    // What this line is worth once the order's discount is accounted for.
+    // Only ever scales DOWN: if the lines already reconcile (a re-synced order)
+    // or the order total exceeds them (shipping), the line is left alone.
+    const lineTotal = lineTotalByOrder.get(l.orderId) ?? 0n;
+    const paidForGoods =
+      o.grossRevenueMinor < lineTotal ? o.grossRevenueMinor : lineTotal;
+    const scaledBase =
+      lineTotal > 0n ? (l.lineRevenueMinor * paidForGoods) / lineTotal : 0n;
+    // The first line of the order absorbs the truncation shortfall.
+    const isFirst = firstLineOfOrder.get(l.orderId) === li;
+    const shortfall = isFirst
+      ? paidForGoods - (scaledByOrder.get(l.orderId) ?? 0n)
+      : 0n;
+    const effectiveLineMinor = scaledBase + shortfall;
+
+    const rev = splitMinor(effectiveLineMinor, qty);
     const cogs = splitMinor(l.lineCogsMinor, qty);
 
     // The order's own costs, spread over every unit in the order.
@@ -165,7 +210,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     const shipPer = splitMinor(o.shippingCostMinor, orderUnits);
     const refundPer = splitMinor(o.refundsMinor, orderUnits);
 
-    const rateBp = rateForLine(l);
+    // Slab from the price actually charged per pair: a Rs1,100 pair discounted
+    // to Rs900 belongs in the 5% band, not the 12% one.
+    const rateBp = rateForLine({
+      productType: l.productType,
+      lineRevenueMinor: effectiveLineMinor,
+      quantity: qty,
+    });
     const delivered = o.deliveryStatus === "delivered";
 
     for (let u = 0; u < qty; u++) {
