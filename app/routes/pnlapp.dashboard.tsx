@@ -682,6 +682,12 @@ of which ${fmt(c.deliveredRevenue)} delivered`;
           >
             {d.compareOn ? "Hide comparison" : "Compare months"}
           </button>
+          {/* A plain link, not a fetch: the browser handles the download and
+              the month is in the URL, so the file can be re-pulled or shared
+              without going through the page again. */}
+          <a className="pnl-btn" href={`/pnl-app/export?month=${d.month}`} download>
+            Export orders
+          </a>
           <div className="pnl-controls-right">
             {d.lastSyncAt && (
               <span className="pnl-sub" style={{ fontSize: 13 }}>
