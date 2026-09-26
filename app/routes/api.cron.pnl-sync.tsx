@@ -15,7 +15,7 @@ import { json } from "@remix-run/node";
 import prisma from "../db.server";
 import { unauthenticated } from "../shopify.server";
 import { syncRevenueAndCogs, backfillShipping } from "../utils/pnl-sync.server";
-import { getPnlApp, runStandaloneSync } from "../utils/pnl-app.server";
+import { getPnlApp, runStandaloneSync, tokenAdmin } from "../utils/pnl-app.server";
 import { fetchAndApplyDeliverySheet } from "../utils/delivery-import.server";
 import { refreshReturnHqCache } from "../utils/returnhq.server";
 import { computeMonth } from "../utils/monthly-pnl.server";
@@ -37,6 +37,48 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   // Read-only reporting mode: ?stats=1 returns the COGS cost-match rate (and a
   // few funnel counts) for every month with orders. Runs NO sync — it only
   // reads the already-synced tables, so it's safe to call any time.
+  // Re-sync one explicit month range: ?resync=YYYY-MM..YYYY-MM
+  //
+  // The normal backfill walks newest-first from backfillStartMonth and stops
+  // when Shopify reports no next page. On this store that consistently happened
+  // around 24 June, leaving April and May untouched however many times it ran,
+  // so re-running could never reach them. A bounded window starts its own
+  // pagination inside those months instead of trying to walk back to them.
+  //
+  // Cursor-free by design: it is a one-shot repair, and writing a cursor would
+  // interfere with the rolling backfill's own resume state.
+  const resync = new URL(request.url).searchParams.get("resync");
+  if (resync) {
+    const m = resync.match(/^(\d{4}-\d{2})\.\.(\d{4}-\d{2})$/);
+    if (!m) return json({ error: "use ?resync=YYYY-MM..YYYY-MM" }, { status: 400 });
+    const app = await getPnlApp();
+    if (!app.shopDomain || !app.adminToken) return json({ error: "not-configured" }, { status: 400 });
+
+    const IST = 5.5 * 60 * 60 * 1000;
+    const [fy, fm] = m[1].split("-").map(Number);
+    const [ty, tm] = m[2].split("-").map(Number);
+    const since = new Date(Date.UTC(fy, fm - 1, 1) - IST);
+    // Exclusive end of the TO month, so "..2026-05" covers all of May.
+    const until = new Date(Date.UTC(ty, tm, 1) - IST);
+    if (!(since < until)) return json({ error: "from must precede to" }, { status: 400 });
+
+    const admin = tokenAdmin(app.shopDomain, app.adminToken);
+    const rc = await syncRevenueAndCogs(admin, app.shopDomain, {
+      since,
+      until,
+      maxPages: 400,
+      timeBudgetMs: STANDALONE_TIME_BUDGET_MS,
+    });
+    return json({
+      ok: true,
+      window: { since: since.toISOString(), until: until.toISOString() },
+      orders: rc.orders,
+      pages: rc.pages,
+      done: rc.done,
+      note: rc.done ? "window fully synced" : "time budget hit, call again to continue",
+    });
+  }
+
   if (new URL(request.url).searchParams.get("stats") === "1") {
     const app = await getPnlApp();
     const shop = app.shopDomain;
