@@ -76,11 +76,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const ids = orders.map((o) => o.orderId);
   const allLines: Array<{
     orderId: string;
-    productId: string;
-    variantId: string;
-    productTitle: string;
     productType: string;
-    variantTitle: string;
     sku: string;
     quantity: number;
     lineRevenueMinor: bigint;
@@ -92,11 +88,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       where: { shop, orderId: { in: ids.slice(i, i + 2000) } },
       select: {
         orderId: true,
-        productId: true,
-        variantId: true,
-        productTitle: true,
         productType: true,
-        variantTitle: true,
         sku: true,
         quantity: true,
         lineRevenueMinor: true,
@@ -139,11 +131,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     "awb",
     "carrier",
     "sku",
-    "product_title",
-    "variant_title",
     "product_type",
-    "product_id",
-    "variant_id",
     "unit_revenue",
     "unit_cogs",
     "cogs_known",
@@ -197,11 +185,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           esc(o.awb),
           esc(o.carrier),
           esc(l.sku),
-          esc(l.productTitle),
-          esc(l.variantTitle),
           esc(l.productType),
-          esc(l.productId.replace(/^.*\//, "")),
-          esc(l.variantId.replace(/^.*\//, "")),
           rup(unitRev),
           rup(cogs[u]),
           esc(l.lineCogsComplete ? "yes" : "no"),
