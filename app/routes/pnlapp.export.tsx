@@ -17,9 +17,10 @@
  *
  * fee_charged will not tie exactly to the statement's Return/Exchange Fees
  * line, and should not. The statement bills REQUESTS (ReturnHQ count x the flat
- * fee); this column sums the fee ORDERS actually raised in Shopify. August:
- * Rs1,48,200 here against Rs1,55,200 there, a gap of exactly 70 requests that
- * never got a fee order. That gap is the useful part, not an error to hide.
+ * fee); this column sums what was actually charged in Shopify, across return
+ * fee orders and exchange replacement orders. August: Rs1,48,200 here against
+ * Rs1,55,200 there, a gap of exactly 70 requests that never got charged. That
+ * gap is the useful part, not an error to hide.
  *
  * Taxable value reconciles to the rupee. The TAX column sums a little below the
  * statement (about Rs49 on 6,937 August orders, ~0.7 paise each): integer
@@ -234,19 +235,25 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     // to Rs900 belongs in the 5% band, not the 12% one.
     const rhq = returnsByOrder.get(o.orderName);
 
-    // A ReturnHQ fee order is not a sale, and reading it as one overstates both
-    // revenue and unit counts. These say plainly what each row is.
+    // Returns and exchanges are booked differently, and reading either as an
+    // ordinary sale overstates revenue and unit counts.
     //
-    // A return-fee order is the flat charge alone, nothing shipped. An
-    // exchange-fee order carries the replacement product AND the fee, and when
-    // it exceeds the flat fee the excess is a price difference the customer
-    // paid to move to a dearer item. #216618 in August is Rs280: Rs100 fee plus
-    // Rs180 of difference.
+    // A RETURN gets its own fee order: the flat charge alone, nothing shipped.
+    //
+    // An EXCHANGE gets a replacement order instead, which SHIPS the new item
+    // and collects the fee on the same order. Its product line is Rs0, because
+    // the customer already paid for the goods on the original order, so the
+    // order total is the fee plus any price difference for moving to a dearer
+    // item. Verified on August: #219636 is Rs100 against a Rs0 product line,
+    // and #216618 is Rs280, being Rs100 fee and Rs180 of difference.
+    //
+    // That is why the units on a replacement row are real stock going out
+    // while its revenue is only the fee: the pair was paid for last month.
     const isReturnFee = o.deliveryStatus === "returnhq-fee";
     const orderKind = isReturnFee
       ? "return-fee"
       : o.isExchangeFee
-        ? "exchange-fee"
+        ? "exchange-replacement"
         : "sale";
     const flatFee = app.returnRequestFeeMinor;
     const feeMinor = isReturnFee
