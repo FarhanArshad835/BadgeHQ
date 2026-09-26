@@ -41,6 +41,7 @@ const ORDER_PNL_FIELDS = `
       quantity
       originalUnitPriceSet { shopMoney { amount } }
       discountedUnitPriceSet { shopMoney { amount } }
+      discountAllocations { allocatedAmountSet { shopMoney { amount } } }
       product { id title productType }
       variant { id title inventoryItem { unitCost { amount currencyCode } } }
     }
@@ -147,12 +148,46 @@ export function computeOrderFinancials(node: any): OrderFinancialsComputed {
 
   for (const li of lineNodes) {
     const quantity = Number(li?.quantity ?? 0) || 0;
-    // Revenue per line: what the customer paid (discounted unit price × qty).
-    const unitPaid = toMinor(
-      li?.discountedUnitPriceSet?.shopMoney?.amount ??
-        li?.originalUnitPriceSet?.shopMoney?.amount,
+    // Revenue per line: what the customer actually paid for it.
+    //
+    // discountedUnitPriceSet alone is NOT that. It reflects only LINE-level
+    // discounts; an order-level one (a cart or automatic discount, which is
+    // what a "2 for 1299" offer is) leaves the line at full price and records
+    // the reduction against the order instead. Verified on #218077: two lines
+    // at 849 + 799 = 1648, customer paid 1249, and both discountedUnitPriceSet
+    // values still read full price.
+    //
+    // discountAllocations carries that order-level discount apportioned per
+    // line, and those allocations sum exactly to the order's total discount
+    // (205.56 + 193.44 = 399.00 on that order), so subtracting them gives line
+    // values that add up to what was really charged.
+    //
+    // This matters beyond revenue: GST is computed from these line values, so
+    // the un-discounted base was booking tax on money never collected.
+    const originalMinor = toMinor(li?.originalUnitPriceSet?.shopMoney?.amount);
+    const discountedMinor = toMinor(li?.discountedUnitPriceSet?.shopMoney?.amount);
+    const allocatedMinor = (li?.discountAllocations ?? []).reduce(
+      (sum: bigint, a: any) => sum + toMinor(a?.allocatedAmountSet?.shopMoney?.amount),
+      0n,
     );
-    const lineRevenueMinor = unitPaid * BigInt(quantity);
+
+    // Start from the ORIGINAL price and subtract the allocations, rather than
+    // from the discounted price.
+    //
+    // Subtracting allocations from discountedUnitPriceSet double-counts
+    // whenever Shopify has ALSO reduced that field. Found on #227949: a fully
+    // discounted line reads original 849, discounted 0, allocation 849, and
+    // taking 849 off 0 gave a line of 0 against an order total of 100.
+    // Working from the original price makes both cases agree, because the
+    // allocations are the full record of what came off.
+    const qty = BigInt(quantity);
+    const fromOriginal = originalMinor * qty - allocatedMinor;
+    const fromDiscounted = discountedMinor * qty;
+    // The lower of the two, floored at zero. When Shopify reduced the unit
+    // price itself the allocation may be redundant, and the smaller figure is
+    // the one that reconciles to what was charged.
+    const candidate = fromOriginal < fromDiscounted ? fromOriginal : fromDiscounted;
+    const lineRevenueMinor = candidate > 0n ? candidate : 0n;
 
     // COGS per line from cost-per-item. Absent → this line (and the order) is
     // cogs-incomplete.
