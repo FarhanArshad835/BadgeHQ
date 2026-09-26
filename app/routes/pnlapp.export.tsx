@@ -24,6 +24,7 @@ import type { LoaderFunctionArgs } from "@remix-run/node";
 import prisma from "../db.server";
 import { getPnlApp, isAuthed } from "../utils/pnl-app.server";
 import { monthWindowIst } from "../utils/monthly-pnl.server";
+import { returnHqByOrder } from "../utils/returnhq.server";
 
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 
@@ -70,6 +71,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     orderBy: { orderCreatedAt: "asc" },
   });
   const orderById = new Map(orders.map((o) => [o.orderId, o]));
+
+  // Whether the customer returned or exchanged, from ReturnHQ's own database.
+  // Shopify does not know: a return there is a refund, and these requests are
+  // raised in ReturnHQ, so without this join the export cannot say which sales
+  // actually stuck.
+  const returnsByOrder = await returnHqByOrder(
+    orders.map((o) => o.orderName).filter(Boolean),
+  );
 
   // Lines in chunks: an `in` list of 13k ids is rejected by the query planner
   // well before it is slow.
@@ -140,6 +149,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     "gst_amount",
     "unit_shipping_cost",
     "unit_refund",
+    "return_type",
+    "return_status",
     "line_qty",
     "unit_index",
     "delivered_at_ist",
@@ -212,6 +223,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
     // Slab from the price actually charged per pair: a Rs1,100 pair discounted
     // to Rs900 belongs in the 5% band, not the 12% one.
+    const rhq = returnsByOrder.get(o.orderName);
     const rateBp = rateForLine({
       productType: l.productType,
       lineRevenueMinor: effectiveLineMinor,
@@ -245,6 +257,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           rup(tax),
           rup(shipPer[u] ?? null),
           rup(refundPer[u] ?? null),
+          esc(rhq?.type ?? ""),
+          esc(rhq?.status ?? ""),
           String(qty),
           String(u + 1),
           esc(ist(o.deliveredAt)),

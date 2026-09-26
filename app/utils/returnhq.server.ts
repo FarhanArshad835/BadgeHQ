@@ -137,6 +137,62 @@ export async function refreshReturnHqCache(): Promise<{
 }
 
 /**
+ * ReturnHQ requests for specific orders, keyed by order name.
+ *
+ * The cached table holds monthly TOTALS only, which is right for the statement
+ * but useless in a per-order export: a row cannot say whether that customer
+ * returned. This reads the live ReturnHQ DB for the given order names.
+ *
+ * Read-only, and scoped to this shop's shop_id, since that database is
+ * multi-tenant. Returns an empty map on any failure rather than throwing: a
+ * missing return column should not take down an export.
+ */
+export async function returnHqByOrder(
+  orderNames: string[],
+): Promise<Map<string, { type: string; status: string }>> {
+  const out = new Map<string, { type: string; status: string }>();
+  if (!orderNames.length) return out;
+
+  const db = returnHqClient();
+  if (!db) return out;
+  try {
+    const shopId = await jmShopId(db);
+    if (shopId == null) return out;
+
+    // Chunked: a single IN list of a month's order names is large enough to
+    // upset the planner.
+    for (let i = 0; i < orderNames.length; i += 2000) {
+      const slice = orderNames.slice(i, i + 2000);
+      const rows = await db.$queryRawUnsafe<
+        Array<{ shopify_order_number: string; type: string; status: string }>
+      >(
+        `SELECT shopify_order_number, type::text AS type, status::text AS status
+           FROM return_requests
+          WHERE shop_id = $1 AND shopify_order_number = ANY($2)`,
+        shopId,
+        slice,
+      );
+      for (const r of rows) {
+        const name = String(r.shopify_order_number || "").trim();
+        if (!name) continue;
+        // One order can carry several requests; the newest wins, and a
+        // cancelled one never masks a live request.
+        const prev = out.get(name);
+        if (!prev || prev.status === "cancelled") {
+          out.set(name, { type: r.type, status: r.status });
+        }
+      }
+    }
+    return out;
+  } catch (e: any) {
+    console.error("[returnhq] byOrder", String(e?.message || e).slice(0, 200));
+    return out;
+  } finally {
+    await db.$disconnect().catch(() => {});
+  }
+}
+
+/**
  * Read the cached ReturnHQ counts for a month (populated by the cron). No live
  * ReturnHQ query — fast, and doesn't hit ReturnHQ on every page load.
  */
