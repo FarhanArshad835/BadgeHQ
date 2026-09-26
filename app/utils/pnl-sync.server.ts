@@ -203,9 +203,17 @@ async function writeOrderPage(shop: string, computed: OrderFinancialsComputed[])
       "updatedAt"         = EXCLUDED."updatedAt"
   `;
 
-  // Replace line rows for the whole page in two bulk statements.
+  // Replace line rows for the whole page, delete + insert inside ONE
+  // transaction.
+  //
+  // Unwrapped, these are two independent statements, and two sync runs
+  // overlapping on the same orders interleave as delete/delete/insert/insert:
+  // both deletes find the old rows, then both inserts land, and the order ends
+  // up with every line twice. That is not theoretical. Running chunks back to
+  // back to speed up a backfill produced 4,998 duplicate rows across June and
+  // July, inflating July COGS by Rs6.6 lakh and pushing its per-pair profit
+  // from +Rs28 to -Rs11.
   const orderIds = computed.map((c) => c.orderId);
-  await prisma.orderLineFinancials.deleteMany({ where: { shop, orderId: { in: orderIds } } });
   const lineData = computed.flatMap((c) =>
     c.lines.map((l) => ({
       shop,
@@ -223,9 +231,10 @@ async function writeOrderPage(shop: string, computed: OrderFinancialsComputed[])
       lineCogsComplete: l.lineCogsComplete,
     })),
   );
-  if (lineData.length) {
-    await prisma.orderLineFinancials.createMany({ data: lineData });
-  }
+  await prisma.$transaction([
+    prisma.orderLineFinancials.deleteMany({ where: { shop, orderId: { in: orderIds } } }),
+    ...(lineData.length ? [prisma.orderLineFinancials.createMany({ data: lineData })] : []),
+  ]);
 }
 
 /**
