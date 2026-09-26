@@ -15,6 +15,12 @@
  * uses, rather than apportioned from the monthly total. Apportioning would
  * reconcile by construction and prove nothing.
  *
+ * fee_charged will not tie exactly to the statement's Return/Exchange Fees
+ * line, and should not. The statement bills REQUESTS (ReturnHQ count x the flat
+ * fee); this column sums the fee ORDERS actually raised in Shopify. August:
+ * Rs1,48,200 here against Rs1,55,200 there, a gap of exactly 70 requests that
+ * never got a fee order. That gap is the useful part, not an error to hide.
+ *
  * Taxable value reconciles to the rupee. The TAX column sums a little below the
  * statement (about Rs49 on 6,937 August orders, ~0.7 paise each): integer
  * division truncates per row here and once per month there. Both are right at
@@ -151,6 +157,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     "unit_refund",
     "return_type",
     "return_status",
+    "order_kind",
+    "fee_charged",
+    "price_difference",
     "line_qty",
     "unit_index",
     "delivered_at_ist",
@@ -224,6 +233,34 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     // Slab from the price actually charged per pair: a Rs1,100 pair discounted
     // to Rs900 belongs in the 5% band, not the 12% one.
     const rhq = returnsByOrder.get(o.orderName);
+
+    // A ReturnHQ fee order is not a sale, and reading it as one overstates both
+    // revenue and unit counts. These say plainly what each row is.
+    //
+    // A return-fee order is the flat charge alone, nothing shipped. An
+    // exchange-fee order carries the replacement product AND the fee, and when
+    // it exceeds the flat fee the excess is a price difference the customer
+    // paid to move to a dearer item. #216618 in August is Rs280: Rs100 fee plus
+    // Rs180 of difference.
+    const isReturnFee = o.deliveryStatus === "returnhq-fee";
+    const orderKind = isReturnFee
+      ? "return-fee"
+      : o.isExchangeFee
+        ? "exchange-fee"
+        : "sale";
+    const flatFee = app.returnRequestFeeMinor;
+    const feeMinor = isReturnFee
+      ? o.grossRevenueMinor
+      : o.isExchangeFee
+        ? (o.grossRevenueMinor < flatFee ? o.grossRevenueMinor : flatFee)
+        : null;
+    // Only ever positive: an exchange for a cheaper item is not a negative fee.
+    const priceDiffMinor =
+      o.isExchangeFee && o.grossRevenueMinor > flatFee
+        ? o.grossRevenueMinor - flatFee
+        : o.isExchangeFee
+          ? 0n
+          : null;
     const rateBp = rateForLine({
       productType: l.productType,
       lineRevenueMinor: effectiveLineMinor,
@@ -259,6 +296,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           rup(refundPer[u] ?? null),
           esc(rhq?.type ?? ""),
           esc(rhq?.status ?? ""),
+          esc(orderKind),
+          rup(feeMinor),
+          rup(priceDiffMinor),
           String(qty),
           String(u + 1),
           esc(ist(o.deliveredAt)),
