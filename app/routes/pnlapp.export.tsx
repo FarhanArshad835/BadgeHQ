@@ -15,6 +15,10 @@
  * uses, rather than apportioned from the monthly total. Apportioning would
  * reconcile by construction and prove nothing.
  *
+ * unit_product_revenue is PRODUCT money only, and fee_charged is fee money
+ * only, so the two can be summed without double-counting. A return-fee row
+ * shows product revenue 0 and fee 100, not 100 and 100.
+ *
  * fee_charged will not tie exactly to the statement's Return/Exchange Fees
  * line, and should not. The statement bills REQUESTS (ReturnHQ count x the flat
  * fee); this column sums what was actually charged in Shopify, across return
@@ -148,7 +152,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     "carrier",
     "sku",
     "product_type",
-    "unit_revenue",
+    "unit_product_revenue",
     "unit_cogs",
     "cogs_known",
     "gst_rate_pct",
@@ -276,7 +280,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     const delivered = o.deliveryStatus === "delivered";
 
     for (let u = 0; u < qty; u++) {
-      const unitRev = rev[u] ?? 0n;
+      // A fee is reported in fee_charged, so it must not ALSO appear as
+      // unit_revenue: the same Rs100 in two columns double-counts the moment
+      // anyone sums both, and on August that is Rs69,000 of phantom revenue.
+      //
+      // unit_revenue therefore means PRODUCT revenue only. A return-fee row has
+      // none (nothing was sold), and a replacement row already has none (the
+      // goods were paid for on the original order), so only the return-fee case
+      // needs zeroing here.
+      const unitRev = isReturnFee ? 0n : rev[u] ?? 0n;
       // GST only on delivered units, matching the delivered basis the statement
       // uses: an RTO row keeps its revenue but carries no tax, nothing was sold.
       const taxable = delivered ? unitRev : 0n;
