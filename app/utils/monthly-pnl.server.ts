@@ -481,6 +481,11 @@ export type MonthlyPnl = {
   netPnlPerDeliveredPairMinor: bigint | null;
   adPerDeliveredOrderMinor: bigint | null;
   freightPerDeliveredOrderMinor: bigint | null;
+  // Per PAIR, not per order. A basket averaging 1.7 pairs makes the two differ
+  // by most of a third, and pairs is the unit these costs are really incurred
+  // in: COGS is already per pair, so the three only compare on one basis.
+  adPerPairMinor: bigint | null;
+  freightPerPairMinor: bigint | null;
   cogsPerPairMinor: bigint | null;
   // Health + publish gate.
   resolutionRate: number;
@@ -708,6 +713,8 @@ export async function computeMonth(shop: string, month: string): Promise<Monthly
     netPnlPerDeliveredPairMinor: perPair(netPnlMinor),
     adPerDeliveredOrderMinor: perDelOrder(adSpendMinor),
     freightPerDeliveredOrderMinor: perDelOrder(freightMinor),
+    adPerPairMinor: perPair(adSpendMinor),
+    freightPerPairMinor: perPair(freightMinor),
     cogsPerPairMinor: perPair(cogs.cogsMinor),
     resolutionRate: rev.resolutionRate,
     deliveredShareOfPlaced: rev.deliveredShareOfPlaced,

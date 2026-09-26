@@ -45,6 +45,8 @@ const EXPLAIN = {
   deliveredShare: "Of everything ordered, the share that actually reached customers, by value. The rest was cancelled, returned or is still in transit.",
   adPerOrder: "Ad spend divided by delivered orders — what it cost in advertising to land one delivered order.",
   freightPerOrder: "Average freight billed per delivered order.",
+  adPerPair: "Total ad spend divided by delivered pairs. Per PAIR, not per order, so it compares directly against COGS per pair.",
+  freightPerPair: "Billed shipping divided by delivered pairs. Per PAIR, not per order: a two-pair order ships once, so this is lower than the per-order figure.",
   cogsPerPair: "Average cost of one delivered item.",
   cogsMatchRate: "How many delivered items had a cost-per-item set in Shopify. Below 97% the COGS figure is withheld rather than guessed.",
 } as const;
@@ -291,6 +293,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       netPnlPerDeliveredPair: s(r.netPnlPerDeliveredPairMinor),
       adPerDeliveredOrder: s(r.adPerDeliveredOrderMinor),
       freightPerDeliveredOrder: s(r.freightPerDeliveredOrderMinor),
+      adPerPair: s(r.adPerPairMinor),
+      freightPerPair: s(r.freightPerPairMinor),
       cogsPerPair: s(r.cogsPerPairMinor),
       // Health.
       resolutionRate: r.resolutionRate,
@@ -383,6 +387,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       // month-on-month profit swing: totals move with volume, these do not.
       adPerDeliveredOrder: s(c.adPerDeliveredOrderMinor),
       freightPerDeliveredOrder: s(c.freightPerDeliveredOrderMinor),
+      adPerPair: s(c.adPerPairMinor),
+      freightPerPair: s(c.freightPerPairMinor),
       cogsPerPair: s(c.cogsPerPairMinor),
       cogsMatchRate: c.cogsMatchRate,
     })),
@@ -875,8 +881,8 @@ of which ${fmt(r.deliveredRevenue)} delivered`} value={fmt(r.grossSale)} strong
                 <div className="pnl-section-label">Per delivered order / pair</div>
                 <table className="pnl-table">
                   <tbody>
-                    <Row label="Ad / delivered order" explain={EXPLAIN.adPerOrder} value={fmt(r.adPerDeliveredOrder, "Pending")} />
-                    <Row label="Freight / delivered order" explain={EXPLAIN.freightPerOrder} value={fmt(r.freightPerDeliveredOrder, "Pending")} />
+                    <Row label="Ad / pair" explain={EXPLAIN.adPerPair} value={fmt(r.adPerPair, "Pending")} />
+                    <Row label="Freight / pair" explain={EXPLAIN.freightPerPair} value={fmt(r.freightPerPair, "Pending")} />
                     <Row label="COGS / pair" explain={EXPLAIN.cogsPerPair} value={fmt(r.cogsPerPair, "Pending")} />
                     <Row label="COGS cost-match rate" explain={EXPLAIN.cogsMatchRate} value={pct(r.cogsMatchRate)} />
                   </tbody>
@@ -1113,22 +1119,22 @@ of which ${fmt(r.deliveredRevenue)} delivered`} value={fmt(r.grossSale)} strong
                     rows are what actually explain a swing between months. */}
                 <CmpRow label="—" cols={d.compare} pick={() => ""} />
                 <CmpRow
-                  label="Ad / delivered order"
+                  label="Ad / pair"
                   cols={d.compare}
-                  pick={(c) => fmt(c.adPerDeliveredOrder, "Pending")}
-                  breakdown={(c) => (c.adSpend != null && c.deliveredOrders
-                    ? `${fmt(c.adSpend)} / ${c.deliveredOrders.toLocaleString("en-IN")} delivered  =  ${fmt(c.adPerDeliveredOrder)}`
+                  pick={(c) => fmt(c.adPerPair, "Pending")}
+                  breakdown={(c) => (c.adSpend != null && c.deliveredPairs
+                    ? `${fmt(c.adSpend)} / ${c.deliveredPairs.toLocaleString("en-IN")} pairs  =  ${fmt(c.adPerPair)}`
                     : undefined)}
-                  explain={EXPLAIN.adPerOrder}
+                  explain={EXPLAIN.adPerPair}
                 />
                 <CmpRow
-                  label="Freight / delivered order"
+                  label="Freight / pair"
                   cols={d.compare}
-                  pick={(c) => fmt(c.freightPerDeliveredOrder, "Pending")}
-                  breakdown={(c) => (c.freight != null && c.deliveredOrders
-                    ? `${fmt(c.freight)} / ${c.deliveredOrders.toLocaleString("en-IN")} delivered  =  ${fmt(c.freightPerDeliveredOrder)}`
+                  pick={(c) => fmt(c.freightPerPair, "Pending")}
+                  breakdown={(c) => (c.freight != null && c.deliveredPairs
+                    ? `${fmt(c.freight)} / ${c.deliveredPairs.toLocaleString("en-IN")} pairs  =  ${fmt(c.freightPerPair)}`
                     : undefined)}
-                  explain={EXPLAIN.freightPerOrder}
+                  explain={EXPLAIN.freightPerPair}
                 />
                 <CmpRow
                   label="COGS / pair"
