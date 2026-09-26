@@ -351,6 +351,15 @@ export const CSS = `
 .pnl-note { font-size: 13px; color: var(--ink-soft); line-height: 1.6; }
 .pnl-rule { border: none; border-top: 1px solid var(--line); margin: 6px 0; }
 .pnl-section-label { font-size: 10.5px; font-weight: 680; color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.05em; }
+
+/* A section label used as a <summary>: the label alone is small and faint, so
+   on its own it does not read as something you can click. Hover and the open
+   state give it the affordance the plain heading does not need. */
+summary.pnl-section-label { padding: 2px 0; user-select: none; transition: color 120ms var(--ease); }
+summary.pnl-section-label:hover { color: var(--ink); }
+summary.pnl-section-label::marker { color: var(--ink-faint); }
+details[open] > summary.pnl-section-label { color: var(--ink-soft); margin-bottom: 4px; }
+summary.pnl-section-label:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
 .pnl-empty { background: var(--panel); border: 1px dashed var(--line); border-radius: 10px; padding: 20px; text-align: center; color: var(--ink-soft); margin-top: 10px; }
 
 .pnl-help { background: var(--surface); border: 1px solid var(--line); border-radius: 5px; padding: 10px 12px; font-size: 12px; color: var(--ink-soft); line-height: 1.5; }

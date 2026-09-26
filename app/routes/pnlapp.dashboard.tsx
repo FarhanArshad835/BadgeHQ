@@ -865,11 +865,18 @@ of which ${fmt(r.deliveredRevenue)} delivered`} value={fmt(r.grossSale)} strong
             {/* Delivered items missing cost-per-item — the fixable COGS gap. */}
             {d.unmatchedTotal > 0 && (
               <div className="pnl-panel" style={{ marginTop: 20 }}>
-                <div className="pnl-section-label">
-                  Delivered items missing cost-per-item — {d.unmatchedTotal} product{d.unmatchedTotal === 1 ? "" : "s"},{" "}
-                  {d.unmatchedUnits} unit{d.unmatchedUnits === 1 ? "" : "s"}
-                </div>
-                <p className="pnl-sub" style={{ marginTop: 0, marginBottom: 12, fontSize: 13 }}>
+                {/* Collapsed by default: this is a long to-do list, not a
+                    figure to read. The heading keeps the COUNT visible so the
+                    gap is still obvious without the table taking over the page. */}
+                <details>
+                  <summary
+                    className="pnl-section-label"
+                    style={{ cursor: "pointer", marginBottom: 0, listStyle: "revert" }}
+                  >
+                    Delivered items missing cost-per-item — {d.unmatchedTotal} product{d.unmatchedTotal === 1 ? "" : "s"},{" "}
+                    {d.unmatchedUnits} unit{d.unmatchedUnits === 1 ? "" : "s"}
+                  </summary>
+                <p className="pnl-sub" style={{ marginTop: 12, marginBottom: 12, fontSize: 13 }}>
                   These delivered items have no <strong>Cost per item</strong> set in Shopify, so their COGS is unknown.
                   Set the cost on each variant in Shopify (Products, the variant, Cost per item) and it fills in on the next sync.
                 </p>
@@ -900,6 +907,7 @@ of which ${fmt(r.deliveredRevenue)} delivered`} value={fmt(r.grossSale)} strong
                     Showing the top {d.unmatched.length} of {d.unmatchedTotal} by units.
                   </p>
                 )}
+                </details>
               </div>
             )}
 
