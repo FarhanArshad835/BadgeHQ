@@ -77,14 +77,102 @@
   ],
   "redirects": [
     {
-      "source": "/pnl-app/:path*",
+      "source": "/pnl-app",
       "has": [
         {
           "type": "host",
           "value": "badge-hq.vercel.app"
         }
       ],
-      "destination": "https://jmlooks-ops.vercel.app/pnl-app/:path*",
+      "destination": "https://jmlooks-ops.vercel.app/pnl-app",
+      "permanent": false
+    },
+    {
+      "source": "/pnl-app/home",
+      "has": [
+        {
+          "type": "host",
+          "value": "badge-hq.vercel.app"
+        }
+      ],
+      "destination": "https://jmlooks-ops.vercel.app/pnl-app/home",
+      "permanent": false
+    },
+    {
+      "source": "/pnl-app/login",
+      "has": [
+        {
+          "type": "host",
+          "value": "badge-hq.vercel.app"
+        }
+      ],
+      "destination": "https://jmlooks-ops.vercel.app/pnl-app/login",
+      "permanent": false
+    },
+    {
+      "source": "/pnl-app/scan",
+      "has": [
+        {
+          "type": "host",
+          "value": "badge-hq.vercel.app"
+        }
+      ],
+      "destination": "https://jmlooks-ops.vercel.app/pnl-app/scan",
+      "permanent": false
+    },
+    {
+      "source": "/pnl-app/scan/login",
+      "has": [
+        {
+          "type": "host",
+          "value": "badge-hq.vercel.app"
+        }
+      ],
+      "destination": "https://jmlooks-ops.vercel.app/pnl-app/scan/login",
+      "permanent": false
+    },
+    {
+      "source": "/pnl-app/scan/dispatch",
+      "has": [
+        {
+          "type": "host",
+          "value": "badge-hq.vercel.app"
+        }
+      ],
+      "destination": "https://jmlooks-ops.vercel.app/pnl-app/scan/dispatch",
+      "permanent": false
+    },
+    {
+      "source": "/pnl-app/scan/returns",
+      "has": [
+        {
+          "type": "host",
+          "value": "badge-hq.vercel.app"
+        }
+      ],
+      "destination": "https://jmlooks-ops.vercel.app/pnl-app/scan/returns",
+      "permanent": false
+    },
+    {
+      "source": "/pnl-app/scan/claims",
+      "has": [
+        {
+          "type": "host",
+          "value": "badge-hq.vercel.app"
+        }
+      ],
+      "destination": "https://jmlooks-ops.vercel.app/pnl-app/scan/claims",
+      "permanent": false
+    },
+    {
+      "source": "/pnl-app/scan/history",
+      "has": [
+        {
+          "type": "host",
+          "value": "badge-hq.vercel.app"
+        }
+      ],
+      "destination": "https://jmlooks-ops.vercel.app/pnl-app/scan/history",
       "permanent": false
     }
   ]
