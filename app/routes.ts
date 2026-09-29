@@ -32,6 +32,7 @@ const pnlAppRoutes = [
   route("/pnl-app/scan/dispatch", "routes/pnlapp.scan.dispatch.tsx"),
   route("/pnl-app/scan/returns", "routes/pnlapp.scan.returns.tsx"),
   route("/pnl-app/scan/history", "routes/pnlapp.scan.history.tsx"),
+  route("/pnl-app/scan/claims", "routes/pnlapp.scan.claims.tsx"),
 ];
 
 // flatRoutes() owns every other route; it ignores the pnlapp.* files so they

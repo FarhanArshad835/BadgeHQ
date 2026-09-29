@@ -386,3 +386,96 @@ export async function scanCountsToday(shop: string): Promise<Record<string, numb
   for (const r of rows) out[r.kind] = r._count;
   return out;
 }
+
+/**
+ * RTO parcels the courier says came back, that nobody has scanned in.
+ *
+ * Each one is stock we have been told to expect and have not seen, so past the
+ * grace period it is a claim against the courier.
+ *
+ * THE CLOCK IS THE WEAK PART, and the UI says so. The courier's own return date
+ * is the right basis, but the tracking sheet leaves Delivered Date blank on all
+ * 21,392 RTO rows, so there is nothing to read. deliverySyncedAt cannot stand in
+ * either: 7,243 orders share a single sync day because that is when a backfill
+ * ran, not when 7,243 parcels arrived. Until the sheet carries real dates this
+ * ages from the ORDER date, which is always earlier than the return, so the list
+ * errs towards showing a parcel too early rather than too late.
+ */
+export async function claimCandidates(
+  shop: string,
+  graceDays: number,
+): Promise<{
+  rows: Array<{
+    orderName: string;
+    awb: string;
+    carrier: string;
+    orderedAt: string;
+    daysOld: number;
+    revenueMinor: string;
+    cogsMinor: string | null;
+  }>;
+  totalCogsMinor: bigint;
+  totalRevenueMinor: bigint;
+  scannedCount: number;
+}> {
+  const cutoff = new Date(Date.now() - graceDays * 24 * 60 * 60 * 1000);
+
+  const rtos = await prisma.orderFinancials.findMany({
+    where: {
+      shop,
+      deliveryStatus: { in: ["rto", "rto_in_transit"] },
+      awb: { not: "" },
+      orderCreatedAt: { lt: cutoff },
+    },
+    select: {
+      orderName: true,
+      awb: true,
+      carrier: true,
+      orderCreatedAt: true,
+      grossRevenueMinor: true,
+      cogsMinor: true,
+    },
+    orderBy: { orderCreatedAt: "asc" },
+    // No take: a cap here would silently truncate the totals, and 7 days vs 45
+    // days would report identical money because the cap bit before the filter.
+    // The row list is trimmed for display in the route instead.
+  });
+  if (!rtos.length) {
+    return { rows: [], totalCogsMinor: 0n, totalRevenueMinor: 0n, scannedCount: 0 };
+  }
+
+  // Which of those have actually been scanned in? Chunked: an IN list of
+  // several thousand AWBs is refused by the planner well before it is slow.
+  const seen = new Set<string>();
+  const awbs = rtos.map((r) => r.awb);
+  for (let i = 0; i < awbs.length; i += 2000) {
+    const scans = await prisma.scanEvent.findMany({
+      where: { shop, kind: "rto", awb: { in: awbs.slice(i, i + 2000) } },
+      select: { awb: true },
+    });
+    for (const s of scans) seen.add(s.awb);
+  }
+
+  const now = Date.now();
+  const rows = rtos
+    .filter((r) => !seen.has(r.awb))
+    .map((r) => ({
+      orderName: r.orderName,
+      awb: r.awb,
+      carrier: r.carrier,
+      orderedAt: r.orderCreatedAt.toISOString().slice(0, 10),
+      daysOld: Math.floor((now - r.orderCreatedAt.getTime()) / 86400000),
+      revenueMinor: r.grossRevenueMinor.toString(),
+      cogsMinor: r.cogsMinor == null ? null : r.cogsMinor.toString(),
+    }));
+
+  let totalCogsMinor = 0n;
+  let totalRevenueMinor = 0n;
+  for (const r of rtos) {
+    if (seen.has(r.awb)) continue;
+    totalCogsMinor += r.cogsMinor ?? 0n;
+    totalRevenueMinor += r.grossRevenueMinor;
+  }
+
+  return { rows, totalCogsMinor, totalRevenueMinor, scannedCount: seen.size };
+}
