@@ -18,9 +18,23 @@ import { syncRevenueAndCogs, backfillShipping } from "./pnl-sync.server";
 
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 
-const COOKIE_NAME = "pnl_session";
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const SIGNING_KEY = process.env.SHOPIFY_API_SECRET || "pnl-fallback-key-change-me";
+
+/**
+ * Two independent logins over one cookie mechanism.
+ *
+ * The PATH is what separates them. A cookie scoped to /pnl-app/scan is never
+ * sent to /pnl-app/home, so warehouse staff holding the scanner password cannot
+ * reach the P&L even by typing the URL. That is enforced by the browser, not by
+ * a check we could forget to write.
+ */
+export type SessionScope = "pnl" | "scan";
+
+const SCOPES: Record<SessionScope, { cookie: string; path: string }> = {
+  pnl: { cookie: "pnl_session", path: "/pnl-app" },
+  scan: { cookie: "scan_session", path: "/pnl-app/scan" },
+};
 
 // ── password hashing (scrypt) ────────────────────────────────────────────────
 
@@ -52,23 +66,27 @@ function sign(value: string): string {
 }
 
 /** Build the Set-Cookie header value for a fresh authenticated session. */
-export function makeSessionCookie(): string {
+export function makeSessionCookie(scope: SessionScope = "pnl"): string {
+  const { cookie, path } = SCOPES[scope];
   const expiry = String(Date.now() + SESSION_TTL_MS);
   const payload = `ok.${expiry}`;
   const token = `${payload}.${sign(payload)}`;
   const maxAge = Math.floor(SESSION_TTL_MS / 1000);
-  return `${COOKIE_NAME}=${token}; Path=/pnl-app; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}`;
+  return `${cookie}=${token}; Path=${path}; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}`;
 }
 
 /** Clear the session (logout). */
-export function clearSessionCookie(): string {
-  return `${COOKIE_NAME}=; Path=/pnl-app; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
+export function clearSessionCookie(scope: SessionScope = "pnl"): string {
+  const { cookie, path } = SCOPES[scope];
+  return `${cookie}=; Path=${path}; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
 }
 
 /** True if the request carries a valid, unexpired, correctly-signed session. */
-export function isAuthed(request: Request): boolean {
+export function isAuthed(request: Request, scope: SessionScope = "pnl"): boolean {
   const cookie = request.headers.get("Cookie") || "";
-  const m = cookie.match(new RegExp(`${COOKIE_NAME}=([^;]+)`));
+  // Anchored on a boundary so "scan_session" can never satisfy a "pnl_session"
+  // lookup by suffix match.
+  const m = cookie.match(new RegExp(`(?:^|; )${SCOPES[scope].cookie}=([^;]+)`));
   if (!m) return false;
   const parts = decodeURIComponent(m[1]).split(".");
   if (parts.length !== 3) return false;

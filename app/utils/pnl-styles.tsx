@@ -375,6 +375,72 @@ summary.pnl-section-label:focus-visible { outline: 2px solid var(--accent); outl
   .pnl-btn:active:not(:disabled),
   .pnl-btn-primary:active:not(:disabled) { transform: none; }
 }
+
+/* ── warehouse scanners ────────────────────────────────────────────────────
+   Sized for a bench, not a desk: the verdict has to be readable at arm's
+   length while the operator is looking at a packet, so the type is far larger
+   than anywhere else in this app. */
+.pnl-scan-nav { display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.pnl-scan-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+.pnl-scan-nav-right { display: flex; align-items: center; gap: 12px; }
+.pnl-scan-tab { font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+  padding: 7px 14px; border-radius: 6px; text-decoration: none;
+  background: var(--panel); color: var(--ink-soft); border: 1px solid var(--line);
+  transition: background 140ms var(--ease), color 140ms var(--ease); }
+.pnl-scan-tab:hover { background: var(--surface); color: var(--ink); }
+.pnl-scan-tab--on { background: var(--ink); color: oklch(0.99 0.003 275); border-color: transparent; }
+
+.pnl-scan-toolbar { display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+
+.pnl-scan-head { display: flex; align-items: baseline; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+.pnl-scan-counts { display: flex; gap: 14px; align-items: baseline; font-size: 13px; color: var(--ink-soft); }
+.pnl-scan-pending { color: var(--ink-faint); }
+/* An unsaved scan is the one thing that must never be missed. */
+.pnl-scan-unsaved { color: #b42318; font-weight: 700; }
+
+.pnl-scan-panel { border-radius: 12px; padding: 22px 20px; text-align: center;
+  margin-bottom: 14px; transition: background 120ms linear; }
+.pnl-scan-verdict { font-size: 15px; font-weight: 800; letter-spacing: 0.12em;
+  text-transform: uppercase; opacity: 0.85; }
+.pnl-scan-awb { font-size: 38px; font-weight: 700; line-height: 1.1; margin: 6px 0 4px;
+  font-variant-numeric: tabular-nums; word-break: break-all; }
+.pnl-scan-msg { font-size: 15px; font-weight: 500; opacity: 0.95; }
+
+.pnl-scan-input { width: 100%; box-sizing: border-box; font: inherit; font-size: 22px;
+  padding: 14px 16px; border: 2px solid var(--accent); border-radius: 10px;
+  background: var(--panel); color: var(--ink); letter-spacing: 0.04em; }
+.pnl-scan-input:focus { outline: 3px solid var(--accent-wash); outline-offset: 2px; }
+
+.pnl-scan-list { margin-top: 14px; max-height: 44vh; overflow-y: auto;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.pnl-scan-row { display: grid; grid-template-columns: 1fr 1fr auto auto; gap: 10px;
+  padding: 9px 12px; border-bottom: 1px solid var(--line); font-size: 13px; align-items: center; }
+.pnl-scan-row:last-child { border-bottom: 0; }
+.pnl-scan-row-awb { font-weight: 600; font-variant-numeric: tabular-nums; word-break: break-all; }
+.pnl-scan-row-order { color: var(--ink-soft); }
+.pnl-scan-row-time { color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+.pnl-scan-row-state { font-weight: 600; text-transform: uppercase; font-size: 11px; letter-spacing: 0.04em; }
+.pnl-scan-row--blocked .pnl-scan-row-state,
+.pnl-scan-row--error .pnl-scan-row-state { color: #b42318; }
+.pnl-scan-row--duplicate .pnl-scan-row-state { color: #b1660a; }
+.pnl-scan-row--ok .pnl-scan-row-state { color: #1a7f37; }
+.pnl-scan-row--not-found .pnl-scan-row-state { color: #54308a; }
+
+.pnl-scan-result { font-weight: 600; }
+.pnl-scan-result--blocked, .pnl-scan-result--error { color: #b42318; }
+.pnl-scan-result--duplicate { color: #b1660a; }
+.pnl-scan-result--ok { color: #1a7f37; }
+.pnl-scan-result--not-found { color: #54308a; }
+
+/* Phones and small tablets do the scanning, so this is the real target. */
+@media (max-width: 600px) {
+  .pnl-scan-awb { font-size: 30px; }
+  .pnl-scan-row { grid-template-columns: 1fr auto; row-gap: 2px; }
+  .pnl-scan-row-order, .pnl-scan-row-time { font-size: 12px; }
+}
 `;
 
 /** Inject the shared stylesheet once. Place near the top of each page. */

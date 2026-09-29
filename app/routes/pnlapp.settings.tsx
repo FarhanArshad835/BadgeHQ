@@ -17,6 +17,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     metaAdAccountId: app.metaAdAccountId,
     hasMetaToken: Boolean(app.metaAccessToken),
     deliverySheetUrl: app.deliverySheetUrl,
+    dispatchSheetUrl: app.dispatchSheetUrl,
     stockingMatch: app.stockingMatch,
     reportStartMonth: app.reportStartMonth,
     stockingUnitCost: (Number(app.stockingUnitCostMinor) / 100).toString(),
@@ -39,6 +40,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const metaAdAccountId = String(form.get("metaAdAccountId") || "").trim();
   const metaAccessToken = String(form.get("metaAccessToken") || "").trim();
   const deliverySheetUrl = String(form.get("deliverySheetUrl") || "").trim();
+  const dispatchSheetUrl = String(form.get("dispatchSheetUrl") || "").trim();
   const stockingMatch = String(form.get("stockingMatch") || "").trim();
   // "YYYY-MM", or blank to show every month. Anything else is ignored rather
   // than stored: a malformed value would silently hide months.
@@ -75,6 +77,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       shiprocketEmail,
       metaAdAccountId,
       deliverySheetUrl,
+      dispatchSheetUrl,
       stockingMatch,
       ...(reportStartMonth != null ? { reportStartMonth } : {}),
       ...(stockingUnitCostMinor != null ? { stockingUnitCostMinor } : {}),
@@ -187,6 +190,14 @@ export default function PnlSettings() {
             The app fetches it directly (delivered / RTO matched by AWB) on the dashboard button and nightly.
           </div>
           <Field label="Published CSV URL" name="deliverySheetUrl" defaultValue={d.deliverySheetUrl} placeholder="https://docs.google.com/…/pub?gid=…&output=csv" />
+          <hr className="pnl-rule" />
+          <div className="pnl-section-label">Dispatch scanner</div>
+          <div className="pnl-help" style={{ marginBottom: 12 }}>
+            The list of AWBs already handed to a courier. The dispatch scanner blocks anything on
+            it, so a packet cannot be sent twice. Read only when you press Sync on the scanner, not
+            on every scan: that endpoint takes seconds to respond and a scan cannot wait.
+          </div>
+          <Field label="Dispatched AWBs URL" name="dispatchSheetUrl" defaultValue={d.dispatchSheetUrl} placeholder="https://script.google.com/macros/s/…/exec" />
           <button type="submit" className="pnl-btn pnl-btn-primary" style={{ marginTop: 4, alignSelf: "flex-start" }}>
             Save
           </button>

@@ -20,6 +20,18 @@ const pnlAppRoutes = [
   route("/pnl-app/settings", "routes/pnlapp.settings.tsx"),
   route("/pnl-app/export", "routes/pnlapp.export.tsx"),
   route("/pnl-app/logout", "routes/pnlapp.logout.tsx"),
+  // Warehouse scanners. Same /pnl-app prefix so they share the session
+  // mechanism, but their cookie is scoped one level deeper (/pnl-app/scan) so
+  // the scanner password cannot reach the P&L.
+  //
+  // /pnl-app/scan is a bare redirect for the same reason /pnl-app is: a path
+  // that is a PREFIX of its siblings gets no working .data endpoint on Vercel.
+  route("/pnl-app/scan", "routes/pnlapp.scan.redirect.tsx"),
+  route("/pnl-app/scan/login", "routes/pnlapp.scan.login.tsx"),
+  route("/pnl-app/scan/logout", "routes/pnlapp.scan.logout.tsx"),
+  route("/pnl-app/scan/dispatch", "routes/pnlapp.scan.dispatch.tsx"),
+  route("/pnl-app/scan/returns", "routes/pnlapp.scan.returns.tsx"),
+  route("/pnl-app/scan/history", "routes/pnlapp.scan.history.tsx"),
 ];
 
 // flatRoutes() owns every other route; it ignores the pnlapp.* files so they

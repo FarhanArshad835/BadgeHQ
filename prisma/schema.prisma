@@ -702,24 +702,27 @@ model OrderLineFinancials {
 /// credentials are server-side only; the P&L data itself reuses the
 /// OrderFinancials/OrderLineFinancials tables keyed by the shop domain.
 model PnlApp {
-  id                 String @id @default("default")
+  id                 String    @id @default("default")
   // Access gate for the standalone tool (it's not behind Shopify login).
-  passwordHash       String @default("") // scrypt/pbkdf2 hash of the shared password
+  passwordHash       String    @default("") // scrypt/pbkdf2 hash of the shared password
+  // Separate password for the warehouse scanners. Its cookie is scoped to
+  // /pnl-app/scan, so staff holding it cannot reach the P&L.
+  scanPasswordHash   String    @default("")
   // Outstanding password-reset token, minted from the Shopify admin. Stored as
   // a HASH so a database read cannot be used to reset the password, and cleared
   // on use so a link that leaks afterwards is inert.
   resetTokenHash     String    @default("")
   resetTokenExpires  DateTime?
   // Shopify custom-app credentials.
-  shopDomain         String @default("") // e.g. "b03304.myshopify.com"
-  adminToken         String @default("") // shpat_… custom-app Admin API token
+  shopDomain         String    @default("") // e.g. "b03304.myshopify.com"
+  adminToken         String    @default("") // shpat_… custom-app Admin API token
   // Carrier credentials (actual billed shipping — verify-first, like the app).
-  shiprocketEmail    String @default("")
-  shiprocketPassword String @default("")
-  delhiveryApiKey    String @default("")
+  shiprocketEmail    String    @default("")
+  shiprocketPassword String    @default("")
+  delhiveryApiKey    String    @default("")
   // Meta Ads — direct Meta Marketing API (ads_read token), not Supermetrics.
-  metaAccessToken    String @default("")
-  metaAdAccountId    String @default("") // e.g. "act_908549380106884"
+  metaAccessToken    String    @default("")
+  metaAdAccountId    String    @default("") // e.g. "act_908549380106884"
 
   // Monthly-P&L config knobs (the method's fixed rates; editable in Settings so
   // they're never hard-coded estimates the merchant can't see or change).
@@ -762,6 +765,10 @@ model PnlApp {
   // Published-to-web CSV URL of the delivery-status sheet (AWB tab). The app
   // fetches this directly (no Google auth) to set delivery outcome by AWB.
   deliverySheetUrl          String    @default("")
+  /// Published CSV / Apps Script URL listing AWBs already handed to a courier.
+  /// Read on a button press only: that endpoint was measured at 2.4s to 30s per
+  /// call, which a background sync can absorb and a scan cannot.
+  dispatchSheetUrl          String    @default("")
   deliverySheetSyncedAt     DateTime?
   deliverySheetStatus       String    @default("")
 
@@ -937,4 +944,46 @@ model UsdOrder {
   updatedAt         DateTime @updatedAt
 
   @@index([status])
+}
+
+/// One physical scan on the warehouse floor.
+///
+/// Append-only, and deliberately NOT a source of truth for delivery status: the
+/// tracking sheet owns OrderFinancials.deliveryStatus and the twice-daily cron
+/// would overwrite anything written here. Scans accumulate on their own so they
+/// can later be reconciled AGAINST the sheet rather than fight it.
+model ScanEvent {
+  id        String   @id @default(cuid())
+  shop      String
+  /// dispatch | rto | customer-return
+  kind      String
+  /// Normalised exactly as parseDeliveryCsv does: [^0-9a-zA-Z] stripped, case KEPT.
+  /// Case matters: lowercasing corrupts AWBs like "7D131105745".
+  awb       String
+  /// The order this AWB matched at scan time. Blank when we do not know it, which
+  /// is normal for a parcel dispatched before the last sync.
+  orderName String   @default("")
+  /// ok | duplicate | not-found | blocked
+  result    String
+  /// Free note, e.g. why a blocked scan was let through anyway.
+  note      String   @default("")
+  scannedAt DateTime @default(now())
+
+  @@unique([shop, kind, awb])
+  @@index([shop, kind, scannedAt])
+}
+
+/// AWBs already handed to a courier, synced from the dispatch sheet.
+///
+/// Scanning one of these at dispatch means a packet is about to be sent twice,
+/// so the scanner blocks it. Verified against the live sheet: 2,956 AWBs across
+/// Delhivery, Bluedart, Shiprocket, Xpressbees and Ecom.
+model DispatchedAwb {
+  id       String   @id @default(cuid())
+  shop     String
+  awb      String
+  syncedAt DateTime @default(now())
+
+  @@unique([shop, awb])
+  @@index([shop])
 }
