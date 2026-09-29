@@ -10,6 +10,21 @@
 import prisma from "../db.server";
 
 export type ScanKind = "dispatch" | "rto" | "customer-return";
+
+/**
+ * Which kind of inbound parcel this is, decided from the data rather than asked
+ * of the operator.
+ *
+ * The two are separable in practice, measured on live data:
+ *   - Of 3,000 RTO orders, only 4 (0.1%) also had a ReturnHQ request.
+ *   - Of orders WITH a request, 2,381 of 2,405 were delivered first.
+ *
+ * So the rule is simply: a live ReturnHQ request means the customer sent it
+ * back; otherwise a courier RTO status means it never reached them. Both true
+ * is vanishingly rare, and the request wins there because a customer raising a
+ * request is a deliberate act while a courier status is a guess about a parcel.
+ */
+export type InboundKind = "rto" | "customer-return";
 export type ScanResult = "ok" | "duplicate" | "not-found" | "blocked";
 
 /**
@@ -26,6 +41,12 @@ export function normaliseAwb(raw: string): string {
 
 export type ScanOutcome = {
   awb: string;
+  /** What this turned out to be. Differs from the request when it was "inbound". */
+  kind: ScanKind;
+  /** Why that kind was chosen, shown to the operator so a wrong call is visible. */
+  detectedReason: string;
+  /** False when the data was thin, so the UI can ask for a second look. */
+  confident: boolean;
   result: ScanResult;
   /** What the operator should be told, in their words not ours. */
   message: string;
@@ -47,13 +68,25 @@ export type ScanOutcome = {
  */
 export async function recordScan(
   shop: string,
-  kind: ScanKind,
+  requested: ScanKind | "inbound",
   rawAwb: string,
   opts: { note?: string; force?: boolean } = {},
 ): Promise<ScanOutcome> {
   const awb = normaliseAwb(rawAwb);
+  // "inbound" means the operator scanned a returning parcel without saying
+  // which sort it is. That is the right default: the data knows, and asking
+  // them to classify by eye is how a parcel ends up in the wrong bucket.
+  let kind: ScanKind = requested === "inbound" ? "rto" : requested;
+  let detected: Awaited<ReturnType<typeof detectInbound>> | null = null;
+  if (requested === "inbound" && awb.length >= 6) {
+    detected = await detectInbound(shop, awb);
+    kind = detected.kind;
+  }
   const base: ScanOutcome = {
     awb,
+    kind,
+    detectedReason: detected?.reason || "",
+    confident: detected ? detected.confident : true,
     result: "ok",
     message: "",
     orderName: "",
@@ -97,14 +130,19 @@ export async function recordScan(
 
   // Which order is this? Unknown is normal, not an error: a parcel dispatched
   // since the last sync will not be in OrderFinancials yet.
-  const order = await prisma.orderFinancials.findFirst({
-    where: { shop, awb },
-    select: { orderName: true, deliveryStatus: true, orderCreatedAt: true },
-    orderBy: { orderCreatedAt: "desc" },
-  });
+  // detectInbound already did both lookups; do not repeat them.
+  const order = detected
+    ? detected.orderName
+      ? { orderName: detected.orderName, deliveryStatus: detected.deliveryStatus }
+      : null
+    : await prisma.orderFinancials.findFirst({
+        where: { shop, awb },
+        select: { orderName: true, deliveryStatus: true },
+        orderBy: { orderCreatedAt: "desc" },
+      });
 
-  let returnType = "";
-  if (kind === "customer-return" && order?.orderName) {
+  let returnType = detected?.returnType || "";
+  if (!detected && kind === "customer-return" && order?.orderName) {
     // Best effort: a ReturnHQ outage must not stop the packet being recorded.
     try {
       const { returnHqByOrder } = await import("./returnhq.server");
@@ -124,7 +162,98 @@ export async function recordScan(
     orderName: order?.orderName || "",
     deliveryStatus: order?.deliveryStatus || "",
     returnType,
-    message: buildMessage(kind, result, order?.deliveryStatus || "", returnType),
+    message: detected?.reason || buildMessage(kind, result, order?.deliveryStatus || "", returnType),
+  };
+}
+
+/**
+ * Work out whether an inbound parcel is an RTO or a customer return.
+ *
+ * Returns the reason as well as the verdict: an operator who can see WHY will
+ * spot a wrong call, and a verdict with no reason is one they either trust
+ * blindly or ignore entirely.
+ */
+export async function detectInbound(
+  shop: string,
+  awb: string,
+): Promise<{
+  kind: InboundKind;
+  confident: boolean;
+  reason: string;
+  orderName: string;
+  deliveryStatus: string;
+  returnType: string;
+}> {
+  const order = await prisma.orderFinancials.findFirst({
+    where: { shop, awb },
+    select: { orderName: true, deliveryStatus: true },
+    orderBy: { orderCreatedAt: "desc" },
+  });
+
+  if (!order) {
+    // Nothing to go on. RTO is the safer default: it is the commoner inbound
+    // parcel, and miscalling a return as an RTO loses less than the reverse
+    // (which would imply a customer request that does not exist).
+    return {
+      kind: "rto",
+      confident: false,
+      reason: "Not in our orders yet, assumed RTO.",
+      orderName: "",
+      deliveryStatus: "",
+      returnType: "",
+    };
+  }
+
+  let returnType = "";
+  try {
+    const { returnHqByOrder } = await import("./returnhq.server");
+    const map = await returnHqByOrder([order.orderName]);
+    const hit = map.get(order.orderName);
+    // A cancelled request is not a parcel coming back.
+    if (hit && hit.status !== "cancelled") returnType = hit.type;
+  } catch {
+    // ReturnHQ being down must not stop a packet being booked in.
+    returnType = "";
+  }
+
+  const isRto = order.deliveryStatus === "rto" || order.deliveryStatus === "rto_in_transit";
+
+  if (returnType) {
+    return {
+      kind: "customer-return",
+      confident: true,
+      reason: isRto
+        ? `Customer raised a ${returnType} request, though the courier also says RTO.`
+        : `Customer raised a ${returnType} request.`,
+      orderName: order.orderName,
+      deliveryStatus: order.deliveryStatus,
+      returnType,
+    };
+  }
+
+  if (isRto) {
+    return {
+      kind: "rto",
+      confident: true,
+      reason: "Courier returned it undelivered.",
+      orderName: order.orderName,
+      deliveryStatus: order.deliveryStatus,
+      returnType: "",
+    };
+  }
+
+  // Delivered with no request: someone has sent a parcel back without raising
+  // one. Worth flagging at the bench, not silently filing as an RTO.
+  return {
+    kind: "customer-return",
+    confident: false,
+    reason:
+      order.deliveryStatus === "delivered"
+        ? "Was delivered, but there is NO return request. Check with the customer."
+        : `Courier says "${order.deliveryStatus}" and there is no return request.`,
+    orderName: order.orderName,
+    deliveryStatus: order.deliveryStatus,
+    returnType: "",
   };
 }
 

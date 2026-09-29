@@ -1,21 +1,24 @@
 /**
- * RTO received and customer return received, on one page.
+ * Inbound parcels: one scanner for both RTO and customer returns.
  *
- * Two tabs rather than two pages because it is one bench doing both jobs, often
- * alternating packet to packet. The KIND still differs in the database, so the
- * two are never conflated in a report.
+ * No tabs, because the operator should not have to classify a parcel by eye and
+ * the data already knows. Measured on live data: of 3,000 RTO orders only 4
+ * (0.1%) also carried a ReturnHQ request, and of orders WITH a request 2,381 of
+ * 2,405 had been delivered first. The two signals barely overlap, so a request
+ * means the customer sent it back and a courier RTO means it never arrived.
  *
- * Neither writes OrderFinancials.deliveryStatus. The tracking sheet owns that
- * column and the twice-daily cron would overwrite anything put there, so a scan
- * that appeared to work would quietly revert. What a scan gives you instead is a
- * warehouse-confirmed timestamp, and a visible disagreement when the courier
- * says something different.
+ * The verdict is shown with its REASON, so a wrong call is visible rather than
+ * silently filed. A parcel the data cannot place is marked "CHECK" instead of
+ * being guessed at confidently.
+ *
+ * Neither kind writes OrderFinancials.deliveryStatus: the tracking sheet owns
+ * that column and the twice-daily cron would overwrite anything put there.
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { useLoaderData, useSearchParams } from "@remix-run/react";
+import { useLoaderData } from "@remix-run/react";
 import { getPnlApp, isAuthed } from "../utils/pnl-app.server";
-import { recordScan, scanCountsToday, type ScanKind } from "../utils/scan.server";
+import { recordScan, scanCountsToday } from "../utils/scan.server";
 import { PnlStyles } from "../utils/pnl-styles";
 import { ScanPad } from "../components/ScanPad";
 import { ScanNav } from "../components/ScanNav";
@@ -36,16 +39,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const body = await request.json().catch(() => null);
   if (!body?.awb) return json({ error: "bad-request" }, { status: 400 });
 
-  // Validated, not trusted: the kind decides which bucket this lands in.
-  const kind: ScanKind = body.kind === "customer-return" ? "customer-return" : "rto";
-  const outcome = await recordScan(shop, kind, String(body.awb));
+  // "inbound" lets recordScan decide between rto and customer-return.
+  const outcome = await recordScan(shop, "inbound", String(body.awb));
   return json(outcome);
 };
 
 export default function ReturnsScanner() {
   const d = useLoaderData<typeof loader>();
-  const [params, setParams] = useSearchParams();
-  const tab = params.get("tab") === "customer" ? "customer-return" : "rto";
 
   return (
     <div className="pnl">
@@ -53,36 +53,18 @@ export default function ReturnsScanner() {
       <div className="pnl-wrap">
         <ScanNav active="returns" counts={d.counts} />
 
-        <div className="pnl-scan-tabs" style={{ marginBottom: 12 }}>
-          <button
-            type="button"
-            className={`pnl-scan-tab ${tab === "rto" ? "pnl-scan-tab--on" : ""}`}
-            onClick={() => setParams({})}
-          >
-            RTO received
-          </button>
-          <button
-            type="button"
-            className={`pnl-scan-tab ${tab === "customer-return" ? "pnl-scan-tab--on" : ""}`}
-            onClick={() => setParams({ tab: "customer" })}
-          >
-            Customer return received
-          </button>
-        </div>
-
-        {/* key forces a fresh ScanPad per tab: carrying one tab's session list
-            into the other would let an operator think a packet was already
-            booked in under the wrong kind. */}
         <ScanPad
-          key={tab}
-          kind={tab as ScanKind}
-          title={tab === "rto" ? "RTO received" : "Customer return received"}
-          hint={
-            tab === "rto"
-              ? "Scan a parcel that came back undelivered."
-              : "Scan a parcel a customer sent back."
-          }
+          kind="inbound"
+          title="Inbound parcels"
+          hint="Scan any parcel coming back. RTO or customer return is worked out for you."
         />
+
+        <p className="pnl-help" style={{ marginTop: 14 }}>
+          A parcel the courier returned undelivered is an <strong>RTO</strong>. One the customer
+          sent back with a ReturnHQ request is a <strong>customer return</strong>. When the data
+          cannot tell, the panel says <strong>CHECK</strong> and gives the reason, so nothing is
+          filed under a guess.
+        </p>
       </div>
     </div>
   );

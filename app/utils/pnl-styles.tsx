@@ -403,6 +403,9 @@ summary.pnl-section-label:focus-visible { outline: 2px solid var(--accent); outl
 
 .pnl-scan-panel { border-radius: 12px; padding: 22px 20px; text-align: center;
   margin-bottom: 14px; transition: background 120ms linear; }
+/* An uncertain verdict must look different from a confident one, or the
+   operator learns to ignore the distinction. */
+.pnl-scan-unsure { opacity: 0.9; font-weight: 800; }
 .pnl-scan-verdict { font-size: 15px; font-weight: 800; letter-spacing: 0.12em;
   text-transform: uppercase; opacity: 0.85; }
 .pnl-scan-awb { font-size: 38px; font-weight: 700; line-height: 1.1; margin: 6px 0 4px;

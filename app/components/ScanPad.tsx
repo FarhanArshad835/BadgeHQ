@@ -13,16 +13,24 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 
-export type ScanKind = "dispatch" | "rto" | "customer-return";
+export type ScanKind = "dispatch" | "rto" | "customer-return" | "inbound";
 
 export type ScanRow = {
   awb: string;
   result: string;
   message: string;
   orderName: string;
+  /** What the server decided this parcel is. Blank until it answers. */
+  kind: string;
   at: string;
   /** False until the server confirms. Never shown as a success. */
   saved: boolean;
+};
+
+const KIND_LABEL: Record<string, string> = {
+  rto: "RTO",
+  "customer-return": "CUSTOMER RETURN",
+  dispatch: "DISPATCH",
 };
 
 const TONES: Record<string, { hz: number; ms: number; times: number }> = {
@@ -80,11 +88,13 @@ export function ScanPad({
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [rows, setRows] = useState<ScanRow[]>([]);
-  const [panel, setPanel] = useState<{ state: string; awb: string; message: string }>({
-    state: "idle",
-    awb: "",
-    message: hint,
-  });
+  const [panel, setPanel] = useState<{
+    state: string;
+    awb: string;
+    message: string;
+    kind: string;
+    confident: boolean;
+  }>({ state: "idle", awb: "", message: hint, kind: "", confident: true });
   const [pending, setPending] = useState(0);
 
   // A Set, built once: 3,000 linear scans per keystroke would defeat the point.
@@ -114,12 +124,16 @@ export function ScanPad({
       setPanel({
         state: optimistic,
         awb,
+        kind: "",
+        confident: true,
         message:
           optimistic === "blocked"
             ? "ALREADY DISPATCHED. Do not send this packet again."
             : optimistic === "duplicate"
               ? "Already scanned in this session."
-              : "Saving…",
+              : kind === "inbound"
+                ? "Checking…"
+                : "Saving…",
       });
       beep(optimistic);
 
@@ -128,6 +142,7 @@ export function ScanPad({
         result: optimistic,
         message: "",
         orderName: "",
+        kind: "",
         at: new Date().toLocaleTimeString(),
         saved: false,
       };
@@ -147,18 +162,33 @@ export function ScanPad({
         setRows((r) =>
           r.map((x) =>
             x.awb === awb && !x.saved
-              ? { ...x, result: data.result, message: data.message, orderName: data.orderName, saved: true }
+              ? {
+                  ...x,
+                  result: data.result,
+                  message: data.message,
+                  orderName: data.orderName,
+                  kind: data.kind || "",
+                  saved: true,
+                }
               : x,
           ),
         );
         if (data.result !== optimistic) beep(data.result);
-        setPanel({ state: data.result, awb, message: data.message });
+        setPanel({
+          state: data.result,
+          awb,
+          message: data.message,
+          kind: data.kind || "",
+          confident: data.confident !== false,
+        });
       } catch {
         // Never let a failed write look like a success.
         setRows((r) => r.map((x) => (x.awb === awb && !x.saved ? { ...x, result: "error" } : x)));
         setPanel({
           state: "error",
           awb,
+          kind: "",
+          confident: true,
           message: "NOT SAVED. Check the connection and scan this packet again.",
         });
         beep("error");
@@ -186,7 +216,10 @@ export function ScanPad({
       </div>
 
       <div className="pnl-scan-panel" style={{ background: look.bg, color: look.fg }}>
-        <div className="pnl-scan-verdict">{look.label}</div>
+        <div className="pnl-scan-verdict">
+          {panel.kind && KIND_LABEL[panel.kind] ? KIND_LABEL[panel.kind] : look.label}
+          {panel.kind && !panel.confident && <span className="pnl-scan-unsure"> — CHECK</span>}
+        </div>
         <div className="pnl-scan-awb">{panel.awb || " "}</div>
         <div className="pnl-scan-msg">{panel.message}</div>
       </div>
@@ -219,7 +252,11 @@ export function ScanPad({
               <span className="pnl-scan-row-order">{r.orderName || (r.saved ? "not in orders" : "")}</span>
               <span className="pnl-scan-row-time">{r.at}</span>
               <span className="pnl-scan-row-state">
-                {r.result === "error" ? "NOT SAVED" : r.saved ? r.result : "…"}
+                {r.result === "error"
+                  ? "NOT SAVED"
+                  : r.saved
+                    ? KIND_LABEL[r.kind] || r.result
+                    : "…"}
               </span>
             </div>
           ))

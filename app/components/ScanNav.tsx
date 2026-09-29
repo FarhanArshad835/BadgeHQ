@@ -8,7 +8,7 @@ import { Link } from "@remix-run/react";
 
 const TABS = [
   { key: "dispatch", href: "/pnl-app/scan/dispatch", label: "Dispatch" },
-  { key: "returns", href: "/pnl-app/scan/returns", label: "RTO & Returns" },
+  { key: "returns", href: "/pnl-app/scan/returns", label: "Inbound" },
   { key: "history", href: "/pnl-app/scan/history", label: "History" },
 ];
 
