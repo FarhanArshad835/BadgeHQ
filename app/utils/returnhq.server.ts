@@ -210,3 +210,104 @@ export async function returnHqCountsForMonth(month: string): Promise<ReturnHqMon
     available: true,
   };
 }
+
+/**
+ * Customer returns the courier says it delivered to us, that nobody has
+ * physically confirmed.
+ *
+ * The mirror of the RTO claim list, against a different counterparty. A reverse
+ * pickup is still a courier holding our stock: they collected it from the
+ * customer and told us they dropped it at the warehouse, so if it never turned
+ * up that is their liability, not the customer's.
+ *
+ * Two dates make this possible without any new plumbing, and ReturnHQ already
+ * records both:
+ *   carrier_received_at - the courier's own claim that it reached us
+ *   received_at         - a human confirming it physically arrived
+ * A row with the first and not the second is exactly the gap worth chasing.
+ *
+ * Rows with no carrier date are counted separately rather than assumed missing:
+ * a return still in transit has not been delivered yet, and dunning a courier
+ * for a parcel they are still carrying wastes the relationship.
+ */
+export async function unconfirmedReturns(
+  graceDays: number,
+): Promise<{
+  rows: Array<{
+    orderName: string;
+    awb: string;
+    carrier: string;
+    receivedAt: string;
+    daysOld: number;
+    type: string;
+  }>;
+  /** Picked up but the courier has not yet said it reached us. */
+  inFlight: number;
+  available: boolean;
+}> {
+  const db = returnHqClient();
+  if (!db) return { rows: [], inFlight: 0, available: false };
+  try {
+    const shopId = await jmShopId(db);
+    if (shopId == null) return { rows: [], inFlight: 0, available: false };
+
+    const cutoff = new Date(Date.now() - graceDays * 24 * 60 * 60 * 1000);
+
+    const rows = await db.$queryRawUnsafe<
+      Array<{
+        order_name: string;
+        awb: string | null;
+        provider: string | null;
+        carrier_received_at: Date;
+        type: string;
+      }>
+    >(
+      `SELECT shopify_order_number AS order_name,
+              awb_number           AS awb,
+              logistics_provider   AS provider,
+              carrier_received_at,
+              type::text           AS type
+         FROM return_requests
+        WHERE shop_id = $1
+          AND status::text <> 'cancelled'
+          AND carrier_received_at IS NOT NULL
+          AND received_at IS NULL
+          AND carrier_received_at < $2
+        ORDER BY carrier_received_at ASC
+        LIMIT 5000`,
+      shopId,
+      cutoff,
+    );
+
+    const inFlightRows = await db.$queryRawUnsafe<Array<{ c: bigint }>>(
+      // Stated positively: only a parcel the courier has actually collected is
+      // "on the way back". A request that is merely raised or approved is still
+      // sitting with the customer and is not in anyone's custody.
+      `SELECT count(*) AS c
+         FROM return_requests
+        WHERE shop_id = $1
+          AND status::text IN ('pickup_scheduled', 'in_transit')
+          AND carrier_received_at IS NULL
+          AND received_at IS NULL`,
+      shopId,
+    );
+
+    const now = Date.now();
+    return {
+      available: true,
+      inFlight: Number(inFlightRows[0]?.c ?? 0),
+      rows: rows.map((r) => ({
+        orderName: r.order_name,
+        awb: r.awb || "",
+        carrier: r.provider || "",
+        receivedAt: r.carrier_received_at.toISOString().slice(0, 10),
+        daysOld: Math.floor((now - r.carrier_received_at.getTime()) / 86400000),
+        type: r.type,
+      })),
+    };
+  } catch (e: any) {
+    // A ReturnHQ outage should leave the RTO half of the page working.
+    console.error("[returnhq] unconfirmed", String(e?.message || e).slice(0, 200));
+    return { rows: [], inFlight: 0, available: false };
+  }
+}
