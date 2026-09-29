@@ -1,40 +1,91 @@
 {
   "framework": "remix",
-  "regions": ["iad1"],
+  "regions": [
+    "iad1"
+  ],
   "crons": [
-    { "path": "/api/cron/whatsapp-replies", "schedule": "0 * * * *" },
-    { "path": "/api/cron/pnl-sync", "schedule": "30 2 * * *" },
-    { "path": "/api/cron/pnl-sync", "schedule": "30 14 * * *" }
+    {
+      "path": "/api/cron/whatsapp-replies",
+      "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/pnl-sync",
+      "schedule": "30 2 * * *"
+    },
+    {
+      "path": "/api/cron/pnl-sync",
+      "schedule": "30 14 * * *"
+    }
   ],
   "headers": [
     {
       "source": "/widget.js",
       "headers": [
-        { "key": "Access-Control-Allow-Origin", "value": "*" },
-        { "key": "Cache-Control", "value": "public, max-age=3600, s-maxage=86400" },
-        { "key": "Content-Type", "value": "application/javascript; charset=utf-8" }
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "*"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=3600, s-maxage=86400"
+        },
+        {
+          "key": "Content-Type",
+          "value": "application/javascript; charset=utf-8"
+        }
       ]
     },
     {
       "source": "/api/widgets",
       "headers": [
-        { "key": "Access-Control-Allow-Origin", "value": "*" },
-        { "key": "Cache-Control", "value": "public, max-age=300, s-maxage=600" }
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "*"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=300, s-maxage=600"
+        }
       ]
     },
     {
       "source": "/api/products/inventory",
       "headers": [
-        { "key": "Access-Control-Allow-Origin", "value": "*" },
-        { "key": "Cache-Control", "value": "public, max-age=300, s-maxage=600" }
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "*"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=300, s-maxage=600"
+        }
       ]
     },
     {
       "source": "/api/delivery-edd",
       "headers": [
-        { "key": "Access-Control-Allow-Origin", "value": "*" },
-        { "key": "Cache-Control", "value": "public, max-age=3600, s-maxage=21600" }
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "*"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=3600, s-maxage=21600"
+        }
       ]
+    }
+  ],
+  "redirects": [
+    {
+      "source": "/pnl-app/:path*",
+      "has": [
+        {
+          "type": "host",
+          "value": "badge-hq.vercel.app"
+        }
+      ],
+      "destination": "https://jmlooks-ops.vercel.app/pnl-app/:path*",
+      "permanent": false
     }
   ]
 }
