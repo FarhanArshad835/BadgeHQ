@@ -80,9 +80,6 @@ export default function ScanLogin() {
             {needsSetup ? "Set password and enter" : "Enter"}
           </button>
         </Form>
-        <p className="pnl-help" style={{ marginTop: 18 }}>
-          This password opens the scanners only. It does not give access to Profit and Loss.
-        </p>
       </div>
     </div>
   );
