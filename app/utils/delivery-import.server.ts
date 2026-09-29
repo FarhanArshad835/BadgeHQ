@@ -30,12 +30,47 @@ export function mapSheetStatus(raw: string): DeliveryOutcome | "no-awb" | null {
 }
 
 /**
+ * Parse a date from the tracking sheet.
+ *
+ * Google publishes these in the sheet's own locale, so both "9/26/2026" and
+ * "26/09/2026" turn up. Where the first number is above 12 it can only be a
+ * day, which disambiguates most rows; the rest fall back to the sheet's
+ * observed M/D/YYYY. Anything unparseable returns null rather than a guess: a
+ * wrong date here would start a claim clock at the wrong moment.
+ */
+function parseSheetDate(raw: unknown): Date | null {
+  const s = String(raw ?? "").trim();
+  if (!s) return null;
+
+  const slash = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/);
+  if (slash) {
+    const a = Number(slash[1]);
+    const b = Number(slash[2]);
+    const y = Number(slash[3]);
+    // First number over 12 can only be a day.
+    const [month, day] = a > 12 ? [b, a] : [a, b];
+    if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+    const d = new Date(Date.UTC(y, month - 1, day));
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) {
+    const d = new Date(`${iso[0]}T00:00:00Z`);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+
+  const parsed = new Date(s);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+/**
  * Parse an uploaded CSV of AWB → delivery status. Tolerant of column order and
  * extra columns: it finds the AWB column (a long digit run) and the delivery-
  * status column (by header name), from the header row. Returns AWB→outcome pairs.
  */
 export function parseDeliveryCsv(csv: string): {
-  pairs: Array<{ awb: string; outcome: DeliveryOutcome | "no-awb" }>;
+  pairs: Array<{ awb: string; outcome: DeliveryOutcome | "no-awb"; deliveredAt: Date | null }>;
   totalRows: number;
   skipped: number;
 } {
@@ -46,12 +81,15 @@ export function parseDeliveryCsv(csv: string): {
   const header = splitCsvLine(lines[0]).map((h) => h.toLowerCase().trim());
   let awbCol = header.findIndex((h) => h === "awb" || h.includes("awb") || h.includes("waybill"));
   let statusCol = header.findIndex((h) => h.includes("delivery status") || h === "status" || h.includes("status"));
+  // The date the courier says the parcel arrived. For an RTO that is the date it
+  // came back to US, which is the only usable clock for a courier claim.
+  const dateCol = header.findIndex((h) => h.includes("delivered date") || h.includes("delivery date"));
   // If no recognisable header, assume col0 = AWB, col2 = status (the sheet's shape).
   const hasHeader = awbCol !== -1 || statusCol !== -1;
   if (awbCol === -1) awbCol = 0;
   if (statusCol === -1) statusCol = 2;
 
-  const pairs: Array<{ awb: string; outcome: DeliveryOutcome | "no-awb" }> = [];
+  const pairs: Array<{ awb: string; outcome: DeliveryOutcome | "no-awb"; deliveredAt: Date | null }> = [];
   let skipped = 0;
   const start = hasHeader ? 1 : 0;
   for (let i = start; i < lines.length; i++) {
@@ -67,7 +105,7 @@ export function parseDeliveryCsv(csv: string): {
       skipped++;
       continue;
     }
-    pairs.push({ awb, outcome });
+    pairs.push({ awb, outcome, deliveredAt: dateCol === -1 ? null : parseSheetDate(cells[dateCol]) });
   }
   return { pairs, totalRows: lines.length - start, skipped };
 }
@@ -136,13 +174,13 @@ function splitCsvLine(line: string): string[] {
  */
 export async function applyDeliveryStatuses(
   shop: string,
-  pairs: Array<{ awb: string; outcome: string }>,
-): Promise<{ updated: number; delivered: number; rto: number }> {
-  if (!pairs.length) return { updated: 0, delivered: 0, rto: 0 };
+  pairs: Array<{ awb: string; outcome: string; deliveredAt?: Date | null }>,
+): Promise<{ updated: number; delivered: number; rto: number; rtoDated: number }> {
+  if (!pairs.length) return { updated: 0, delivered: 0, rto: 0, rtoDated: 0 };
 
   // Dedup by AWB (last wins) so the VALUES list is clean.
-  const byAwb = new Map<string, string>();
-  for (const p of pairs) byAwb.set(p.awb, p.outcome);
+  const byAwb = new Map<string, { outcome: string; deliveredAt: Date | null }>();
+  for (const p of pairs) byAwb.set(p.awb, { outcome: p.outcome, deliveredAt: p.deliveredAt ?? null });
   const entries = Array.from(byAwb.entries());
 
   const now = new Date();
@@ -151,25 +189,40 @@ export async function applyDeliveryStatuses(
   for (let i = 0; i < entries.length; i += CHUNK) {
     const slice = entries.slice(i, i + CHUNK);
     const values = Prisma.join(
-      slice.map(([awb, outcome]) => Prisma.sql`(${awb}, ${outcome})`),
+      slice.map(([awb, v]) => Prisma.sql`(${awb}, ${v.outcome}, ${v.deliveredAt}::timestamp)`),
     );
-    // Update matching orders; set deliveredAt only for delivered.
-    // IS DISTINCT FROM: only write rows whose status actually CHANGED. A nightly
-    // re-run where most orders are already terminal does ~zero writes (cheap
-    // index reads only), which keeps Neon compute minimal on the repeating cron.
+    // IS DISTINCT FROM on BOTH columns: a row whose status is unchanged but
+    // which has just gained a return date must still be written, or the claim
+    // clock would never arrive for the 21,392 RTOs already sitting terminal.
+    //
+    // rtoReceivedAt is COALESCEd, never overwritten with null: once a courier
+    // has told us when a parcel came back, a later sync with a blank cell must
+    // not erase it.
     const res = await prisma.$executeRaw`
       UPDATE "OrderFinancials" AS o
       SET "deliveryStatus" = v.outcome,
           "deliveredAt" = CASE WHEN v.outcome = 'delivered' THEN ${now} ELSE NULL END,
+          "rtoReceivedAt" = CASE
+            WHEN v.outcome IN ('rto', 'rto_in_transit')
+              THEN COALESCE(v.delivered_at, o."rtoReceivedAt")
+            ELSE o."rtoReceivedAt" END,
           "deliverySyncedAt" = ${now}
-      FROM (VALUES ${values}) AS v(awb, outcome)
+      FROM (VALUES ${values}) AS v(awb, outcome, delivered_at)
       WHERE o.shop = ${shop} AND o.awb = v.awb
-        AND o."deliveryStatus" IS DISTINCT FROM v.outcome
+        AND (
+          o."deliveryStatus" IS DISTINCT FROM v.outcome
+          OR (v.outcome IN ('rto', 'rto_in_transit')
+              AND v.delivered_at IS NOT NULL
+              AND o."rtoReceivedAt" IS NULL)
+        )
     `;
     updated += Number(res);
   }
 
-  const delivered = entries.filter(([, o]) => o === "delivered").length;
-  const rto = entries.filter(([, o]) => o === "rto" || o === "rto_in_transit").length;
-  return { updated, delivered, rto };
+  const delivered = entries.filter(([, v]) => v.outcome === "delivered").length;
+  const rto = entries.filter(([, v]) => v.outcome === "rto" || v.outcome === "rto_in_transit").length;
+  const rtoDated = entries.filter(
+    ([, v]) => (v.outcome === "rto" || v.outcome === "rto_in_transit") && v.deliveredAt != null,
+  ).length;
+  return { updated, delivered, rto, rtoDated };
 }

@@ -643,6 +643,11 @@ model OrderFinancials {
   // signals; "unknown" until the tracking backfill resolves it.
   deliveryStatus   String    @default("unknown") // delivered | rto | in_transit | no-awb | unknown
   deliveredAt      DateTime? // best-effort delivery timestamp when the carrier reports it
+  /// When the courier says an RTO arrived BACK with us, from the tracking
+  /// sheet's Delivered Date column. This is the clock a courier claim runs on:
+  /// deliveredAt is null for an RTO and deliverySyncedAt is only when our sync
+  /// ran, so neither can date a return.
+  rtoReceivedAt    DateTime?
   deliverySyncedAt DateTime?
 
   // Bookkeeping.

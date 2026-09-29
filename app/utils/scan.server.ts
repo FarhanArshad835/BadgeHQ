@@ -393,13 +393,16 @@ export async function scanCountsToday(shop: string): Promise<Record<string, numb
  * Each one is stock we have been told to expect and have not seen, so past the
  * grace period it is a claim against the courier.
  *
- * THE CLOCK IS THE WEAK PART, and the UI says so. The courier's own return date
- * is the right basis, but the tracking sheet leaves Delivered Date blank on all
- * 21,392 RTO rows, so there is nothing to read. deliverySyncedAt cannot stand in
- * either: 7,243 orders share a single sync day because that is when a backfill
- * ran, not when 7,243 parcels arrived. Until the sheet carries real dates this
- * ages from the ORDER date, which is always earlier than the return, so the list
- * errs towards showing a parcel too early rather than too late.
+ * The clock is rtoReceivedAt: the date the COURIER says the parcel arrived back
+ * with us, imported from the tracking sheet's Delivered Date column. That is the
+ * only defensible basis for a claim, because it is the courier's own record of
+ * handing the parcel over.
+ *
+ * Orders with no such date are EXCLUDED rather than aged from something else.
+ * The order date would be wrong (always earlier than the return) and
+ * deliverySyncedAt would be worse (7,243 orders share one sync day, which is
+ * when a backfill ran). A claim sent on a made-up date is worse than a claim
+ * not sent, so the count of undated rows is returned for the UI to show.
  */
 export async function claimCandidates(
   shop: string,
@@ -409,7 +412,7 @@ export async function claimCandidates(
     orderName: string;
     awb: string;
     carrier: string;
-    orderedAt: string;
+    receivedAt: string;
     daysOld: number;
     revenueMinor: string;
     cogsMinor: string | null;
@@ -417,31 +420,44 @@ export async function claimCandidates(
   totalCogsMinor: bigint;
   totalRevenueMinor: bigint;
   scannedCount: number;
+  /** RTOs with no courier return date, so they cannot be claimed yet. */
+  undatedCount: number;
 }> {
   const cutoff = new Date(Date.now() - graceDays * 24 * 60 * 60 * 1000);
+
+  // How many RTOs we cannot judge yet, so the UI never implies the list is
+  // complete when most of the data is missing.
+  const undatedCount = await prisma.orderFinancials.count({
+    where: {
+      shop,
+      deliveryStatus: { in: ["rto", "rto_in_transit"] },
+      awb: { not: "" },
+      rtoReceivedAt: null,
+    },
+  });
 
   const rtos = await prisma.orderFinancials.findMany({
     where: {
       shop,
       deliveryStatus: { in: ["rto", "rto_in_transit"] },
       awb: { not: "" },
-      orderCreatedAt: { lt: cutoff },
+      rtoReceivedAt: { lt: cutoff },
     },
     select: {
       orderName: true,
       awb: true,
       carrier: true,
-      orderCreatedAt: true,
+      rtoReceivedAt: true,
       grossRevenueMinor: true,
       cogsMinor: true,
     },
-    orderBy: { orderCreatedAt: "asc" },
+    orderBy: { rtoReceivedAt: "asc" },
     // No take: a cap here would silently truncate the totals, and 7 days vs 45
     // days would report identical money because the cap bit before the filter.
     // The row list is trimmed for display in the route instead.
   });
   if (!rtos.length) {
-    return { rows: [], totalCogsMinor: 0n, totalRevenueMinor: 0n, scannedCount: 0 };
+    return { rows: [], totalCogsMinor: 0n, totalRevenueMinor: 0n, scannedCount: 0, undatedCount };
   }
 
   // Which of those have actually been scanned in? Chunked: an IN list of
@@ -463,8 +479,8 @@ export async function claimCandidates(
       orderName: r.orderName,
       awb: r.awb,
       carrier: r.carrier,
-      orderedAt: r.orderCreatedAt.toISOString().slice(0, 10),
-      daysOld: Math.floor((now - r.orderCreatedAt.getTime()) / 86400000),
+      receivedAt: r.rtoReceivedAt!.toISOString().slice(0, 10),
+      daysOld: Math.floor((now - r.rtoReceivedAt!.getTime()) / 86400000),
       revenueMinor: r.grossRevenueMinor.toString(),
       cogsMinor: r.cogsMinor == null ? null : r.cogsMinor.toString(),
     }));
@@ -477,5 +493,5 @@ export async function claimCandidates(
     totalRevenueMinor += r.grossRevenueMinor;
   }
 
-  return { rows, totalCogsMinor, totalRevenueMinor, scannedCount: seen.size };
+  return { rows, totalCogsMinor, totalRevenueMinor, scannedCount: seen.size, undatedCount };
 }

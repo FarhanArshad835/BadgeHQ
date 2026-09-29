@@ -26,7 +26,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (!isAuthed(request, "scan")) return redirect("/pnl-app/scan/login");
   const app = await getPnlApp();
   const shop = app.shopDomain;
-  if (!shop) return json({ rows: [], counts: {}, days: 7, totals: { cogs: "0", revenue: "0" }, scanned: 0 });
+  if (!shop) return json({ rows: [], counts: {}, days: 7, totals: { cogs: "0", revenue: "0" }, scanned: 0, undated: 0 });
 
   const url = new URL(request.url);
   const requested = Number(url.searchParams.get("days") || 7);
@@ -38,13 +38,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
     const rup = (v: string | null) => (v == null ? "" : (Number(v) / 100).toFixed(2));
     const csv = [
-      "order_name,awb,carrier,ordered_on,days_since_order,order_value,cogs",
+      "order_name,awb,carrier,rto_received_on,days_since_received,order_value,cogs",
       ...res.rows.map((r) =>
         [
           esc(r.orderName),
           esc(r.awb),
           esc(r.carrier),
-          esc(r.orderedAt),
+          esc(r.receivedAt),
           String(r.daysOld),
           rup(r.revenueMinor),
           rup(r.cogsMinor),
@@ -67,6 +67,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     rows: res.rows.slice(0, 500),
     totalRows: res.rows.length,
     scanned: res.scannedCount,
+    undated: res.undatedCount,
     totals: {
       cogs: res.totalCogsMinor.toString(),
       revenue: res.totalRevenueMinor.toString(),
@@ -98,7 +99,7 @@ export default function Claims() {
           >
             {DAY_OPTIONS.map((n) => (
               <option key={n} value={n}>
-                Unscanned after {n} days
+                Returned over {n} days ago
               </option>
             ))}
           </select>
@@ -108,7 +109,7 @@ export default function Claims() {
         </div>
 
         <div className="pnl-panel" style={{ marginBottom: 14 }}>
-          <div className="pnl-section-label">Not received</div>
+          <div className="pnl-section-label">Returned by courier, never scanned in</div>
           <div style={{ display: "flex", gap: 28, flexWrap: "wrap", marginTop: 8 }}>
             <div>
               <div style={{ fontSize: 28, fontWeight: 700 }}>
@@ -127,14 +128,16 @@ export default function Claims() {
           </div>
         </div>
 
-        {/* The clock is the weak input, so it is stated rather than buried. */}
-        <div className="pnl-help" style={{ marginBottom: 14 }}>
-          Counted from the <strong>order date</strong>, not the date the courier returned the
-          parcel. The tracking sheet leaves Delivered Date blank on every RTO row, so there is no
-          return date to read yet. An order date is always earlier than its return, so a parcel can
-          show up here before it is genuinely claimable. Run{" "}
-          <strong>backfillDeliveryDates</strong> in the tracking script and this becomes exact.
-        </div>
+        {/* Coverage, not the clock, is now the caveat. Saying how much is
+            missing stops the list reading as complete when it is not. */}
+        {d.undated > 0 && (
+          <div className="pnl-help" style={{ marginBottom: 14 }}>
+            <strong>{d.undated.toLocaleString("en-IN")} returned parcels are not shown</strong>{" "}
+            because the courier has not given a return date for them. Counting those from anything
+            else would start the claim clock on a date the courier never agreed to. Run{" "}
+            <strong>backfillDeliveryDates</strong> in the tracking script to fill them in.
+          </div>
+        )}
 
         {d.scanned > 0 && (
           <p className="pnl-sub" style={{ marginBottom: 12 }}>
@@ -145,7 +148,9 @@ export default function Claims() {
         <div className="pnl-panel">
           {d.rows.length === 0 ? (
             <p className="pnl-sub" style={{ margin: 0 }}>
-              Nothing to claim. Every returned parcel older than {d.days} days has been scanned in.
+              {d.undated > 0
+                ? "No claimable parcels yet: none of the returned parcels carry a courier return date."
+                : `Nothing to claim. Every parcel the courier returned more than ${d.days} days ago has been scanned in.`}
             </p>
           ) : (
             <>
@@ -156,7 +161,7 @@ export default function Claims() {
                       <th>Order</th>
                       <th>AWB</th>
                       <th>Carrier</th>
-                      <th>Ordered</th>
+                      <th>RTO received</th>
                       <th className="pnl-num">Days</th>
                       <th className="pnl-num">Value</th>
                       <th className="pnl-num">Stock cost</th>
@@ -168,7 +173,7 @@ export default function Claims() {
                         <td>{r.orderName}</td>
                         <td style={{ fontVariantNumeric: "tabular-nums" }}>{r.awb}</td>
                         <td>{r.carrier || <span className="pnl-muted">unknown</span>}</td>
-                        <td style={{ whiteSpace: "nowrap" }}>{r.orderedAt}</td>
+                        <td style={{ whiteSpace: "nowrap" }}>{r.receivedAt}</td>
                         <td className="pnl-num">{r.daysOld}</td>
                         <td className="pnl-num">{rup(r.revenueMinor)}</td>
                         <td className="pnl-num">
