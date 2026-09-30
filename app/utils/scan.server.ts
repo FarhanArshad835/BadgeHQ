@@ -524,6 +524,8 @@ export async function returnClaimCandidates(
     receivedAt: string;
     daysOld: number;
     type: string;
+    /** True when the bench has physically scanned this parcel in. */
+    scanned: boolean;
   }>;
   /** Delivered returns past the cutoff: the denominator for the bar. */
   eligibleCount: number;
@@ -549,7 +551,9 @@ export async function returnClaimCandidates(
     for (const sc of scans) seen.add(sc.awb);
   }
 
-  const rows = res.rows.filter((r) => !seen.has(normaliseAwb(r.awb)));
+  // Flagged, not dropped: the caller filters them out by default but can show
+  // them, so the list can answer "did we find it?" as well as "what is missing?"
+  const rows = res.rows.map((r) => ({ ...r, scanned: seen.has(normaliseAwb(r.awb)) }));
   return {
     rows,
     eligibleCount: res.rows.length,
@@ -757,6 +761,8 @@ export async function claimCandidates(
     daysOld: number;
     revenueMinor: string;
     cogsMinor: string | null;
+    /** True when the bench has physically scanned this parcel in. */
+    scanned: boolean;
   }>;
   totalCogsMinor: bigint;
   totalRevenueMinor: bigint;
@@ -818,17 +824,19 @@ export async function claimCandidates(
   }
 
   const now = Date.now();
-  const rows = rtos
-    .filter((r) => !seen.has(r.awb))
-    .map((r) => ({
-      orderName: r.orderName,
-      awb: r.awb,
-      carrier: r.carrier,
-      receivedAt: r.rtoReceivedAt!.toISOString().slice(0, 10),
-      daysOld: Math.floor((now - r.rtoReceivedAt!.getTime()) / 86400000),
-      revenueMinor: r.grossRevenueMinor.toString(),
-      cogsMinor: r.cogsMinor == null ? null : r.cogsMinor.toString(),
-    }));
+  // Scanned parcels are RETURNED, flagged rather than dropped. They are the
+  // proof the process is working, and a list that can only ever show failures
+  // cannot answer "did we find it?" — the caller filters them out by default.
+  const rows = rtos.map((r) => ({
+    orderName: r.orderName,
+    awb: r.awb,
+    carrier: r.carrier,
+    receivedAt: r.rtoReceivedAt!.toISOString().slice(0, 10),
+    daysOld: Math.floor((now - r.rtoReceivedAt!.getTime()) / 86400000),
+    revenueMinor: r.grossRevenueMinor.toString(),
+    cogsMinor: r.cogsMinor == null ? null : r.cogsMinor.toString(),
+    scanned: seen.has(r.awb),
+  }));
 
   // Sorted over the WHOLE set, before the route trims to 500. Sorting only the
   // visible page would reorder an arbitrary slice and call it "the highest

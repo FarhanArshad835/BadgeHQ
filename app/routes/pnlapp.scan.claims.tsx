@@ -40,6 +40,9 @@ type ClaimRow = {
   cost: number | null;
   orderValue: number;
   status: string;
+  /** Physically scanned at the bench. Hidden by default: the list is about
+   *  what is MISSING, and a found parcel is not a claim. */
+  scanned: boolean;
 };
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -78,6 +81,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         cost: null,
         orderValue: 0,
         status: statuses.get(r.awb) || "",
+        scanned: r.scanned,
       })),
     });
   }
@@ -99,6 +103,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       cost: rupees(r.cogsMinor),
       orderValue: rupees(r.revenueMinor) ?? 0,
       status: statuses.get(r.awb) || "",
+      scanned: r.scanned,
     })),
   });
 };
@@ -152,6 +157,8 @@ export default function Claims() {
   // never disagree about what the table is showing.
   const [sortCol, setSortCol] = useState<"days" | "cost" | "order" | "carrier" | "delivered">("days");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  // Found parcels are hidden by default: this is a list of what is missing.
+  const [showScanned, setShowScanned] = useState(false);
   const [page, setPage] = useState(0);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [popOpen, setPopOpen] = useState(false);
@@ -165,6 +172,8 @@ export default function Claims() {
   const isReturns = d.tab === "returns";
 
   const nextStep = (r: ClaimRow) => {
+    // The bench found it, so there is nothing to claim regardless of age.
+    if (r.scanned) return "Found";
     if (r.status === "received") return "Received";
     if (r.status === "raised") return "Claim raised";
     if (r.carrier === "Unknown") return "Fix carrier";
@@ -210,6 +219,7 @@ export default function Claims() {
     return rows
       .filter(
         (r) =>
+          (showScanned || !r.scanned) &&
           inRange(r) &&
           (!carrier || r.carrier === carrier) &&
           (!step || nextStep(r) === step) &&
@@ -217,7 +227,7 @@ export default function Claims() {
       )
       .sort(cmp);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, search, carrier, step, sortCol, sortDir, age, custom, claimWindow]);
+  }, [rows, search, carrier, step, sortCol, sortDir, age, custom, claimWindow, showScanned]);
 
   /**
    * A sortable header.
@@ -272,13 +282,20 @@ export default function Claims() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [rows, claimWindow],
   );
+  // A parcel the bench has scanned is not at risk — it is on the shelf.
   const atRisk = useMemo(
-    () => rows.filter((r) => r.status !== "received").reduce((s, r) => s + (r.cost ?? 0), 0),
+    () =>
+      rows
+        .filter((r) => !r.scanned && r.status !== "received")
+        .reduce((s, r) => s + (r.cost ?? 0), 0),
     [rows],
   );
-  const pctOfReturns = rows.length + d.undated > 0
-    ? ((rows.length / (rows.length + d.undated)) * 100).toFixed(1)
-    : "0.0";
+  const missing = rows.filter((r) => !r.scanned);
+  const scannedCount = rows.filter((r) => r.scanned).length;
+  const pctOfReturns =
+    rows.length + d.undated > 0
+      ? ((missing.length / (rows.length + d.undated)) * 100).toFixed(1)
+      : "0.0";
 
   async function setStatus(awb: string, next: "received" | "raised") {
     const current = rows.find((r) => r.awb === awb)?.status || "";
@@ -437,7 +454,7 @@ export default function Claims() {
 
         <section className="summary">
           <div className="headline">
-            <div className="big">{rows.length.toLocaleString("en-IN")}</div>
+            <div className="big">{missing.length.toLocaleString("en-IN")}</div>
             <div className="big-sub">
               <span className="long">
                 parcels marked {isReturns ? "returned" : "RTO delivered"} but never scanned in ·{" "}
@@ -487,9 +504,25 @@ export default function Claims() {
                 }}
               >
                 {a ? `${a}+ days` : "All"}{" "}
-                <span>{rows.filter((r) => r.days >= a).length.toLocaleString("en-IN")}</span>
+                <span>
+                  {(showScanned ? rows : missing)
+                    .filter((r) => r.days >= a)
+                    .length.toLocaleString("en-IN")}
+                </span>
               </button>
             ))}
+            {scannedCount > 0 && (
+              <button
+                className={"chip" + (showScanned ? " active" : "")}
+                onClick={() => {
+                  setShowScanned((v) => !v);
+                  setPage(0);
+                }}
+                title="Parcels the bench has physically scanned in"
+              >
+                {showScanned ? "Hiding none" : "Found"} <span>{scannedCount.toLocaleString("en-IN")}</span>
+              </button>
+            )}
             <button
               ref={customChipRef}
               className={"chip" + (custom ? " active" : "")}
@@ -621,6 +654,7 @@ export default function Claims() {
               <option>Closing soon</option>
               <option>Fix carrier</option>
               <option>Past window</option>
+              <option>Found</option>
               <option>Received</option>
               <option>Claim raised</option>
             </select>
@@ -666,9 +700,15 @@ export default function Claims() {
                 slice.map((r) => {
                   const st = nextStep(r);
                   const dot =
-                    st === "File claim" ? "ready" : st === "Closing soon" ? "soon" : r.status ? "done" : "";
+                    st === "File claim"
+                      ? "ready"
+                      : st === "Closing soon"
+                        ? "soon"
+                        : r.scanned || r.status
+                          ? "done"
+                          : "";
                   return (
-                    <tr key={r.awb} className={r.status ? "done" : ""}>
+                    <tr key={r.awb} className={r.scanned || r.status ? "done" : ""}>
                       <td className="c-chk">
                         <input
                           type="checkbox"
