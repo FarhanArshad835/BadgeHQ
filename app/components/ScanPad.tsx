@@ -74,6 +74,9 @@ const PANEL: Record<string, { bg: string; fg: string; label: string }> = {
   error: { bg: "#b42318", fg: "#ffffff", label: "NOT SAVED" },
 };
 
+/** Thrown when the scan POST is bounced to the login page. */
+class SessionExpired extends Error {}
+
 export function ScanPad({
   kind,
   title,
@@ -94,6 +97,7 @@ export function ScanPad({
     message: string;
     kind: string;
     confident: boolean;
+    signedOut?: boolean;
   }>({ state: "idle", awb: "", message: hint, kind: "", confident: true });
   const [pending, setPending] = useState(0);
 
@@ -154,7 +158,17 @@ export function ScanPad({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ awb, kind }),
+          // Do not follow the login redirect an expired session produces:
+          // following it returns an HTML page, res.json() throws, and the
+          // operator is told to check a connection that is working fine.
+          redirect: "manual",
         });
+        // An opaque redirect (or a 401) means the session has gone, not that
+        // the network failed. Worth saying plainly: the fix is to log in
+        // again, and no amount of re-scanning will help.
+        if (res.type === "opaqueredirect" || res.status === 401 || res.status === 302) {
+          throw new SessionExpired();
+        }
         if (!res.ok) throw new Error(String(res.status));
         const data = await res.json();
 
@@ -181,15 +195,19 @@ export function ScanPad({
           kind: data.kind || "",
           confident: data.confident !== false,
         });
-      } catch {
+      } catch (err) {
         // Never let a failed write look like a success.
+        const expired = err instanceof SessionExpired;
         setRows((r) => r.map((x) => (x.awb === awb && !x.saved ? { ...x, result: "error" } : x)));
         setPanel({
           state: "error",
           awb,
           kind: "",
           confident: true,
-          message: "NOT SAVED. Check the connection and scan this packet again.",
+          signedOut: expired,
+          message: expired
+            ? "NOT SAVED — you have been signed out. Log in again, then scan this packet."
+            : "NOT SAVED. Check the connection and scan this packet again.",
         });
         beep("error");
       } finally {
@@ -222,6 +240,16 @@ export function ScanPad({
         </div>
         <div className="pnl-scan-awb">{panel.awb || " "}</div>
         <div className="pnl-scan-msg">{panel.message}</div>
+        {/* A signed-out operator should not have to know the URL. */}
+        {panel.signedOut && (
+          <a
+            className="pnl-btn"
+            href="/pnl-app/scan/login"
+            style={{ marginTop: 10, display: "inline-block" }}
+          >
+            Log in again
+          </a>
+        )}
       </div>
 
       <input
