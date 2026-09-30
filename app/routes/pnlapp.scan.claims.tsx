@@ -39,11 +39,13 @@ import { ScanProgressBar } from "../components/ScanProgressBar";
  * reader work out that a longer window means fewer, older, more certain
  * parcels; saying so directly is the whole job of the label.
  */
+// "over N days ago" put two time words on one idea. One is enough: how long
+// the parcel has been overdue.
 const DAY_OPTIONS = [
-  { days: 7, label: "Courier marked RTO over 7 days ago" },
-  { days: 14, label: "Courier marked RTO over 14 days ago" },
-  { days: 30, label: "Courier marked RTO over 30 days ago" },
-  { days: 45, label: "Courier marked RTO over 45 days ago" },
+  { days: 7, label: "Waiting 7+ days" },
+  { days: 14, label: "Waiting 14+ days" },
+  { days: 30, label: "Waiting 30+ days" },
+  { days: 45, label: "Waiting 45+ days" },
 ];
 const DAY_VALUES = DAY_OPTIONS.map((o) => o.days);
 const TABS = ["rto", "returns"] as const;
@@ -211,7 +213,7 @@ export default function Claims() {
           {/* The full question, spelled out. The dropdown only sets the "how
               long ago" part of it. */}
           <span className="pnl-sub" style={{ fontSize: 12.5 }}>
-            …and still not scanned physically
+            since the courier marked it {isReturns ? "returned" : "RTO"} — still not scanned
           </span>
           <a
             className="pnl-btn"

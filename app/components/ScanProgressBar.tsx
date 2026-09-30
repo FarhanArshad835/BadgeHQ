@@ -47,7 +47,7 @@ export function ScanProgressBar({
       {/* The same words as the filter above it, so the two read as one
           statement instead of two descriptions of the same thing. */}
       <div className="pnl-section-label">
-        Marked {noun} over {graceDays} days ago, never scanned physically
+        Waiting {graceDays}+ days since the courier marked it {noun} — never scanned
       </div>
 
       <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginTop: 10, flexWrap: "wrap" }}>
