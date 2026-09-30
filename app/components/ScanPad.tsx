@@ -74,8 +74,35 @@ const PANEL: Record<string, { bg: string; fg: string; label: string }> = {
   error: { bg: "#b42318", fg: "#ffffff", label: "NOT SAVED" },
 };
 
-/** Thrown when the scan POST is bounced to the login page. */
+/** Thrown when the action reports the scanner session has lapsed. */
 class SessionExpired extends Error {}
+
+/**
+ * Pull the action's payload out of a single-fetch response.
+ *
+ * Remix answers .data with turbo-stream: a flat array where objects hold
+ * INDEXES into that array rather than values, so {"_1":2} means "key at [1],
+ * value at [2]". Resolving those references is all this needs to do; the
+ * payload here is one flat object of strings.
+ */
+function decodeTurboStream(text: string): any {
+  const parsed = JSON.parse(text);
+  if (!Array.isArray(parsed)) return parsed;
+  const at = (i: unknown): any => {
+    const v = parsed[i as number];
+    if (v && typeof v === "object" && !Array.isArray(v)) {
+      const out: Record<string, any> = {};
+      for (const [k, ref] of Object.entries(v)) {
+        out[typeof k === "string" && k.startsWith("_") ? at(Number(k.slice(1))) : k] = at(ref);
+      }
+      return out;
+    }
+    return v;
+  };
+  // [0] is the root: {"_1":2} -> { data: <payload> }
+  const root = at(0);
+  return root?.data ?? root;
+}
 
 export function ScanPad({
   kind,
@@ -154,23 +181,23 @@ export function ScanPad({
       setPending((n) => n + 1);
 
       try {
-        const res = await fetch("", {
+        // Posts to the route's single-fetch .data endpoint, NOT to the route
+        // path. A plain fetch("") POST is a DOCUMENT request: Remix runs the
+        // action, revalidates, and answers with a full HTML page. The scan
+        // saved, but res.json() then choked on HTML and the operator was told
+        // NOT SAVED for a scan that had in fact been recorded — the worst
+        // possible direction for this panel to be wrong in.
+        const res = await fetch(window.location.pathname + ".data", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ awb, kind }),
-          // Do not follow the login redirect an expired session produces:
-          // following it returns an HTML page, res.json() throws, and the
-          // operator is told to check a connection that is working fine.
-          redirect: "manual",
+          credentials: "same-origin",
         });
-        // An opaque redirect (or a 401) means the session has gone, not that
-        // the network failed. Worth saying plainly: the fix is to log in
-        // again, and no amount of re-scanning will help.
-        if (res.type === "opaqueredirect" || res.status === 401 || res.status === 302) {
-          throw new SessionExpired();
-        }
+        // A lapsed session answers 401 here rather than redirecting, so it can
+        // be named instead of being reported as a network fault.
+        if (res.status === 401) throw new SessionExpired();
         if (!res.ok) throw new Error(String(res.status));
-        const data = await res.json();
+        const data = decodeTurboStream(await res.text());
 
         // The server has the last word: it can see duplicates from other devices.
         setRows((r) =>
