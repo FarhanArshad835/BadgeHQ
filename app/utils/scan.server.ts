@@ -425,12 +425,14 @@ export async function claimCandidates(
 }> {
   const cutoff = new Date(Date.now() - graceDays * 24 * 60 * 60 * 1000);
 
-  // How many RTOs we cannot judge yet, so the UI never implies the list is
-  // complete when most of the data is missing.
+  // Terminal 'rto' only. A parcel still coming back has not arrived, so it is
+  // neither claimable nor a gap in our data — counting it as "missing a date"
+  // would pad the caveat with parcels the courier is still legitimately
+  // carrying, which is the same mistake as claiming on them.
   const undatedCount = await prisma.orderFinancials.count({
     where: {
       shop,
-      deliveryStatus: { in: ["rto", "rto_in_transit"] },
+      deliveryStatus: "rto",
       awb: { not: "" },
       rtoReceivedAt: null,
     },
@@ -439,7 +441,7 @@ export async function claimCandidates(
   const rtos = await prisma.orderFinancials.findMany({
     where: {
       shop,
-      deliveryStatus: { in: ["rto", "rto_in_transit"] },
+      deliveryStatus: "rto",
       awb: { not: "" },
       rtoReceivedAt: { lt: cutoff },
     },

@@ -14,17 +14,41 @@ import type { DeliveryOutcome } from "./pnl-sync.server";
 
 /** Map a sheet "Delivery Status" string to our outcome. Same vocabulary the
  *  carrier classifier produces, so the monthly engine treats them identically.
- *  Returns null for a status we don't recognise (skip, don't guess). */
+ *  Returns null for a status we don't recognise (skip, don't guess).
+ *
+ *  The return vocabulary is carrier-specific and does NOT share words. Delhivery
+ *  and Shiprocket say "RTO"; Shadowfax says "Returned to Seller" / "RTS". A rule
+ *  written for one silently drops the other: 2,841 Shadowfax "Returned to
+ *  Seller" rows mapped to null and never counted as returns at all.
+ *
+ *  Order matters twice over, and both orderings are load-bearing:
+ *    - return before delivered, so "RTO Delivered" is a return, not a sale;
+ *    - NEGATIVE before positive, so "Return to Seller Not Delivered" is a failed
+ *      return rather than matching the word "delivered" sitting inside it. */
 export function mapSheetStatus(raw: string): DeliveryOutcome | "no-awb" | null {
   const s = String(raw || "").toLowerCase().replace(/[_\-\s]+/g, " ").trim();
   if (!s) return null;
-  // RTO must be checked before "delivered" — "RTO Delivered" is a return.
-  if (/\brto\b|return(ed)? to origin|\brts\b/.test(s)) {
-    return /in transit|initiat|returning/.test(s) ? "rto_in_transit" : "rto";
+
+  const isReturn = /\brto\b|\brts\b|return(ed)? to (origin|seller|client)/.test(s);
+
+  if (isReturn) {
+    // A return that FAILED is not a completed return. Checked first because
+    // "not delivered" contains "delivered" and would otherwise book the parcel
+    // as a sale to the customer.
+    if (/\bnot delivered\b|\bundelivered\b/.test(s)) return "rto_in_transit";
+    // Still moving back to us. "In process" and "pending" are Shadowfax's
+    // wording for a return that has been raised but has not arrived, so the
+    // claim clock must not start on them.
+    if (/in transit|in process|initiat|pending|returning|out for delivery|ofd/.test(s)) {
+      return "rto_in_transit";
+    }
+    return "rto";
   }
+
   if (/\blost\b|untraceable/.test(s)) return "lost";
   if (/\bcancel(l?ed|ed)?\b/.test(s)) return "cancelled";
-  if (/\bdelivered\b/.test(s)) return "delivered"; // plain delivered (RTO handled above)
+  if (/\bnot delivered\b|\bundelivered\b/.test(s)) return "in_transit";
+  if (/\bdelivered\b/.test(s)) return "delivered"; // plain delivered (returns handled above)
   if (/in transit|out for delivery|shipped|pickup|dispatch|ofd/.test(s)) return "in_transit";
   return null;
 }
@@ -195,15 +219,20 @@ export async function applyDeliveryStatuses(
     // which has just gained a return date must still be written, or the claim
     // clock would never arrive for the 21,392 RTOs already sitting terminal.
     //
-    // rtoReceivedAt is COALESCEd, never overwritten with null: once a courier
-    // has told us when a parcel came back, a later sync with a blank cell must
-    // not erase it.
+    // rtoReceivedAt is written for 'rto' ONLY, never 'rto_in_transit'. A return
+    // that is still moving has not reached our warehouse, so dating it would
+    // start the claim clock while the courier is still legitimately carrying
+    // the parcel — and a claim raised on a date the courier can disprove is
+    // worse than no claim at all.
+    //
+    // It is COALESCEd, never overwritten with null: once a courier has told us
+    // when a parcel came back, a later sync with a blank cell must not erase it.
     const res = await prisma.$executeRaw`
       UPDATE "OrderFinancials" AS o
       SET "deliveryStatus" = v.outcome,
           "deliveredAt" = CASE WHEN v.outcome = 'delivered' THEN ${now} ELSE NULL END,
           "rtoReceivedAt" = CASE
-            WHEN v.outcome IN ('rto', 'rto_in_transit')
+            WHEN v.outcome = 'rto'
               THEN COALESCE(v.delivered_at, o."rtoReceivedAt")
             ELSE o."rtoReceivedAt" END,
           "deliverySyncedAt" = ${now}
@@ -211,7 +240,7 @@ export async function applyDeliveryStatuses(
       WHERE o.shop = ${shop} AND o.awb = v.awb
         AND (
           o."deliveryStatus" IS DISTINCT FROM v.outcome
-          OR (v.outcome IN ('rto', 'rto_in_transit')
+          OR (v.outcome = 'rto'
               AND v.delivered_at IS NOT NULL
               AND o."rtoReceivedAt" IS NULL)
         )
