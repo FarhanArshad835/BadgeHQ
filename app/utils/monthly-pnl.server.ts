@@ -57,11 +57,13 @@ export type RevenueDelivered = {
   rtoOrders: number;
   cancelledOrders: number;
   abandonedOrders: number;
+  lostOrders: number;
   inTransitOrders: number;
   // Per-bucket order value (net-of-discount), for the funnel's value column.
   rtoRevenueMinor: bigint;
   cancelledRevenueMinor: bigint;
   abandonedRevenueMinor: bigint;
+  lostRevenueMinor: bigint;
   inTransitRevenueMinor: bigint;
   unresolvedOrders: number;
   deliveredPairs: number; // Σ qty on delivered orders
@@ -98,6 +100,7 @@ export async function revenueAndDelivered(shop: string, month: string): Promise<
   let rtoOrders = 0;
   let cancelledOrders = 0;
   let abandonedOrders = 0;
+  let lostOrders = 0;
   let inTransitOrders = 0;
   let unresolvedOrders = 0;
   let resolvedOrders = 0;
@@ -106,6 +109,7 @@ export async function revenueAndDelivered(shop: string, month: string): Promise<
   let rtoRevenueMinor = 0n;
   let cancelledRevenueMinor = 0n;
   let abandonedRevenueMinor = 0n;
+  let lostRevenueMinor = 0n;
   let inTransitRevenueMinor = 0n;
 
   for (const o of orders) {
@@ -129,10 +133,18 @@ export async function revenueAndDelivered(shop: string, month: string): Promise<
     } else if (oc === "abandoned") {
       abandonedOrders++;
       abandonedRevenueMinor += o.grossRevenueMinor;
+    } else if (oc === "lost") {
+      // Its own bucket. The courier has said the parcel is gone, so the outcome
+      // IS known and calling it "in transit / unknown" reads as a parcel still
+      // on its way. It is also already resolved for the resolution rate, so
+      // leaving it in the unknown bucket made the two disagree about one order.
+      lostOrders++;
+      lostRevenueMinor += o.grossRevenueMinor;
     } else {
-      // Catch-all so the five funnel buckets ALWAYS sum to placed: in_transit,
-      // no-awb, unknown, lost, and any future/unmapped status land here rather
-      // than vanishing (lost was previously counted nowhere).
+      // Catch-all so the funnel buckets ALWAYS sum to placed: in_transit,
+      // unknown, and any future/unmapped status land here rather than
+      // vanishing. Mostly 'unknown' — an order with no AWB that was PAID, so
+      // it is a missing tracking number rather than a parcel in motion.
       inTransitOrders++;
       inTransitRevenueMinor += o.grossRevenueMinor;
     }
@@ -158,11 +170,13 @@ export async function revenueAndDelivered(shop: string, month: string): Promise<
     rtoOrders,
     cancelledOrders,
     abandonedOrders,
+    lostOrders,
     inTransitOrders,
     // per-bucket value (net-of-discount)
     rtoRevenueMinor,
     cancelledRevenueMinor,
     abandonedRevenueMinor,
+    lostRevenueMinor,
     inTransitRevenueMinor,
     unresolvedOrders,
     deliveredPairs: 0, // filled by deliveredCogs (needs line rows) — set in computeMonth
@@ -468,12 +482,14 @@ export type MonthlyPnl = {
   rtoOrders: number;
   cancelledOrders: number;
   abandonedOrders: number;
+  lostOrders: number;
   inTransitOrders: number;
   // Per-bucket order value (net-of-discount) for the funnel's value column.
   deliveredRevenueMinor: bigint;
   rtoRevenueMinor: bigint;
   cancelledRevenueMinor: bigint;
   abandonedRevenueMinor: bigint;
+  lostRevenueMinor: bigint;
   inTransitRevenueMinor: bigint;
   deliveredPairs: number;
   // Per-delivered / per-pair metrics (null when netPnl is suppressed).
@@ -702,11 +718,13 @@ export async function computeMonth(shop: string, month: string): Promise<Monthly
     rtoOrders: rev.rtoOrders,
     cancelledOrders: rev.cancelledOrders,
     abandonedOrders: rev.abandonedOrders,
+    lostOrders: rev.lostOrders,
     inTransitOrders: rev.inTransitOrders,
     deliveredRevenueMinor: rev.deliveredRevenueMinor,
     rtoRevenueMinor: rev.rtoRevenueMinor,
     cancelledRevenueMinor: rev.cancelledRevenueMinor,
     abandonedRevenueMinor: rev.abandonedRevenueMinor,
+    lostRevenueMinor: rev.lostRevenueMinor,
     inTransitRevenueMinor: rev.inTransitRevenueMinor,
     deliveredPairs: cogs.deliveredPairs,
     netPnlPerDeliveredOrderMinor: perDelOrder(netPnlMinor),

@@ -37,7 +37,8 @@ const EXPLAIN = {
   rto: "Returned To Origin: shipped but refused or undeliverable, so it came back. You pay freight both ways and earn nothing.",
   cancelled: "Cancelled before dispatch.",
   abandoned: "Never paid for.",
-  inTransit: "Still on its way, or the carrier has not reported an outcome yet.",
+  inTransit: "Still on its way, or shipped without a tracking number being recorded, so no carrier can report on it.",
+  lost: "The carrier says the parcel is gone. Terminal: the stock is written off and never came back.",
   deliveredPairs: "Total items (not orders) delivered — an order can contain several.",
   returns: "Return requests raised against this month's orders.",
   exchanges: "Exchange requests raised against this month's orders.",
@@ -169,7 +170,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     rto: ["rto", "rto_in_transit"],
     cancelled: ["cancelled"],
     abandoned: ["abandoned"],
-    intransit: ["in_transit", "no-awb", "unknown", "lost"], // the catch-all bucket
+    lost: ["lost"],
+    // The catch-all. "unknown" dominates it: an order with no AWB that WAS
+    // paid, so it is a missing tracking number rather than a parcel moving.
+    intransit: ["in_transit", "no-awb", "unknown"],
   };
   const drillStatus = url.searchParams.get("status") || "";
   let drillOrders: Array<{ name: string; id: string; status: string; created: string; awb: string }> | null = null;
@@ -279,6 +283,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       rtoOrders: r.rtoOrders,
       cancelledOrders: r.cancelledOrders,
       abandonedOrders: r.abandonedOrders,
+      lostOrders: r.lostOrders,
       inTransitOrders: r.inTransitOrders,
       deliveredPairs: r.deliveredPairs,
       // Per-bucket order value (for the funnel value column).
@@ -286,6 +291,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       rtoRevenue: s(r.rtoRevenueMinor),
       cancelledRevenue: s(r.cancelledRevenueMinor),
       abandonedRevenue: s(r.abandonedRevenueMinor),
+      lostRevenue: s(r.lostRevenueMinor),
       inTransitRevenue: s(r.inTransitRevenueMinor),
       // Placed value = net placed revenue (already computed above as netPlaced).
       // Per-delivered metrics.
@@ -373,6 +379,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       rtoOrders: c.rtoOrders,
       cancelledOrders: c.cancelledOrders,
       abandonedOrders: c.abandonedOrders,
+      lostOrders: c.lostOrders,
       inTransitOrders: c.inTransitOrders,
       deliveredPairs: c.deliveredPairs,
       netPlaced: s(c.netPlacedRevenueMinor),
@@ -380,6 +387,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       rtoRevenue: s(c.rtoRevenueMinor),
       cancelledRevenue: s(c.cancelledRevenueMinor),
       abandonedRevenue: s(c.abandonedRevenueMinor),
+      lostRevenue: s(c.lostRevenueMinor),
       inTransitRevenue: s(c.inTransitRevenueMinor),
       resolutionRate: c.resolutionRate,
       deliveredShareOfPlaced: c.deliveredShareOfPlaced,
@@ -537,7 +545,8 @@ const DRILL_LABELS: Record<string, string> = {
   rto: "RTO",
   cancelled: "Cancelled",
   abandoned: "Abandoned",
-  intransit: "In transit / unknown",
+  lost: "Lost",
+  intransit: "Unknown / no tracking",
 };
 
 export default function PnlDashboard() {
@@ -861,8 +870,9 @@ of which ${fmt(r.deliveredRevenue)} delivered`} value={fmt(r.grossSale)} strong
                     <Row label="RTO" explain={EXPLAIN.rto} value={String(r.rtoOrders)} value2={fmt(r.rtoRevenue)} to={drill("rto")} active={d.drillStatus === "rto"} />
                     <Row label="Cancelled" explain={EXPLAIN.cancelled} value={String(r.cancelledOrders)} value2={fmt(r.cancelledRevenue)} to={drill("cancelled")} active={d.drillStatus === "cancelled"} />
                     <Row label="Abandoned" explain={EXPLAIN.abandoned} value={String(r.abandonedOrders)} value2={fmt(r.abandonedRevenue)} to={drill("abandoned")} active={d.drillStatus === "abandoned"} />
-                    <Row label="In transit / unknown" explain={EXPLAIN.inTransit} value={String(r.inTransitOrders)} value2={fmt(r.inTransitRevenue)} to={drill("intransit")} active={d.drillStatus === "intransit"} />
-                    {/* The five outcome lines sum to Placed by construction. */}
+                    <Row label="Lost" explain={EXPLAIN.lost} value={String(r.lostOrders)} value2={fmt(r.lostRevenue)} to={drill("lost")} active={d.drillStatus === "lost"} />
+                    <Row label="Unknown / no tracking" explain={EXPLAIN.inTransit} value={String(r.inTransitOrders)} value2={fmt(r.inTransitRevenue)} to={drill("intransit")} active={d.drillStatus === "intransit"} />
+                    {/* The six outcome lines sum to Placed by construction. */}
                     <Row
                       label="Delivered items (pairs)"
                       value={String(r.deliveredPairs)}
