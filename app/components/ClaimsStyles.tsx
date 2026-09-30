@@ -204,5 +204,21 @@ const CSS = String.raw`
     .claims-app .act { height: 22px; padding: 0 7px; font-size: 11px; }
     .claims-app .footer { font-size: 11px; }
   }
-
+  /* Sortable headers. Added on top of the prototype rather than editing its
+     rules, so its own CSS stays byte-identical. The button inherits the th's
+     type and colour, so a sortable header looks exactly like a static one
+     until it is active. */
+  .claims-app th button.sort {
+    background: none; border: 0; padding: 0; margin: 0;
+    font: inherit; color: inherit; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 4px;
+  }
+  .claims-app th.num button.sort { flex-direction: row-reverse; }
+  .claims-app th button.sort:hover { color: var(--ink); }
+  .claims-app th button.sort[aria-sort="ascending"],
+  .claims-app th button.sort[aria-sort="descending"] { color: var(--ink); font-weight: 500; }
+  .claims-app th button.sort .arrow { opacity: 0; font-size: 10px; }
+  .claims-app th button.sort:hover .arrow { opacity: .45; }
+  .claims-app th button.sort[aria-sort="ascending"] .arrow,
+  .claims-app th button.sort[aria-sort="descending"] .arrow { opacity: 1; }
 `;

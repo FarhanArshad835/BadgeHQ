@@ -148,7 +148,10 @@ export default function Claims() {
   const [carrier, setCarrier] = useState("");
   const [step, setStep] = useState("");
   const [claimWindow, setClaimWindow] = useState(60);
-  const [sort, setSort] = useState("old");
+  // The sort dropdown and the column headers set the same state, so they can
+  // never disagree about what the table is showing.
+  const [sortCol, setSortCol] = useState<"days" | "cost" | "order" | "carrier" | "delivered">("days");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(0);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [popOpen, setPopOpen] = useState(false);
@@ -184,11 +187,25 @@ export default function Claims() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    const sorters: Record<string, (a: ClaimRow, b: ClaimRow) => number> = {
-      old: (a, b) => b.days - a.days,
-      new: (a, b) => a.days - b.days,
-      // Unknown cost sorts last: it is absent data, not a low number.
-      cost: (a, b) => (b.cost ?? -1) - (a.cost ?? -1),
+    const sign = sortDir === "asc" ? 1 : -1;
+    const cmp = (a: ClaimRow, b: ClaimRow) => {
+      switch (sortCol) {
+        case "cost":
+          // Unknown cost sorts last in BOTH directions: it is absent data, not
+          // a low number, and letting it lead would misrepresent it.
+          if (a.cost == null || b.cost == null) {
+            return (a.cost == null ? 1 : 0) - (b.cost == null ? 1 : 0);
+          }
+          return sign * (a.cost - b.cost);
+        case "order":
+          return sign * a.order.localeCompare(b.order, undefined, { numeric: true });
+        case "carrier":
+          return sign * a.carrier.localeCompare(b.carrier);
+        case "delivered":
+          return sign * a.delivered.localeCompare(b.delivered);
+        default:
+          return sign * (a.days - b.days);
+      }
     };
     return rows
       .filter(
@@ -198,9 +215,50 @@ export default function Claims() {
           (!step || nextStep(r) === step) &&
           (!q || r.order.toLowerCase().includes(q) || r.awb.toLowerCase().includes(q)),
       )
-      .sort(sorters[sort]);
+      .sort(cmp);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, search, carrier, step, sort, age, custom, claimWindow]);
+  }, [rows, search, carrier, step, sortCol, sortDir, age, custom, claimWindow]);
+
+  /**
+   * A sortable header.
+   *
+   * Clicking the active column flips direction; clicking another starts it
+   * descending — "most days waiting" and "highest cost" are what someone
+   * chasing claims wants on the first click.
+   */
+  const SortTh = ({
+    col,
+    label,
+    num,
+  }: {
+    col: typeof sortCol;
+    label: string;
+    num?: boolean;
+  }) => {
+    const active = sortCol === col;
+    return (
+      <th className={num ? "num" : undefined}>
+        <button
+          type="button"
+          className="sort"
+          aria-sort={active ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
+          onClick={() => {
+            if (active) setSortDir(sortDir === "desc" ? "asc" : "desc");
+            else {
+              setSortCol(col);
+              setSortDir("desc");
+            }
+            setPage(0);
+          }}
+        >
+          {label}
+          <span className="arrow" aria-hidden>
+            {active && sortDir === "asc" ? "▲" : "▼"}
+          </span>
+        </button>
+      </th>
+    );
+  };
 
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const pageIdx = Math.min(page, pages - 1);
@@ -521,7 +579,16 @@ export default function Claims() {
                 setPage(0);
               }}
             />
-            <select aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value)}>
+            <select
+              aria-label="Sort"
+              value={sortCol === "days" && sortDir === "desc" ? "old" : sortCol === "days" ? "new" : "cost"}
+              onChange={(e) => {
+                const v = e.target.value;
+                setSortCol(v === "cost" ? "cost" : "days");
+                setSortDir(v === "new" ? "asc" : "desc");
+                setPage(0);
+              }}
+            >
               <option value="old">Oldest first</option>
               <option value="new">Newest first</option>
               <option value="cost">Highest cost</option>
@@ -579,11 +646,11 @@ export default function Claims() {
                     }}
                   />
                 </th>
-                <th>Order</th>
-                <th>Carrier</th>
-                <th>Marked delivered</th>
-                <th className="num">Days</th>
-                <th className="num">Stock cost</th>
+                <SortTh col="order" label="Order" />
+                <SortTh col="carrier" label="Carrier" />
+                <SortTh col="delivered" label="Marked delivered" />
+                <SortTh col="days" label="Days" num />
+                <SortTh col="cost" label="Stock cost" num />
                 <th>Next step</th>
                 <th />
               </tr>
