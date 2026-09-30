@@ -66,10 +66,13 @@ export type RevenueDelivered = {
   lostRevenueMinor: bigint;
   inTransitRevenueMinor: bigint;
   unresolvedOrders: number;
+  /** No AWB and no terminal outcome: can never resolve, so held out of the rate. */
+  noTrackingOrders: number;
+  noTrackingRevenueMinor: bigint;
   deliveredPairs: number; // Σ qty on delivered orders
   // Health (spec gates, as signals not hard blocks).
   resolvedOrders: number;
-  resolutionRate: number; // resolved / placed
+  resolutionRate: number; // resolved / (placed - untrackable)
   deliveredShareOfPlaced: number; // deliveredRevenue / netPlaced
 };
 
@@ -89,6 +92,9 @@ export async function revenueAndDelivered(shop: string, month: string): Promise<
       refundsMinor: true,
       discountsMinor: true,
       deliveryStatus: true,
+      // Needed to tell a parcel that is genuinely moving from an order that
+      // has no tracking number at all and therefore can never resolve.
+      awb: true,
     },
   });
 
@@ -104,6 +110,8 @@ export async function revenueAndDelivered(shop: string, month: string): Promise<
   let inTransitOrders = 0;
   let unresolvedOrders = 0;
   let resolvedOrders = 0;
+  let noTrackingOrders = 0;
+  let noTrackingRevenueMinor = 0n;
   // Per-bucket order value (net-of-discount), so the funnel can show a value
   // column next to each count. Delivered value is deliveredRevenueMinor above.
   let rtoRevenueMinor = 0n;
@@ -150,6 +158,19 @@ export async function revenueAndDelivered(shop: string, month: string): Promise<
     }
     if (oc === "unresolved") unresolvedOrders++;
     if (isResolvedOutcome(oc)) resolvedOrders++;
+    // An order with no tracking number and no terminal outcome can never
+    // resolve: nothing will ever report on it, so it would sit in the
+    // denominator for ever and hold the month below the gate permanently.
+    // It is held OUT of the rate rather than counted as resolved — the outcome
+    // is genuinely unknown, and calling it known would be a false claim.
+    // Unpaid/never-shipped orders are already 'abandoned' and resolved above,
+    // so what lands here is a PAID order whose tracking number was never
+    // recorded. It stays visible as its own count so the gap gets fixed
+    // rather than absorbed.
+    if (!o.awb && !isResolvedOutcome(oc)) {
+      noTrackingOrders++;
+      noTrackingRevenueMinor += o.grossRevenueMinor;
+    }
   }
 
   const placedOrders = orders.length;
@@ -181,7 +202,15 @@ export async function revenueAndDelivered(shop: string, month: string): Promise<
     unresolvedOrders,
     deliveredPairs: 0, // filled by deliveredCogs (needs line rows) — set in computeMonth
     resolvedOrders,
-    resolutionRate: placedOrders ? resolvedOrders / placedOrders : 0,
+    noTrackingOrders,
+    noTrackingRevenueMinor,
+    // Denominator excludes the untrackable. Those orders cannot resolve by any
+    // route, so leaving them in would measure the tracking-data gap rather than
+    // whether the month has actually settled.
+    resolutionRate: (() => {
+      const base = placedOrders - noTrackingOrders;
+      return base > 0 ? resolvedOrders / base : placedOrders ? 0 : 0;
+    })(),
     deliveredShareOfPlaced: netPlacedRevenueMinor > 0n ? Number(deliveredRevenueMinor) / Number(netPlacedRevenueMinor) : 0,
   };
 }
@@ -505,6 +534,9 @@ export type MonthlyPnl = {
   cogsPerPairMinor: bigint | null;
   // Health + publish gate.
   resolutionRate: number;
+  /** Orders held out of the resolution rate for having no tracking number. */
+  noTrackingOrders: number;
+  noTrackingRevenueMinor: bigint;
   deliveredShareOfPlaced: number;
   cogsMatchRate: number;
   matured: boolean;
@@ -649,7 +681,13 @@ export async function computeMonth(shop: string, month: string): Promise<Monthly
   if (!resolved) {
     pendingReasons.push(
       `Delivery outcomes: only ${(rev.resolutionRate * 100).toFixed(1)}% of orders have resolved ` +
-        `(need ${(RESOLUTION_THRESHOLD * 100).toFixed(0)}%) — ${rev.placedOrders - rev.resolvedOrders} still in transit or unknown`,
+        `(need ${(RESOLUTION_THRESHOLD * 100).toFixed(0)}%) — ` +
+        `${rev.placedOrders - rev.noTrackingOrders - rev.resolvedOrders} still in transit` +
+        // Named separately: these are not waiting on a carrier, they are
+        // waiting on a tracking number, and they are not in the rate at all.
+        (rev.noTrackingOrders
+          ? `, plus ${rev.noTrackingOrders} with no tracking number (excluded)`
+          : ``),
     );
   }
 
@@ -735,6 +773,8 @@ export async function computeMonth(shop: string, month: string): Promise<Monthly
     freightPerPairMinor: perPair(freightMinor),
     cogsPerPairMinor: perPair(cogs.cogsMinor),
     resolutionRate: rev.resolutionRate,
+    noTrackingOrders: rev.noTrackingOrders,
+    noTrackingRevenueMinor: rev.noTrackingRevenueMinor,
     deliveredShareOfPlaced: rev.deliveredShareOfPlaced,
     cogsMatchRate: cogs.matchRate,
     matured,

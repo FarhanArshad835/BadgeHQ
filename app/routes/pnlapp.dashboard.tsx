@@ -42,7 +42,7 @@ const EXPLAIN = {
   deliveredPairs: "Total items (not orders) delivered — an order can contain several.",
   returns: "Return requests raised against this month's orders.",
   exchanges: "Exchange requests raised against this month's orders.",
-  resolutionRate: "How much of the month has reached a final outcome (delivered, RTO, or cancelled). Low means the month is still settling and the numbers will move.",
+  resolutionRate: "How much of the month has reached a final outcome (delivered, RTO, lost, cancelled or abandoned). Low means the month is still settling and the numbers will move. Orders with no tracking number are left out of this entirely: nothing can ever report on them, so counting them would measure missing tracking data rather than whether the month has settled.",
   deliveredShare: "Of everything ordered, the share that actually reached customers, by value. The rest was cancelled, returned or is still in transit.",
   adPerOrder: "Ad spend divided by delivered orders — what it cost in advertising to land one delivered order.",
   freightPerOrder: "Average freight billed per delivered order.",
