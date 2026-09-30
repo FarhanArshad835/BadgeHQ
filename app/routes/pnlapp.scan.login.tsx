@@ -17,7 +17,7 @@ import {
   makeSessionCookie,
   isAuthed,
 } from "../utils/pnl-app.server";
-import { PnlStyles } from "../utils/pnl-styles";
+import { ClaimsStyles } from "../components/ClaimsStyles";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (isAuthed(request, "scan")) return redirect("/pnl-app/scan/dispatch");
@@ -57,26 +57,25 @@ export default function ScanLogin() {
   const actionData = useActionData<typeof action>();
 
   return (
-    <div className="pnl" style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-      <PnlStyles />
-      <div className="pnl-panel" style={{ width: 380 }}>
-        <h1 className="pnl-h1" style={{ fontSize: 22 }}>Warehouse Scanner</h1>
-        <p className="pnl-sub" style={{ marginTop: 6, marginBottom: 22 }}>
+    <div className="claims-app login-app">
+      <ClaimsStyles />
+      <div className="login-card">
+        <h1>Warehouse Scanner</h1>
+        <p>
           {needsSetup
             ? "First time here. Set a password for the scanners."
             : "Enter the scanner password to continue."}
         </p>
-        <Form method="post" className="pnl-form">
+        <Form method="post">
           <input
-            className="pnl-input"
             type="password"
             name="password"
             placeholder={needsSetup ? "Create a password" : "Password"}
             autoComplete="current-password"
             autoFocus
           />
-          {actionData?.error && <div className="pnl-err">{actionData.error}</div>}
-          <button type="submit" className="pnl-btn pnl-btn-primary">
+          {actionData?.error && <div className="login-err">{actionData.error}</div>}
+          <button type="submit" className="btn-primary">
             {needsSetup ? "Set password and enter" : "Enter"}
           </button>
         </Form>

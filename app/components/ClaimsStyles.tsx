@@ -410,4 +410,44 @@ const CSS = String.raw`
   @media (max-width: 640px) {
     .claims-app .nav a { padding: 5px 10px; }
   }
+  /* ---------- History ---------- */
+  /* The scan count, sitting with the filters that produced it. */
+  .claims-app .hist-count { align-self: center; color: #555; white-space: nowrap; }
+  .claims-app .hist-count b { font-size: 18px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; margin-right: 3px; }
+  .claims-app .hist-count .sub { color: var(--muted); }
+  .claims-app .c-when, .claims-app .c-awb { font-variant-numeric: tabular-nums; }
+  .claims-app .c-awb { font-weight: 500; }
+  .claims-app .c-when { color: #555; }
+  .claims-app .top-right a.btn-primary, .claims-app .filters a.btn-primary {
+    text-decoration: none; display: inline-flex; align-items: center;
+  }
+
+  @media (max-width: 640px) {
+    /* The same card treatment the claims table gets: a five-column row does
+       not survive a phone, and a horizontal scrollbar is not an answer. */
+    .claims-app .hist-count { width: 100%; }
+    .claims-app .filters { grid-template-columns: 1fr 1fr auto; }
+    .claims-app .table-card tbody tr {
+      grid-template-columns: 1fr auto;
+      grid-template-areas: "awb res" "order when";
+      row-gap: 2px;
+    }
+    .claims-app .c-awb { grid-area: awb; }
+    .claims-app .c-order { grid-area: order; font-size: 12px; color: #555; }
+    .claims-app .c-when { grid-area: when; font-size: 12px; text-align: right; }
+    .claims-app .c-res { grid-area: res; text-align: right; }
+    .claims-app .c-kind { display: none; }
+  }
+  /* ---------- Scanner login ---------- */
+  .claims-app.login-app { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
+  .claims-app .login-card { width: 380px; max-width: 100%; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 22px; }
+  .claims-app .login-card h1 { font-size: 20px; margin: 0; letter-spacing: -0.01em; }
+  .claims-app .login-card p { color: var(--muted); margin: 6px 0 20px; line-height: 1.5; }
+  .claims-app .login-card form { display: grid; gap: 10px; }
+  .claims-app .login-card input {
+    height: 44px; padding: 0 12px; font-size: 16px;   /* 16px stops iOS zooming */
+    background: var(--surface); border: 1px solid var(--line-strong); border-radius: 8px;
+  }
+  .claims-app .login-card .btn-primary { height: 44px; }
+  .claims-app .login-err { color: #b42318; font-size: 13px; }
 `;
