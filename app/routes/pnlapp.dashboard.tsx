@@ -661,6 +661,11 @@ of which ${fmt(c.deliveredRevenue)} delivered`;
         <div className="pnl-head">
           <h1 className="pnl-h1">Profit &amp; Loss</h1>
           <div className="pnl-headlinks">
+            {/* The scanners are behind their own password and the scan_session
+                cookie is scoped to /pnl-app/scan, so this lands on the scanner
+                login unless that cookie is already held. Deliberately not
+                labelled as if it opened the scanners directly. */}
+            <a className="pnl-link" href="/pnl-app/scan/dispatch">Warehouse scanners</a>
             <a className="pnl-link" href="/pnl-app/settings">Settings</a>
             <a className="pnl-link" href="/pnl-app/logout">Log out</a>
           </div>
