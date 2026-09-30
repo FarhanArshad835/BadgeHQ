@@ -147,18 +147,67 @@ export function ScanPad({
     return () => clearTimeout(t);
   }, [panel.state, panel.awb, dismiss]);
 
-  // The gun types into whatever has focus, so the input must never lose it.
-  const refocus = useCallback(() => inputRef.current?.focus(), []);
+  // The gun types into whatever has focus, so the input must hold it — but not
+  // at the cost of every other control on the page. Stealing focus back from a
+  // textarea the operator has deliberately clicked makes that field unusable:
+  // a pasted list lands in the scan box instead, where the whole list is read
+  // as one barcode.
+  const stealsFocusFrom = (el: Element | null) =>
+    !el ||
+    el === document.body ||
+    !(
+      el.tagName === "INPUT" ||
+      el.tagName === "TEXTAREA" ||
+      el.tagName === "SELECT" ||
+      el.tagName === "BUTTON" ||
+      el.tagName === "A" ||
+      (el as HTMLElement).isContentEditable
+    );
+
+  const refocus = useCallback(() => {
+    if (!stealsFocusFrom(document.activeElement)) return;
+    inputRef.current?.focus();
+  }, []);
+
   useEffect(() => {
-    refocus();
+    inputRef.current?.focus();
     const t = setInterval(refocus, 1500);
     return () => clearInterval(t);
   }, [refocus]);
 
   const submit = useCallback(
     async (raw: string) => {
+      // A list pasted here is not a barcode. Without this the separators are
+      // stripped and several AWBs are recorded as one impossible code, which
+      // then has to be deleted by hand. Say so instead of filing it.
+      if (/[\n\r\t,;]/.test(raw.trim())) {
+        setPanel({
+          state: "error",
+          awb: "",
+          kind: "",
+          confident: true,
+          message: "That looks like a list. Use “Paste a list of AWBs” below instead.",
+        });
+        beep("error");
+        return;
+      }
+
       const awb = raw.replace(/[^0-9a-zA-Z]/g, "");
       if (awb.length < 6) return;
+
+      // A real AWB is ~11-16 characters. Much longer means several were run
+      // together by a paste that lost its separators.
+      if (awb.length > 24) {
+        setPanel({
+          state: "error",
+          awb: awb.slice(0, 24) + "…",
+          kind: "",
+          confident: true,
+          message: "Too long for one AWB — looks like several joined together. Use the paste box below.",
+        });
+        beep("error");
+        return;
+      }
 
       // Answer locally where we can, so the common case has no latency at all.
       const localBlocked = kind === "dispatch" && dispatchedSet.current.has(awb);
@@ -334,7 +383,9 @@ export function ScanPad({
           (e.target as HTMLInputElement).value = "";
           void submit(v);
         }}
-        onBlur={refocus}
+        // Deferred: at blur time the new target is not focused yet, so checking
+        // immediately would always look like focus went nowhere and pull it back.
+        onBlur={() => setTimeout(refocus, 0)}
       />
 
       <div className="pnl-scan-list">
