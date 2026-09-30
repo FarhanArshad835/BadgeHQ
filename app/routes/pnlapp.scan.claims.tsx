@@ -26,7 +26,12 @@ import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData, useSearchParams, useNavigation } from "@remix-run/react";
 import { getPnlApp, isAuthed } from "../utils/pnl-app.server";
-import { claimCandidates, returnClaimCandidates, scanCountsToday } from "../utils/scan.server";
+import {
+  claimCandidates,
+  returnClaimCandidates,
+  scanCountsToday,
+  type ClaimSort,
+} from "../utils/scan.server";
 import { PnlStyles } from "../utils/pnl-styles";
 import { ScanNav } from "../components/ScanNav";
 import { ScanProgressBar } from "../components/ScanProgressBar";
@@ -73,10 +78,17 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const days = DAY_VALUES.includes(requested) ? requested : 7;
   const t = url.searchParams.get("tab");
   const tab: Tab = TABS.includes(t as Tab) ? (t as Tab) : "rto";
+  const rawSort = url.searchParams.get("sort") || "";
+  const sort = (["days", "value", "cost", "order", "carrier"].includes(rawSort)
+    ? rawSort
+    : "days") as ClaimSort;
+  const dir = url.searchParams.get("dir") === "asc" ? "asc" : "desc";
 
   const EMPTY = {
     tab,
     days,
+    sort,
+    dir,
     counts: {} as Record<string, number>,
     rows: [] as any[],
     totalRows: 0,
@@ -122,7 +134,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     });
   }
 
-  const res = await claimCandidates(shop, days);
+  const res = await claimCandidates(shop, days, sort, dir);
 
   if (url.searchParams.get("format") === "csv") {
     const rupee = (v: string | null) => (v == null ? "" : (Number(v) / 100).toFixed(2));
@@ -170,7 +182,44 @@ export default function Claims() {
   const isReturns = d.tab === "returns";
 
   const go = (next: Record<string, string>) =>
-    setParams({ tab: d.tab, days: String(d.days), ...next });
+    setParams({ tab: d.tab, days: String(d.days), sort: d.sort, dir: d.dir, ...next });
+
+  /**
+   * A sortable header.
+   *
+   * Sorting happens on the server over the WHOLE result, not the 500 rows on
+   * screen — "highest value" has to mean highest of all of them, or the
+   * control is misleading. Clicking the active column flips direction;
+   * clicking another starts it at descending, which is what someone chasing
+   * the biggest claims wants first.
+   */
+  const SortTh = ({ col, label, num }: { col: string; label: string; num?: boolean }) => {
+    const active = d.sort === col;
+    return (
+      <th className={num ? "pnl-num" : undefined}>
+        <button
+          type="button"
+          onClick={() => go({ sort: col, dir: active && d.dir === "desc" ? "asc" : "desc" })}
+          disabled={loading}
+          style={{
+            background: "none",
+            border: 0,
+            padding: 0,
+            font: "inherit",
+            color: "inherit",
+            cursor: "pointer",
+            fontWeight: active ? 700 : "inherit",
+          }}
+          aria-sort={active ? (d.dir === "asc" ? "ascending" : "descending") : "none"}
+        >
+          {label}
+          <span aria-hidden style={{ opacity: active ? 1 : 0.25, marginLeft: 4 }}>
+            {active && d.dir === "asc" ? "↑" : "↓"}
+          </span>
+        </button>
+      </th>
+    );
+  };
 
   return (
     <div className="pnl">
@@ -217,7 +266,7 @@ export default function Claims() {
           </span>
           <a
             className="pnl-btn"
-            href={`/pnl-app/scan/claims?tab=${d.tab}&days=${d.days}&format=csv`}
+            href={`/pnl-app/scan/claims?tab=${d.tab}&days=${d.days}&sort=${d.sort}&dir=${d.dir}&format=csv`}
           >
             Export for courier
           </a>
@@ -312,14 +361,14 @@ export default function Claims() {
                 <table className="pnl-table">
                   <thead>
                     <tr>
-                      <th>Order</th>
+                      <SortTh col="order" label="Order" />
                       <th>AWB</th>
-                      <th>Carrier</th>
+                      <SortTh col="carrier" label="Carrier" />
                       {isReturns && <th>Type</th>}
                       <th>{isReturns ? "Courier delivered" : "RTO received"}</th>
-                      <th className="pnl-num">Days</th>
-                      {!isReturns && <th className="pnl-num">Value</th>}
-                      {!isReturns && <th className="pnl-num">Stock cost</th>}
+                      <SortTh col="days" label="Days" num />
+                      {!isReturns && <SortTh col="value" label="Value" num />}
+                      {!isReturns && <SortTh col="cost" label="Stock cost" num />}
                     </tr>
                   </thead>
                   <tbody>

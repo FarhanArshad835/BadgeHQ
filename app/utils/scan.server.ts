@@ -71,7 +71,7 @@ export async function recordScan(
   shop: string,
   requested: ScanKind | "inbound",
   rawAwb: string,
-  opts: { note?: string; force?: boolean } = {},
+  opts: { note?: string; force?: boolean; session?: string } = {},
 ): Promise<ScanOutcome> {
   const awb = normaliseAwb(rawAwb);
   // "inbound" means the operator scanned a returning parcel without saying
@@ -138,7 +138,7 @@ export async function recordScan(
       where: { shop_awb: { shop, awb } },
     });
     if (sent && !opts.force) {
-      await writeScan(shop, kind, awb, "", "blocked", opts.note || "already dispatched");
+      await writeScan(shop, kind, awb, "", "blocked", opts.note || "already dispatched", opts.session || "");
       return {
         ...base,
         result: "blocked",
@@ -194,7 +194,7 @@ export async function recordScan(
   }
 
   const result: ScanResult = orderName ? "ok" : "not-found";
-  await writeScan(shop, kind, awb, orderName, result, opts.note || (fromSheet ? "order from sheet" : ""));
+  await writeScan(shop, kind, awb, orderName, result, opts.note || (fromSheet ? "order from sheet" : ""), opts.session || "");
 
   return {
     ...base,
@@ -231,6 +231,7 @@ export async function recordScanBulk(
   shop: string,
   requested: ScanKind | "inbound",
   rawList: string,
+  session = "",
 ): Promise<{
   results: ScanOutcome[];
   counts: Record<string, number>;
@@ -260,7 +261,7 @@ export async function recordScanBulk(
   const results: ScanOutcome[] = [];
   const counts: Record<string, number> = {};
   for (const awb of work) {
-    const outcome = await recordScan(shop, requested, awb);
+    const outcome = await recordScan(shop, requested, awb, { session });
     results.push(outcome);
     counts[outcome.result] = (counts[outcome.result] || 0) + 1;
   }
@@ -403,8 +404,9 @@ async function writeScan(
   orderName: string,
   result: ScanResult,
   note: string,
+  session = "",
 ): Promise<void> {
-  const data = { orderName, result, note, scannedAt: new Date() };
+  const data = { orderName, result, note, session, scannedAt: new Date() };
   await prisma.scanEvent.upsert({
     where: { shop_kind_awb: { shop, kind, awb } },
     create: { shop, kind, awb, ...data },
@@ -610,6 +612,43 @@ async function loadSheetAwbMap(url: string): Promise<Map<string, string>> {
   return _sheetLoading;
 }
 
+
+/**
+ * Sessions on this scanner, newest first, with what is in each.
+ *
+ * A session is just a name on a scan, not a row of its own — so it cannot get
+ * out of step with the scans it holds, and deleting one is impossible by
+ * construction. Reopening one means filtering on that name.
+ */
+export async function listSessions(
+  shop: string,
+  kind: ScanKind,
+): Promise<Array<{ name: string; count: number; lastAt: string }>> {
+  const rows = await prisma.scanEvent.groupBy({
+    by: ["session"],
+    where: { shop, kind, session: { not: "" } },
+    _count: true,
+    _max: { scannedAt: true },
+    orderBy: { _max: { scannedAt: "desc" } },
+    take: 30,
+  });
+  return rows.map((r) => ({
+    name: r.session,
+    count: r._count,
+    lastAt: r._max.scannedAt ? r._max.scannedAt.toISOString() : "",
+  }));
+}
+
+/** The scans in one session, for reopening it on the bench. */
+export async function sessionScans(shop: string, kind: ScanKind, session: string) {
+  if (!session) return [];
+  return prisma.scanEvent.findMany({
+    where: { shop, kind, session },
+    orderBy: { scannedAt: "desc" },
+    take: 500,
+  });
+}
+
 /** Recent scans for the history page and the session list. */
 export async function recentScans(
   shop: string,
@@ -660,9 +699,14 @@ export async function scanCountsToday(shop: string): Promise<Record<string, numb
  * when a backfill ran). A claim sent on a made-up date is worse than a claim
  * not sent, so the count of undated rows is returned for the UI to show.
  */
+/** Columns the claims table can be ordered by. */
+export type ClaimSort = "days" | "value" | "cost" | "order" | "carrier";
+
 export async function claimCandidates(
   shop: string,
   graceDays: number,
+  sort: ClaimSort = "days",
+  dir: "asc" | "desc" = "desc",
 ): Promise<{
   rows: Array<{
     orderName: string;
@@ -744,6 +788,31 @@ export async function claimCandidates(
       revenueMinor: r.grossRevenueMinor.toString(),
       cogsMinor: r.cogsMinor == null ? null : r.cogsMinor.toString(),
     }));
+
+  // Sorted over the WHOLE set, before the route trims to 500. Sorting only the
+  // visible page would reorder an arbitrary slice and call it "the highest
+  // value", which is worse than not offering the control at all.
+  const sign = dir === "asc" ? 1 : -1;
+  const num = (v: string | null) => (v == null ? -1 : Number(v));
+  rows.sort((a, b) => {
+    switch (sort) {
+      case "value":
+        return sign * (num(a.revenueMinor) - num(b.revenueMinor));
+      case "cost":
+        // Unknown cost sorts last in either direction: it is absent data, not
+        // a low number, and letting it lead a descending list would be a lie.
+        if (a.cogsMinor == null || b.cogsMinor == null) {
+          return (a.cogsMinor == null ? 1 : 0) - (b.cogsMinor == null ? 1 : 0);
+        }
+        return sign * (num(a.cogsMinor) - num(b.cogsMinor));
+      case "order":
+        return sign * a.orderName.localeCompare(b.orderName, undefined, { numeric: true });
+      case "carrier":
+        return sign * (a.carrier || "￿").localeCompare(b.carrier || "￿");
+      default:
+        return sign * (a.daysOld - b.daysOld);
+    }
+  });
 
   let totalCogsMinor = 0n;
   let totalRevenueMinor = 0n;
