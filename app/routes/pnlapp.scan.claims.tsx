@@ -40,10 +40,10 @@ import { ScanProgressBar } from "../components/ScanProgressBar";
  * parcels; saying so directly is the whole job of the label.
  */
 const DAY_OPTIONS = [
-  { days: 7, label: "Missing over 1 week", note: "most parcels, some may still turn up" },
-  { days: 14, label: "Missing over 2 weeks", note: "fewer, and harder for a courier to dispute" },
-  { days: 30, label: "Missing over 1 month", note: "" },
-  { days: 45, label: "Missing over 6 weeks", note: "the strongest claims" },
+  { days: 7, label: "Courier marked RTO over 7 days ago" },
+  { days: 14, label: "Courier marked RTO over 14 days ago" },
+  { days: 30, label: "Courier marked RTO over 30 days ago" },
+  { days: 45, label: "Courier marked RTO over 45 days ago" },
 ];
 const DAY_VALUES = DAY_OPTIONS.map((o) => o.days);
 const TABS = ["rto", "returns"] as const;
@@ -208,10 +208,10 @@ export default function Claims() {
               </option>
             ))}
           </select>
-          {/* What the choice actually means, so the dropdown does not have to
-              be decoded before it can be used. */}
+          {/* The full question, spelled out. The dropdown only sets the "how
+              long ago" part of it. */}
           <span className="pnl-sub" style={{ fontSize: 12.5 }}>
-            {DAY_OPTIONS.find((o) => o.days === d.days)?.note}
+            …and still not scanned physically
           </span>
           <a
             className="pnl-btn"
@@ -227,7 +227,7 @@ export default function Claims() {
             unscanned={d.totalRows}
             undated={isReturns ? 0 : d.undated}
             graceDays={d.days}
-            noun={isReturns ? "collected and delivered" : "returned"}
+            noun={isReturns ? "returned by the customer" : "RTO"}
           />
         )}
 

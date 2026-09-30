@@ -44,16 +44,18 @@ export function ScanProgressBar({
 
   return (
     <div className="pnl-panel" style={{ marginBottom: 14 }}>
-      <div className="pnl-section-label">Stock the courier says we have</div>
+      {/* The same words as the filter above it, so the two read as one
+          statement instead of two descriptions of the same thing. */}
+      <div className="pnl-section-label">
+        Marked {noun} over {graceDays} days ago, never scanned physically
+      </div>
 
-      {/* The headline is a sentence, not a caption: the number, then what it
-          means, in the order someone reads it. */}
       <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginTop: 10, flexWrap: "wrap" }}>
         <div style={{ fontSize: 34, fontWeight: 700, lineHeight: 1.1 }}>{fmt(unscanned)}</div>
         <div style={{ fontSize: 15 }}>
-          parcels are missing.{" "}
+          parcels <strong>never arrived</strong> as far as we can tell.{" "}
           <span className="pnl-sub">
-            The courier {noun} them over {graceDays} days ago and nobody here has seen them.
+            {fmt(scanned)} of the {fmt(total)} were found on the bench.
           </span>
         </div>
       </div>
