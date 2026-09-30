@@ -18,6 +18,17 @@ import bhq from "../db.server";
 const JM_DOMAIN = "b03304.myshopify.com";
 
 let _client: PrismaClient | null = null;
+/**
+ * One connect promise, shared by every caller.
+ *
+ * Prisma connects lazily on first query, and several scans arriving at once
+ * each got the same un-connected client and raced that startup — the losers
+ * threw "Engine is not yet connected" and the page reported ReturnHQ as
+ * unreachable when it was perfectly healthy. Awaiting one shared promise means
+ * the first caller starts the engine and the rest wait for it.
+ */
+let _connecting: Promise<PrismaClient | null> | null = null;
+
 function returnHqClient(): PrismaClient | null {
   const url = process.env.RETURNHQ_DATABASE_URL;
   if (!url) return null;
@@ -25,6 +36,23 @@ function returnHqClient(): PrismaClient | null {
     _client = new PrismaClient({ datasources: { db: { url } } });
   }
   return _client;
+}
+
+/** The client, guaranteed connected. Every query path must use this. */
+async function returnHqReady(): Promise<PrismaClient | null> {
+  const db = returnHqClient();
+  if (!db) return null;
+  if (!_connecting) {
+    _connecting = db
+      .$connect()
+      .then(() => db)
+      .catch((e) => {
+        // Let the next caller try again rather than caching the failure.
+        _connecting = null;
+        throw e;
+      });
+  }
+  return _connecting;
 }
 
 let _shopIdCache: number | null | undefined;
@@ -72,7 +100,7 @@ export async function refreshReturnHqCache(): Promise<{
   skipped?: number; // requests whose order isn't synced, so they count nowhere
   total?: number;
 }> {
-  const db = returnHqClient();
+  const db = await returnHqReady();
   if (!db) return { ok: false, months: 0 };
   try {
     const shopId = await jmShopId(db);
@@ -153,7 +181,7 @@ export async function returnHqByOrder(
   const out = new Map<string, { type: string; status: string }>();
   if (!orderNames.length) return out;
 
-  const db = returnHqClient();
+  const db = await returnHqReady();
   if (!db) return out;
   try {
     const shopId = await jmShopId(db);
@@ -246,7 +274,7 @@ export async function unconfirmedReturns(
   inFlight: number;
   available: boolean;
 }> {
-  const db = returnHqClient();
+  const db = await returnHqReady();
   if (!db) return { rows: [], inFlight: 0, available: false };
   try {
     const shopId = await jmShopId(db);
@@ -331,7 +359,7 @@ export async function returnHqByReverseAwb(awb: string): Promise<{
   type: string;
   status: string;
 } | null> {
-  const db = returnHqClient();
+  const db = await returnHqReady();
   if (!db) return null;
   const clean = String(awb || "").replace(/[^0-9a-zA-Z]/g, "").trim();
   if (clean.length < 6) return null;

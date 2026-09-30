@@ -250,9 +250,9 @@ export default function Claims() {
 
         {isReturns && !d.available && (
           <div className="pnl-help" style={{ marginBottom: 14 }}>
-            <strong>ReturnHQ is not reachable right now</strong>, so this list could not be built.
-            An empty list here means nothing until it is. The RTO tab reads from our own database
-            and is unaffected.
+            <strong>This list could not be built</strong>, so the 0 above is not a real count —
+            reload in a moment. Customer returns are the one part of this app that reads a second
+            database, and that read failed. The RTO tab uses our own data and is unaffected.
           </div>
         )}
 
