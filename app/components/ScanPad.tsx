@@ -137,18 +137,16 @@ export function ScanPad({
     dispatchedSet.current = new Set(dispatched || []);
   }, [dispatched]);
 
-  // A duplicate warning clears itself: the operator has set the packet aside
-  // and the next scan is often seconds away, but if they pause, a stale red
-  // panel from a minute ago is worse than an idle one. Escape clears it too.
   const dismiss = useCallback(
     () => setPanel({ state: "idle", awb: "", message: hint, kind: "", confident: true }),
     [hint],
   );
-  useEffect(() => {
-    if (panel.state !== "duplicate" && panel.state !== "blocked") return;
-    const t = setTimeout(dismiss, 6000);
-    return () => clearTimeout(t);
-  }, [panel.state, panel.awb, dismiss]);
+
+  // A refusal BLOCKS scanning until it is dismissed. It used to clear itself
+  // after six seconds, which is wrong for something the operator must act on:
+  // the packet has to come off the pile, and a gun firing the next barcode a
+  // second later would bury the warning before it was read.
+  const halted = panel.state === "duplicate" || panel.state === "blocked";
 
   // The gun types into whatever has focus, so the input must hold it — but not
   // at the cost of every other control on the page. Stealing focus back from a
@@ -168,6 +166,9 @@ export function ScanPad({
     );
 
   const refocus = useCallback(() => {
+    // A disabled input cannot hold focus, and trying is what would let the
+    // gun's next barcode land somewhere else on the page.
+    if (inputRef.current?.disabled) return;
     if (!stealsFocusFrom(document.activeElement)) return;
     inputRef.current?.focus();
   }, []);
@@ -334,6 +335,75 @@ export function ScanPad({
 
   return (
     <div className="pnl-scan">
+      {/* A refusal stops the bench. Rendered over the page rather than inline
+          so it cannot be scrolled past, and the dismiss button takes focus so
+          the gun's Enter clears it instead of firing a scan into nothing. */}
+      {halted && (
+        <div
+          role="alertdialog"
+          aria-modal="true"
+          aria-label={look.label}
+          onClick={() => { dismiss(); refocus(); }}
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 50,
+            background: "rgba(20,20,25,0.55)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 20,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: look.bg,
+              color: look.fg,
+              borderRadius: 10,
+              padding: "28px 32px",
+              maxWidth: 560,
+              width: "100%",
+              textAlign: "center",
+              boxShadow: "0 20px 60px rgba(0,0,0,0.35)",
+            }}
+          >
+            <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: "0.08em" }}>
+              {look.label}
+            </div>
+            <div
+              style={{
+                fontSize: 30,
+                fontWeight: 700,
+                margin: "10px 0",
+                fontVariantNumeric: "tabular-nums",
+                wordBreak: "break-all",
+              }}
+            >
+              {panel.awb}
+            </div>
+            <div style={{ fontSize: 15, marginBottom: 20 }}>{panel.message}</div>
+            <button
+              type="button"
+              autoFocus
+              className="pnl-btn"
+              onClick={() => { dismiss(); refocus(); }}
+              onKeyDown={(e) => {
+                // The gun sends Enter after a code. If it fires while this is
+                // open, dismissing is the right thing to do with it.
+                if (e.key === "Enter" || e.key === "Escape") {
+                  e.preventDefault();
+                  dismiss();
+                  refocus();
+                }
+              }}
+              style={{ fontSize: 16, padding: "10px 28px" }}
+            >
+              Set aside and carry on
+            </button>
+          </div>
+        </div>
+      )}
       <div className="pnl-scan-head">
         <h1 className="pnl-h1" style={{ fontSize: 20, margin: 0 }}>{title}</h1>
         <div className="pnl-scan-counts">
@@ -361,16 +431,6 @@ export function ScanPad({
         </div>
         <div className="pnl-scan-awb">{panel.awb || " "}</div>
         <div className="pnl-scan-msg">{panel.message}</div>
-        {(panel.state === "duplicate" || panel.state === "blocked") && (
-          <button
-            type="button"
-            className="pnl-btn"
-            onClick={() => { dismiss(); refocus(); }}
-            style={{ marginTop: 10 }}
-          >
-            Dismiss
-          </button>
-        )}
         {/* A signed-out operator should not have to know the URL. */}
         {panel.signedOut && (
           <a
@@ -386,7 +446,8 @@ export function ScanPad({
       <input
         ref={inputRef}
         className="pnl-scan-input"
-        placeholder="Scan a barcode"
+        disabled={halted}
+        placeholder={halted ? "Dismiss the warning to carry on" : "Scan a barcode"}
         autoComplete="off"
         autoCorrect="off"
         spellCheck={false}

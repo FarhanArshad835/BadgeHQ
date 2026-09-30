@@ -9,7 +9,7 @@ import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData, useSearchParams } from "@remix-run/react";
 import { getPnlApp, isAuthed } from "../utils/pnl-app.server";
-import { recentScans, scanCountsToday, type ScanKind } from "../utils/scan.server";
+import { recentScans, scanCountsToday, type ScanKind, type ScanResult } from "../utils/scan.server";
 import { PnlStyles } from "../utils/pnl-styles";
 import { ScanNav } from "../components/ScanNav";
 
@@ -23,13 +23,17 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (!isAuthed(request, "scan")) return redirect("/pnl-app/scan/login");
   const app = await getPnlApp();
   const shop = app.shopDomain;
-  if (!shop) return json({ rows: [], counts: {}, kind: "" });
+  if (!shop) return json({ rows: [], counts: {}, kind: "", result: "" });
 
   const url = new URL(request.url);
   const raw = url.searchParams.get("kind") || "";
   const kind = (["dispatch", "rto", "customer-return"].includes(raw) ? raw : null) as ScanKind | null;
+  const rawResult = url.searchParams.get("result") || "";
+  const result = (["ok", "not-found", "duplicate", "blocked"].includes(rawResult)
+    ? rawResult
+    : null) as ScanResult | null;
 
-  const rows = await recentScans(shop, kind, 500);
+  const rows = await recentScans(shop, kind, 500, result);
 
   if (url.searchParams.get("format") === "csv") {
     const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
@@ -50,7 +54,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     return new Response(csv, {
       headers: {
         "Content-Type": "text/csv; charset=utf-8",
-        "Content-Disposition": `attachment; filename="scans${kind ? "-" + kind : ""}.csv"`,
+        "Content-Disposition": `attachment; filename="scans${kind ? "-" + kind : ""}${result ? "-" + result : ""}.csv"`,
         "Cache-Control": "no-store",
       },
     });
@@ -60,6 +64,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   return json({
     counts,
     kind: kind || "",
+    result: result || "",
     rows: rows.map((r) => ({
       id: r.id,
       kind: r.kind,
@@ -90,6 +95,7 @@ export default function ScanHistory() {
     rows: Row[];
     counts: Record<string, number>;
     kind: string;
+    result: string;
   };
   const [params, setParams] = useSearchParams();
   const kind = params.get("kind") || "";
@@ -106,7 +112,10 @@ export default function ScanHistory() {
             value={kind}
             onChange={(e) => {
               const v = e.target.value;
-              setParams(v ? { kind: v } : {});
+              const next: Record<string, string> = {};
+              if (v) next.kind = v;
+              if (d.result) next.result = d.result;
+              setParams(next);
             }}
           >
             <option value="">All scans</option>
@@ -114,9 +123,28 @@ export default function ScanHistory() {
             <option value="rto">RTO received</option>
             <option value="customer-return">Customer return</option>
           </select>
+          {/* Result is its own axis: "which RTOs did not match an order" is a
+              question the kind list alone cannot ask. */}
+          <select
+            className="pnl-select"
+            value={d.result}
+            onChange={(e) => {
+              const v = e.target.value;
+              const next: Record<string, string> = {};
+              if (d.kind) next.kind = d.kind;
+              if (v) next.result = v;
+              setParams(next);
+            }}
+          >
+            <option value="">Any result</option>
+            <option value="ok">Matched an order</option>
+            <option value="not-found">Not found</option>
+            <option value="duplicate">Duplicate</option>
+            <option value="blocked">Blocked</option>
+          </select>
           <a
             className="pnl-btn"
-            href={`/pnl-app/scan/history?format=csv${kind ? `&kind=${kind}` : ""}`}
+            href={`/pnl-app/scan/history?format=csv${d.kind ? `&kind=${d.kind}` : ""}${d.result ? `&result=${d.result}` : ""}`}
           >
             Export CSV
           </a>

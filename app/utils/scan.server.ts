@@ -611,9 +611,16 @@ async function loadSheetAwbMap(url: string): Promise<Map<string, string>> {
 }
 
 /** Recent scans for the history page and the session list. */
-export async function recentScans(shop: string, kind: ScanKind | null, limit = 200) {
+export async function recentScans(
+  shop: string,
+  kind: ScanKind | null,
+  limit = 200,
+  /** Result is a separate axis from kind: "which RTOs did not match an order"
+   *  is a real question, and folding it into the kind list could not ask it. */
+  result: ScanResult | null = null,
+) {
   return prisma.scanEvent.findMany({
-    where: { shop, ...(kind ? { kind } : {}) },
+    where: { shop, ...(kind ? { kind } : {}), ...(result ? { result } : {}) },
     orderBy: { scannedAt: "desc" },
     take: limit,
   });
