@@ -1,96 +1,672 @@
 /**
- * The scanning surface: one input, one big verdict, one session list.
+ * The scanning surface, built to the approved prototype.
  *
- * Built for a bench, not a desk. A barcode gun types the code and presses Enter,
- * so the input must always hold focus and never need a click. The verdict panel
- * is large and colour-coded, with a distinct sound per outcome, because the
- * operator is looking at the packet and not the screen.
+ * Same markup, classes and behaviour: the verdict block that is a slim bar when
+ * idle and a full panel with a result, the tally with its pills, the session
+ * list with per-row retry, the paste box with chunked progress, and the modal
+ * that stops the bench on a refusal.
  *
- * Speed comes from answering locally first. The dispatched-AWB set is preloaded
- * (~3,000 codes, ~45KB), so "already dispatched" is decided with no network at
- * all; the server call still happens, and still has the final say, but the
- * operator has already seen a result.
+ * Built for a bench, not a desk. A barcode gun types the code and presses
+ * Enter, so the input must always hold focus and never need a click — and when
+ * it loses focus the page SAYS so, because a scanner that has silently stopped
+ * listening is worse than one that is visibly paused.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 
 export type ScanKind = "dispatch" | "rto" | "customer-return" | "inbound";
 
-export type ScanRow = {
+type RowStatus = "saving" | "ok" | "check" | "notfound" | "error";
+
+type Row = {
   awb: string;
-  result: string;
-  message: string;
-  orderName: string;
-  /** What the server decided this parcel is. Blank until it answers. */
-  kind: string;
-  at: string;
-  /** False until the server confirms. Never shown as a success. */
-  saved: boolean;
+  time: Date;
+  status: RowStatus;
+  order: string | null;
+  label: string;
+  fresh: boolean;
 };
 
-const KIND_LABEL: Record<string, string> = {
-  rto: "RTO",
-  "customer-return": "CUSTOMER RETURN",
-  dispatch: "DISPATCH",
+type Verdict = { cls: string; label: string; awb: string; msg: string };
+
+/** One sound per outcome, so the bench can work by ear. */
+const SOUNDS: Record<string, Array<[number, number, OscillatorType]>> = {
+  ok: [[1046, 0.09, "sine"]],
+  check: [
+    [1046, 0.09, "sine"],
+    [523, 0.2, "sine"],
+  ],
+  notfound: [
+    [784, 0.09, "sine"],
+    [1046, 0.09, "sine"],
+    [784, 0.09, "sine"],
+  ],
+  duplicate: [
+    [440, 0.13, "square"],
+    [440, 0.13, "square"],
+  ],
+  blocked: [[196, 0.6, "sawtooth"]],
+  error: [
+    [660, 0.13, "triangle"],
+    [440, 0.13, "triangle"],
+    [262, 0.32, "triangle"],
+  ],
 };
 
-const TONES: Record<string, { hz: number; ms: number; times: number }> = {
-  ok: { hz: 880, ms: 90, times: 1 },
-  duplicate: { hz: 320, ms: 160, times: 2 },
-  blocked: { hz: 180, ms: 300, times: 3 },
-  "not-found": { hz: 520, ms: 140, times: 2 },
-  error: { hz: 160, ms: 400, times: 1 },
-};
-
-/** A short tone per outcome, so the bench can work by ear. */
-function beep(kind: string) {
-  const tone = TONES[kind] || TONES.ok;
+let audioCtx: AudioContext | null = null;
+function play(name: string) {
   try {
     const Ctx = window.AudioContext || (window as any).webkitAudioContext;
     if (!Ctx) return;
-    const ctx = new Ctx();
-    for (let i = 0; i < tone.times; i++) {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.frequency.value = tone.hz;
-      const start = ctx.currentTime + i * (tone.ms + 60) / 1000;
-      gain.gain.setValueAtTime(0.2, start);
-      osc.start(start);
-      osc.stop(start + tone.ms / 1000);
+    audioCtx = audioCtx || new Ctx();
+    let t = audioCtx.currentTime;
+    for (const [f, d, type] of SOUNDS[name] || []) {
+      const o = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      o.type = type;
+      o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.22, t + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+      o.connect(g).connect(audioCtx.destination);
+      o.start(t);
+      o.stop(t + d + 0.02);
+      t += d + 0.04;
     }
-    setTimeout(() => ctx.close().catch(() => {}), tone.times * (tone.ms + 80) + 200);
   } catch {
     /* audio is a nicety; never let it break a scan */
   }
 }
 
-const PANEL: Record<string, { bg: string; fg: string; label: string }> = {
-  idle: { bg: "#f1f0ee", fg: "#52514e", label: "Ready" },
-  ok: { bg: "#1a7f37", fg: "#ffffff", label: "OK" },
-  duplicate: { bg: "#b1660a", fg: "#ffffff", label: "DUPLICATE" },
-  blocked: { bg: "#b42318", fg: "#ffffff", label: "STOP" },
-  "not-found": { bg: "#54308a", fg: "#ffffff", label: "RECORDED" },
-  error: { bg: "#b42318", fg: "#ffffff", label: "NOT SAVED" },
+const pad2 = (n: number) => String(n).padStart(2, "0");
+const fmtT = (d: Date) => `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+const fmtD = (d: Date) =>
+  d.toLocaleDateString("en-GB", { day: "numeric", month: "short" }) + " " + fmtT(d);
+const parseList = (t: string) =>
+  t
+    .split(/[\s,;]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+const RES_LABEL: Record<string, string> = {
+  saving: "Saving…",
+  error: "Not saved",
+  duplicate: "Duplicate",
+  blocked: "Stop — already dispatched",
 };
 
-/** Thrown when the action reports the scanner session has lapsed. */
-class SessionExpired extends Error {}
+export function ScanPad({
+  kind,
+  title,
+  hint,
+  help,
+  dispatched,
+  toolbar,
+}: {
+  kind: ScanKind;
+  title: string;
+  hint: string;
+  /** The explainer under the page. Markup, matching the prototype. */
+  help: React.ReactNode;
+  /** Preloaded already-dispatched AWBs. Empty for non-dispatch scanners. */
+  dispatched?: string[];
+  /** The dispatch page's sync strip, rendered above the title. */
+  toolbar?: React.ReactNode;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const textRef = useRef<HTMLTextAreaElement>(null);
+  const dismissRef = useRef<HTMLButtonElement>(null);
+
+  const [rows, setRows] = useState<Row[]>([]);
+  const [refused, setRefused] = useState(0);
+  const [verdict, setVerdict] = useState<Verdict>({ cls: "idle", label: "Ready", awb: "", msg: hint });
+  const [modal, setModal] = useState<{ type: string; label: string; awb: string; msg: string } | null>(null);
+  const [listening, setListening] = useState(true);
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [text, setText] = useState("");
+  const [bulk, setBulk] = useState<{
+    total: number;
+    done: number;
+    running: boolean;
+    stopped: boolean;
+    retry: string[];
+    results: Array<{ awb: string; result: string; label: string; order: string | null }>;
+  } | null>(null);
+  const [kbOn, setKbOn] = useState(false);
+
+  // A Set, built once: several thousand linear scans per keystroke would defeat
+  // the point of preloading the list at all.
+  const dispatchedSet = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    dispatchedSet.current = new Set(dispatched || []);
+  }, [dispatched]);
+
+  // Ignore a verdict from a scan the operator has already moved past.
+  const seq = useRef(0);
+  const modalAt = useRef(0);
+  const rowsRef = useRef<Row[]>([]);
+  rowsRef.current = rows;
+
+  const setV = useCallback((cls: string, label: string, awb: string, msg: string) => {
+    setVerdict({ cls, label, awb, msg });
+  }, []);
+
+  /* ---------- Focus: the scan box always listens ---------- */
+  const refocus = useCallback(() => {
+    if (modal) return;
+    const a = document.activeElement as HTMLElement | null;
+    const typing =
+      a &&
+      a !== inputRef.current &&
+      (a.tagName === "TEXTAREA" ||
+        a.tagName === "SELECT" ||
+        (a.tagName === "INPUT" && (a as HTMLInputElement).type !== "checkbox"));
+    if (!typing) inputRef.current?.focus({ preventScroll: true });
+    setListening(document.activeElement === inputRef.current);
+  }, [modal]);
+
+  useEffect(() => {
+    const onClick = () => setTimeout(refocus, 0);
+    const onFocusIn = () => setListening(document.activeElement === inputRef.current);
+    document.addEventListener("click", onClick);
+    document.addEventListener("focusin", onFocusIn);
+    window.addEventListener("focus", onClick);
+    const t = setInterval(() => {
+      if (!document.hidden) refocus();
+    }, 1500);
+    refocus();
+    return () => {
+      document.removeEventListener("click", onClick);
+      document.removeEventListener("focusin", onFocusIn);
+      window.removeEventListener("focus", onClick);
+      clearInterval(t);
+    };
+  }, [refocus]);
+
+  // Phones used with a Bluetooth gun keep the on-screen keyboard hidden.
+  useEffect(() => {
+    if (matchMedia("(pointer: coarse)").matches && inputRef.current) {
+      inputRef.current.inputMode = "none";
+    }
+  }, []);
+
+  /* ---------- Scanning ---------- */
+  function openModal(type: string, label: string, awb: string, msg: string) {
+    modalAt.current = Date.now();
+    setModal({ type, label, awb, msg });
+    setTimeout(() => dismissRef.current?.focus(), 0);
+  }
+
+  const closeModal = useCallback(() => {
+    // The gun sends a trailing Enter or CR-LF after the code. Without this the
+    // modal would dismiss itself before the operator had read a word of it.
+    if (Date.now() - modalAt.current < 400) return;
+    setModal(null);
+    setTimeout(() => inputRef.current?.focus(), 0);
+  }, []);
+
+  function refuse(type: string, code: string, msg: string, isBulk: boolean) {
+    setRefused((n) => n + 1);
+    const label = type === "blocked" ? "STOP" : "DUPLICATE";
+    if (!isBulk) {
+      setV(type, label, code, msg);
+      play(type);
+      openModal(type, label, code, msg);
+    }
+    return { result: type, label: RES_LABEL[type], order: null as string | null };
+  }
+
+  async function commit(row: Row, isBulk: boolean) {
+    const mySeq = ++seq.current;
+    setRows((rs) => rs.map((r) => (r.awb === row.awb ? { ...r, status: "saving" } : r)));
+    if (!isBulk) setV("checking", "Saving", row.awb, "");
+
+    try {
+      // Posts to the route's single-fetch .data endpoint, NOT the route path: a
+      // plain POST to the path is a DOCUMENT request, and Remix answers it with
+      // a full HTML page that res.json() then chokes on — reporting NOT SAVED
+      // for a scan that had in fact been recorded.
+      const res = await fetch(window.location.pathname + ".data", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ awb: row.awb, kind }),
+        credentials: "same-origin",
+      });
+      if (res.status === 401) throw new Error("unauthorized");
+      if (!res.ok) throw new Error(String(res.status));
+      const data = decodeTurboStream(await res.text());
+
+      const cls = data.result === "ok" ? (data.confident === false ? "check" : "ok") : data.result;
+      const status: RowStatus =
+        data.result === "not-found" ? "notfound" : data.confident === false ? "check" : "ok";
+      const label = listLabel(data);
+
+      setRows((rs) =>
+        rs.map((r) => (r.awb === row.awb ? { ...r, status, order: data.orderName || null, label } : r)),
+      );
+      if (!isBulk && mySeq === seq.current) {
+        setV(
+          status === "notfound" ? "notfound" : "ok",
+          verdictLabel(data),
+          row.awb,
+          data.message || "",
+        );
+        play(status === "notfound" ? "notfound" : status === "check" ? "check" : "ok");
+      }
+      return { result: data.result as string, label, order: (data.orderName || null) as string | null };
+    } catch {
+      setRows((rs) => rs.map((r) => (r.awb === row.awb ? { ...r, status: "error" } : r)));
+      if (!isBulk && mySeq === seq.current) {
+        setV(
+          "error",
+          "NOT SAVED",
+          row.awb,
+          "The save didn't reach the server. Put this packet aside, then press Retry or scan it again.",
+        );
+        play("error");
+      }
+      return { result: "error", label: "Not saved", order: null as string | null };
+    }
+  }
+
+  async function scan(raw: string, isBulk = false) {
+    const code = String(raw).trim().replace(/\s+/g, "");
+    if (!code) return null;
+    seq.current++;
+
+    const existing = rowsRef.current.find((r) => r.awb === code);
+    // Re-scanning a failed save is a retry, not a duplicate.
+    if (existing && existing.status === "error") return commit(existing, isBulk);
+    if (existing) {
+      return refuse(
+        "duplicate",
+        code,
+        `Already scanned at ${fmtT(existing.time)} this session. Take this packet off the pile.`,
+        isBulk,
+      );
+    }
+    // Answered locally, so the commonest rejection costs no network at all.
+    if (kind === "dispatch" && dispatchedSet.current.has(code)) {
+      return refuse(
+        "blocked",
+        code,
+        "Already dispatched. Take this packet off the pile — don't send it again.",
+        isBulk,
+      );
+    }
+
+    const row: Row = { awb: code, time: new Date(), status: "saving", order: null, label: "", fresh: !isBulk };
+    rowsRef.current = [row, ...rowsRef.current];
+    setRows((rs) => [row, ...rs]);
+    setTimeout(() => setRows((rs) => rs.map((r) => (r.awb === code ? { ...r, fresh: false } : r))), 1000);
+    return commit(row, isBulk);
+  }
+
+  /* ---------- Bulk paste, in chunks of five ---------- */
+  async function runBulk(codes: string[]) {
+    if (!codes.length || bulk?.running) return;
+    seq.current++;
+    let done = 0;
+    const results: Array<{ awb: string; result: string; label: string; order: string | null }> = [];
+    setBulk({ total: codes.length, done: 0, running: true, stopped: false, retry: [], results: [] });
+    setV("checking", "Recording list", "", `${codes.length} AWBs from the paste box, in chunks of 5.`);
+
+    for (let i = 0; i < codes.length; i += 5) {
+      const chunk = codes.slice(i, i + 5);
+      const outs = await Promise.all(chunk.map((c) => scan(c, true)));
+      outs.forEach((o, j) => o && results.push({ awb: chunk[j], ...o }));
+      done += chunk.length;
+      setBulk({ total: codes.length, done, running: true, stopped: false, retry: [], results: [...results] });
+
+      // Stop on a failure rather than firing the rest at a dead connection.
+      if (outs.some((o) => o && o.result === "error")) {
+        const retry = chunk.filter((c, j) => outs[j] && outs[j]!.result === "error").concat(codes.slice(i + 5));
+        setBulk({ total: codes.length, done, running: false, stopped: true, retry, results: [...results] });
+        const saved = results.filter((r) => ["ok", "not-found"].includes(r.result)).length;
+        setV(
+          "error",
+          "NOT SAVED",
+          `${saved} of ${codes.length} saved`,
+          `Connection dropped. ${retry.length} AWBs still to record — use Retry in the paste box.`,
+        );
+        play("error");
+        return;
+      }
+    }
+
+    const saved = results.filter((r) => ["ok", "not-found"].includes(r.result)).length;
+    setBulk({ total: codes.length, done, running: false, stopped: false, retry: [], results });
+    setV(
+      "ok",
+      "LIST RECORDED",
+      `${saved} of ${codes.length} saved`,
+      "Refused and unmatched AWBs are listed in the paste box results.",
+    );
+    play("ok");
+    setText("");
+  }
+
+  function newSession() {
+    const bad = rows.filter((r) => r.status === "error").length;
+    if (bad && !confirm(`${bad} scan${bad > 1 ? "s were" : " was"} not saved. Start a new session anyway?`))
+      return;
+    // The scans stay recorded and the duplicate check still sees them, so this
+    // cannot be used to put a packet through twice.
+    setRows([]);
+    setRefused(0);
+    setBulk(null);
+    seq.current++;
+    setV("idle", "Ready", "", hint);
+    setTimeout(refocus, 0);
+  }
+
+  const scanned = rows.filter((r) => ["ok", "check", "notfound"].includes(r.status)).length;
+  const saving = rows.filter((r) => r.status === "saving").length;
+  const bad = rows.filter((r) => r.status === "error").length;
+  const listCount = parseList(text).length;
+
+  return (
+    <div className="sp-view">
+      {toolbar}
+
+      <div className="sp-title">
+        <h1>{title}</h1>
+        <div className="sp-tally">
+          <span className="sp-count">
+            <b>{scanned.toLocaleString("en-IN")}</b>scanned this session
+          </span>
+          {refused > 0 && <span className="sp-pill refused">{refused} refused</span>}
+          {saving > 0 && <span className="sp-pill saving">{saving} saving…</span>}
+          {bad > 0 && <span className="sp-pill notsaved">{bad} NOT SAVED</span>}
+          {rows.length > 0 && (
+            <button className="btn-ghost" onClick={newSession}>
+              New session
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div
+        className={
+          "verdict " + verdict.cls + (listening || modal ? "" : " paused") + (verdict.awb ? "" : " no-awb")
+        }
+        role="status"
+        aria-live="assertive"
+      >
+        <div className="v-label">{verdict.label}</div>
+        <div className="v-awb">{verdict.awb}</div>
+        <div className="v-msg">{verdict.msg}</div>
+      </div>
+
+      <div className="sp-input-wrap">
+        <input
+          ref={inputRef}
+          className={"sp-input" + (listening || modal ? "" : " lost")}
+          autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="characters"
+          spellCheck={false}
+          enterKeyHint="done"
+          placeholder="Scan a barcode"
+          aria-label="Scan a barcode"
+          disabled={Boolean(modal)}
+          onKeyDown={(e) => {
+            const el = e.target as HTMLInputElement;
+            if (e.key === "Enter" || (e.key === "Tab" && el.value)) {
+              e.preventDefault();
+              const v = el.value;
+              el.value = "";
+              void scan(v);
+            }
+          }}
+          onBlur={() => setTimeout(refocus, 0)}
+        />
+        <button
+          className={"sp-kb" + (kbOn ? " on" : "")}
+          type="button"
+          aria-label="Show keyboard to type an AWB"
+          aria-pressed={kbOn}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => {
+            const next = !kbOn;
+            setKbOn(next);
+            if (inputRef.current) {
+              inputRef.current.inputMode = next ? "text" : "none";
+              inputRef.current.blur();
+              inputRef.current.focus();
+            }
+          }}
+        >
+          ⌨
+        </button>
+      </div>
+
+      {/* A scanner that has silently stopped listening is worse than one that
+          is visibly paused, so say which it is. */}
+      <div className="sp-focus-note">
+        {listening || modal
+          ? ""
+          : document.activeElement === textRef.current
+            ? "Scanner paused while you type in the paste box. Click anywhere else to resume."
+            : "Scanner paused. Click anywhere on the page to resume."}
+      </div>
+
+      <div className="sp-list">
+        {!rows.length ? (
+          <div className="sp-empty">Scans from this session appear here, newest first.</div>
+        ) : (
+          <>
+            <div className="sp-row head">
+              <div>AWB</div>
+              <div>Order</div>
+              <div>Time</div>
+              <div>Result</div>
+            </div>
+            {rows.slice(0, 200).map((r) => (
+              <RowView key={r.awb} r={r} withTime onRetry={() => commit(r, false)} />
+            ))}
+            {rows.length > 200 && (
+              <div className="sp-empty">
+                Showing the latest 200 of {rows.length.toLocaleString("en-IN")}.
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      <div className="sp-bulk">
+        <button
+          className="sp-bulk-toggle"
+          aria-expanded={bulkOpen}
+          onClick={() => setBulkOpen((v) => !v)}
+        >
+          <span className="car">▶</span>Paste a list of AWBs instead
+        </button>
+        <div className="sp-bulk-body" hidden={!bulkOpen}>
+          <textarea
+            ref={textRef}
+            rows={8}
+            spellCheck={false}
+            placeholder="One AWB per line, or separated by commas or spaces"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+          />
+          <div className="sp-bulk-actions">
+            <button
+              className="btn-primary"
+              disabled={!listCount || Boolean(bulk?.running)}
+              onClick={() => void runBulk(parseList(text))}
+            >
+              Record {listCount.toLocaleString("en-IN")} AWB{listCount === 1 ? "" : "s"}
+            </button>
+            {bulk && (
+              <div className="sp-progress">
+                <div className={"sp-bar" + (bulk.stopped ? " stopped" : !bulk.running ? " done" : "")}>
+                  <i style={{ width: `${(bulk.done / bulk.total) * 100}%` }} />
+                </div>
+                <span className="sp-prog-text">
+                  {bulk.done.toLocaleString("en-IN")} of {bulk.total.toLocaleString("en-IN")}
+                </span>
+              </div>
+            )}
+          </div>
+
+          {bulk && <BulkMessage bulk={bulk} onRetry={() => void runBulk(bulk.retry)} />}
+
+          {bulk && bulk.results.length > 0 && (
+            <>
+              <div className="sp-counts">
+                {Object.entries(
+                  bulk.results.reduce<Record<string, number>>((acc, r) => {
+                    acc[r.label] = (acc[r.label] || 0) + 1;
+                    return acc;
+                  }, {}),
+                ).map(([k, n]) => (
+                  <span key={k}>
+                    {k} · {n}
+                  </span>
+                ))}
+              </div>
+              <div className="sp-results">
+                {bulk.results.map((r, i) => (
+                  <RowView
+                    key={r.awb + i}
+                    r={{
+                      awb: r.awb,
+                      time: new Date(),
+                      status: (r.result === "not-found" ? "notfound" : r.result) as RowStatus,
+                      order: r.order,
+                      label: r.label,
+                      fresh: false,
+                    }}
+                  />
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      <div className="sp-help">{help}</div>
+
+      {/* A refusal stops the bench until it is dismissed. The packet has to come
+          off the pile, and a warning that clears itself would be buried by the
+          next scan a second later. */}
+      <div
+        className="sp-modal"
+        hidden={!modal}
+        role="alertdialog"
+        aria-modal="true"
+        onKeyDown={(e) => {
+          if (e.key === "Escape") closeModal();
+          if (e.key === "Tab") {
+            e.preventDefault();
+            dismissRef.current?.focus();
+          }
+        }}
+      >
+        <div className={"sp-card " + (modal?.type || "")}>
+          <div className="band">
+            <div className="v-label">{modal?.label}</div>
+            <div className="v-awb">{modal?.awb}</div>
+          </div>
+          <div className="body">
+            <p>{modal?.msg}</p>
+            <button ref={dismissRef} className="btn-primary dismiss" onClick={closeModal}>
+              Taken off the pile — continue
+            </button>
+            <div className="hint">Press Enter to continue</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BulkMessage({
+  bulk,
+  onRetry,
+}: {
+  bulk: { total: number; done: number; running: boolean; stopped: boolean; retry: string[]; results: any[] };
+  onRetry: () => void;
+}) {
+  const saved = bulk.results.filter((r) => ["ok", "not-found"].includes(r.result)).length;
+  if (bulk.running) {
+    return <div className="sp-bulk-msg">Recording in chunks of 5 · {saved} saved so far.</div>;
+  }
+  if (bulk.stopped) {
+    return (
+      <div className="sp-bulk-msg err">
+        Connection dropped. {saved} of {bulk.total} saved; {bulk.retry.length} still to record.{" "}
+        <button className="btn-ghost" onClick={onRetry}>
+          Retry the {bulk.retry.length}
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className="sp-bulk-msg">
+      Done. {saved} of {bulk.total} saved.
+    </div>
+  );
+}
+
+function RowView({ r, withTime, onRetry }: { r: Row; withTime?: boolean; onRetry?: () => void }) {
+  const label = RES_LABEL[r.status] || r.label;
+  const order = r.order ? (
+    r.order
+  ) : ["saving", "error", "duplicate", "blocked"].includes(r.status) ? (
+    "—"
+  ) : (
+    <span className="none">not in orders</span>
+  );
+  return (
+    <div className={`sp-row ${r.status}${r.fresh ? " fresh" : ""}`}>
+      <div className="awb-cell">{r.awb}</div>
+      <div className="order-cell">{order}</div>
+      {withTime && <div className="time">{fmtT(r.time)}</div>}
+      <div className="res-cell">
+        <span className={"res " + r.status}>
+          <span className="dot" />
+          {label}
+        </span>
+        {r.status === "error" && onRetry && (
+          <button className="retry" onClick={onRetry}>
+            Retry
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** The big word on the verdict panel. */
+function verdictLabel(d: any): string {
+  if (d.result === "not-found") return "RECORDED";
+  const kind = d.kind === "customer-return" ? "CUSTOMER RETURN" : d.kind === "rto" ? "RTO" : "OK";
+  return d.confident === false ? `${kind} — CHECK` : kind;
+}
+
+/** The short label in the session list. */
+function listLabel(d: any): string {
+  if (d.result === "not-found") return "Recorded, no order";
+  const kind = d.kind === "customer-return" ? "Customer return" : d.kind === "rto" ? "RTO" : "Dispatched";
+  return d.confident === false ? `${kind} — check` : kind;
+}
 
 /**
  * Pull the action's payload out of a single-fetch response.
  *
  * Remix answers .data with turbo-stream: a flat array where objects hold
  * INDEXES into that array rather than values, so {"_1":2} means "key at [1],
- * value at [2]". Resolving those references is all this needs to do; the
- * payload here is one flat object of strings.
+ * value at [2]".
  */
 function decodeTurboStream(text: string): any {
   const parsed = JSON.parse(text);
   if (!Array.isArray(parsed)) return parsed;
   const at = (i: unknown): any => {
     const v = parsed[i as number];
-    if (v && typeof v === "object" && !Array.isArray(v)) {
+    if (Array.isArray(v)) return v.map((x) => at(x));
+    if (v && typeof v === "object") {
       const out: Record<string, any> = {};
       for (const [k, ref] of Object.entries(v)) {
         out[typeof k === "string" && k.startsWith("_") ? at(Number(k.slice(1))) : k] = at(ref);
@@ -99,427 +675,6 @@ function decodeTurboStream(text: string): any {
     }
     return v;
   };
-  // [0] is the root: {"_1":2} -> { data: <payload> }
   const root = at(0);
   return root?.data ?? root;
-}
-
-export function ScanPad({
-  kind,
-  title,
-  hint,
-  dispatched,
-}: {
-  kind: ScanKind;
-  title: string;
-  hint: string;
-  /** Preloaded already-dispatched AWBs. Empty for non-dispatch scanners. */
-  dispatched?: string[];
-}) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [rows, setRows] = useState<ScanRow[]>([]);
-  const [panel, setPanel] = useState<{
-    state: string;
-    awb: string;
-    message: string;
-    kind: string;
-    confident: boolean;
-    signedOut?: boolean;
-  }>({ state: "idle", awb: "", message: hint, kind: "", confident: true });
-  const [pending, setPending] = useState(0);
-  // Refusals are counted but not listed: the operator needs to know the pile
-  // had some, without rows for packets that were never dispatched.
-  const [refused, setRefused] = useState(0);
-
-  // A Set, built once: 3,000 linear scans per keystroke would defeat the point.
-  const dispatchedSet = useRef<Set<string>>(new Set());
-  useEffect(() => {
-    dispatchedSet.current = new Set(dispatched || []);
-  }, [dispatched]);
-
-  /**
-   * Start a fresh session.
-   *
-   * Clears only what is on screen — the list, the counters, the panel. The
-   * scans themselves stay recorded, and the duplicate check still sees them,
-   * so this cannot be used to sneak a packet through twice. It exists because
-   * a bench works in batches: finish a trolley, reset the tally, start the
-   * next one against a count that means something.
-   */
-  const startNewSession = useCallback(() => {
-    setRows([]);
-    setRefused(0);
-    setPending(0);
-    setPanel({ state: "idle", awb: "", message: hint, kind: "", confident: true });
-    inputRef.current?.focus();
-  }, [hint]);
-
-  const dismiss = useCallback(
-    () => setPanel({ state: "idle", awb: "", message: hint, kind: "", confident: true }),
-    [hint],
-  );
-
-  // A refusal BLOCKS scanning until it is dismissed. It used to clear itself
-  // after six seconds, which is wrong for something the operator must act on:
-  // the packet has to come off the pile, and a gun firing the next barcode a
-  // second later would bury the warning before it was read.
-  const halted = panel.state === "duplicate" || panel.state === "blocked";
-
-  // The gun types into whatever has focus, so the input must hold it — but not
-  // at the cost of every other control on the page. Stealing focus back from a
-  // textarea the operator has deliberately clicked makes that field unusable:
-  // a pasted list lands in the scan box instead, where the whole list is read
-  // as one barcode.
-  const stealsFocusFrom = (el: Element | null) =>
-    !el ||
-    el === document.body ||
-    !(
-      el.tagName === "INPUT" ||
-      el.tagName === "TEXTAREA" ||
-      el.tagName === "SELECT" ||
-      el.tagName === "BUTTON" ||
-      el.tagName === "A" ||
-      (el as HTMLElement).isContentEditable
-    );
-
-  const refocus = useCallback(() => {
-    // A disabled input cannot hold focus, and trying is what would let the
-    // gun's next barcode land somewhere else on the page.
-    if (inputRef.current?.disabled) return;
-    if (!stealsFocusFrom(document.activeElement)) return;
-    inputRef.current?.focus();
-  }, []);
-
-  useEffect(() => {
-    inputRef.current?.focus();
-    const t = setInterval(refocus, 1500);
-    return () => clearInterval(t);
-  }, [refocus]);
-
-  const submit = useCallback(
-    async (raw: string) => {
-      // A list pasted here is not a barcode. Without this the separators are
-      // stripped and several AWBs are recorded as one impossible code, which
-      // then has to be deleted by hand. Say so instead of filing it.
-      if (/[\n\r\t,;]/.test(raw.trim())) {
-        setPanel({
-          state: "error",
-          awb: "",
-          kind: "",
-          confident: true,
-          message: "That looks like a list. Use “Paste a list of AWBs” below instead.",
-        });
-        beep("error");
-        return;
-      }
-
-      const awb = raw.replace(/[^0-9a-zA-Z]/g, "");
-      if (awb.length < 6) return;
-
-      // A real AWB is ~11-16 characters. Much longer means several were run
-      // together by a paste that lost its separators.
-      if (awb.length > 24) {
-        setPanel({
-          state: "error",
-          awb: awb.slice(0, 24) + "…",
-          kind: "",
-          confident: true,
-          message: "Too long for one AWB — looks like several joined together. Use the paste box below.",
-        });
-        beep("error");
-        return;
-      }
-
-      // Answer locally where we can, so the common case has no latency at all.
-      const localBlocked = kind === "dispatch" && dispatchedSet.current.has(awb);
-      const alreadyInSession = rows.some((r) => r.awb === awb && r.saved);
-      const optimistic = localBlocked ? "blocked" : alreadyInSession ? "duplicate" : "ok";
-
-      setPanel({
-        state: optimistic,
-        awb,
-        kind: "",
-        confident: true,
-        message:
-          optimistic === "blocked"
-            ? "ALREADY DISPATCHED. Do not send this packet again."
-            : optimistic === "duplicate"
-              ? "Already scanned in this session."
-              : kind === "inbound"
-                ? "Checking…"
-                : "Saving…",
-      });
-      beep(optimistic);
-
-      // A refusal never enters the list. Both "duplicate" and "blocked" mean
-      // the packet was NOT dispatched, so a row for either would be a record
-      // of something that did not happen — and the count already excluded
-      // them, so the list and the tally disagreed.
-      if (optimistic === "duplicate" || optimistic === "blocked") setRefused((n) => n + 1);
-      if (optimistic !== "duplicate" && optimistic !== "blocked") {
-        const row: ScanRow = {
-          awb,
-          result: optimistic,
-          message: "",
-          orderName: "",
-          kind: "",
-          at: new Date().toLocaleTimeString(),
-          saved: false,
-        };
-        setRows((r) => [row, ...r].slice(0, 200));
-      }
-      setPending((n) => n + 1);
-
-      try {
-        // Posts to the route's single-fetch .data endpoint, NOT to the route
-        // path. A plain fetch("") POST is a DOCUMENT request: Remix runs the
-        // action, revalidates, and answers with a full HTML page. The scan
-        // saved, but res.json() then choked on HTML and the operator was told
-        // NOT SAVED for a scan that had in fact been recorded — the worst
-        // possible direction for this panel to be wrong in.
-        const res = await fetch(window.location.pathname + ".data", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ awb, kind }),
-          credentials: "same-origin",
-        });
-        // A lapsed session answers 401 here rather than redirecting, so it can
-        // be named instead of being reported as a network fault.
-        if (res.status === 401) throw new SessionExpired();
-        if (!res.ok) throw new Error(String(res.status));
-        const data = decodeTurboStream(await res.text());
-
-        // The server has the last word: it can see duplicates from other devices.
-        if (data.result === "duplicate" || data.result === "blocked") {
-          // Only when the server disagrees with an optimistic OK; otherwise it
-          // was already counted above.
-          if (optimistic !== "duplicate" && optimistic !== "blocked") setRefused((n) => n + 1);
-          // Nothing was dispatched, so nothing belongs in the list. Leaving a
-          // row would imply a scan happened and would disagree with the count
-          // the operator checks their pile against.
-          setRows((r) => r.filter((x) => !(x.awb === awb && !x.saved)));
-        } else {
-          setRows((r) =>
-            r.map((x) =>
-              x.awb === awb && !x.saved
-                ? {
-                    ...x,
-                    result: data.result,
-                    message: data.message,
-                    orderName: data.orderName,
-                    kind: data.kind || "",
-                    saved: true,
-                  }
-                : x,
-            ),
-          );
-        }
-        if (data.result !== optimistic) beep(data.result);
-        setPanel({
-          state: data.result,
-          awb,
-          message: data.message,
-          kind: data.kind || "",
-          confident: data.confident !== false,
-        });
-      } catch (err) {
-        // Never let a failed write look like a success.
-        const expired = err instanceof SessionExpired;
-        setRows((r) => r.map((x) => (x.awb === awb && !x.saved ? { ...x, result: "error" } : x)));
-        setPanel({
-          state: "error",
-          awb,
-          kind: "",
-          confident: true,
-          signedOut: expired,
-          message: expired
-            ? "NOT SAVED — you have been signed out. Log in again, then scan this packet."
-            : "NOT SAVED. Check the connection and scan this packet again.",
-        });
-        beep("error");
-      } finally {
-        setPending((n) => Math.max(0, n - 1));
-        refocus();
-      }
-    },
-    [kind, rows, refocus],
-  );
-
-  const look = PANEL[panel.state] || PANEL.idle;
-  // Refusals never reach the list now, so this counts exactly what it shows.
-  const savedCount = rows.filter((r) => r.saved).length;
-  const unsaved = rows.filter((r) => r.result === "error").length;
-
-  return (
-    <div className="pnl-scan">
-      {/* A refusal stops the bench. Rendered over the page rather than inline
-          so it cannot be scrolled past, and the dismiss button takes focus so
-          the gun's Enter clears it instead of firing a scan into nothing. */}
-      {halted && (
-        <div
-          role="alertdialog"
-          aria-modal="true"
-          aria-label={look.label}
-          onClick={() => { dismiss(); refocus(); }}
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 50,
-            background: "rgba(20,20,25,0.55)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: 20,
-          }}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              background: look.bg,
-              color: look.fg,
-              borderRadius: 10,
-              padding: "28px 32px",
-              maxWidth: 560,
-              width: "100%",
-              textAlign: "center",
-              boxShadow: "0 20px 60px rgba(0,0,0,0.35)",
-            }}
-          >
-            <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: "0.08em" }}>
-              {look.label}
-            </div>
-            <div
-              style={{
-                fontSize: 30,
-                fontWeight: 700,
-                margin: "10px 0",
-                fontVariantNumeric: "tabular-nums",
-                wordBreak: "break-all",
-              }}
-            >
-              {panel.awb}
-            </div>
-            <div style={{ fontSize: 15, marginBottom: 20 }}>{panel.message}</div>
-            <button
-              type="button"
-              autoFocus
-              className="pnl-btn"
-              onClick={() => { dismiss(); refocus(); }}
-              onKeyDown={(e) => {
-                // The gun sends Enter after a code. If it fires while this is
-                // open, dismissing is the right thing to do with it.
-                if (e.key === "Enter" || e.key === "Escape") {
-                  e.preventDefault();
-                  dismiss();
-                  refocus();
-                }
-              }}
-              style={{ fontSize: 16, padding: "10px 28px" }}
-            >
-              Set aside and carry on
-            </button>
-          </div>
-        </div>
-      )}
-      <div className="pnl-scan-head">
-        <h1 className="pnl-h1" style={{ fontSize: 20, margin: 0 }}>{title}</h1>
-        <div className="pnl-scan-counts">
-          {/* The session tally, big enough to read from the bench. It is what
-              an operator counts their physical pile against, so it states the
-              number rather than mentioning it. */}
-          <span style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-            <strong style={{ fontSize: 26, lineHeight: 1 }}>{savedCount}</strong>
-            <span>scanned this session</span>
-          </span>
-          {refused > 0 && (
-            <span className="pnl-sub" style={{ fontSize: 12 }}>
-              {refused} refused
-            </span>
-          )}
-          {pending > 0 && <span className="pnl-scan-pending">{pending} saving…</span>}
-          {unsaved > 0 && <span className="pnl-scan-unsaved">{unsaved} NOT SAVED</span>}
-          {rows.length > 0 && (
-            <button
-              type="button"
-              className="pnl-btn"
-              onClick={() => {
-                // Only worth confirming once there is something to lose.
-                if (unsaved > 0 && !confirm(`${unsaved} scan(s) were NOT saved. Start a new session anyway?`)) return;
-                startNewSession();
-              }}
-              style={{ fontSize: 12, padding: "4px 10px" }}
-            >
-              New session
-            </button>
-          )}
-        </div>
-      </div>
-
-      <div className="pnl-scan-panel" style={{ background: look.bg, color: look.fg }}>
-        <div className="pnl-scan-verdict">
-          {panel.kind && KIND_LABEL[panel.kind] ? KIND_LABEL[panel.kind] : look.label}
-          {panel.kind && !panel.confident && <span className="pnl-scan-unsure"> — CHECK</span>}
-        </div>
-        <div className="pnl-scan-awb">{panel.awb || " "}</div>
-        <div className="pnl-scan-msg">{panel.message}</div>
-        {/* A signed-out operator should not have to know the URL. */}
-        {panel.signedOut && (
-          <a
-            className="pnl-btn"
-            href="/pnl-app/scan/login"
-            style={{ marginTop: 10, display: "inline-block" }}
-          >
-            Log in again
-          </a>
-        )}
-      </div>
-
-      <input
-        ref={inputRef}
-        className="pnl-scan-input"
-        disabled={halted}
-        placeholder={halted ? "Dismiss the warning to carry on" : "Scan a barcode"}
-        autoComplete="off"
-        autoCorrect="off"
-        spellCheck={false}
-        onKeyDown={(e) => {
-          if (e.key === "Escape") {
-            (e.target as HTMLInputElement).value = "";
-            dismiss();
-            return;
-          }
-          // Guns send Enter after the code. Everything else is a normal keypress.
-          if (e.key !== "Enter") return;
-          e.preventDefault();
-          const v = (e.target as HTMLInputElement).value;
-          (e.target as HTMLInputElement).value = "";
-          void submit(v);
-        }}
-        // Deferred: at blur time the new target is not focused yet, so checking
-        // immediately would always look like focus went nowhere and pull it back.
-        onBlur={() => setTimeout(refocus, 0)}
-      />
-
-      <div className="pnl-scan-list">
-        {rows.length === 0 ? (
-          <p className="pnl-sub" style={{ margin: 0 }}>Scans from this session appear here.</p>
-        ) : (
-          rows.map((r, i) => (
-            <div key={r.awb + i} className={`pnl-scan-row pnl-scan-row--${r.result}`}>
-              <span className="pnl-scan-row-awb">{r.awb}</span>
-              <span className="pnl-scan-row-order">{r.orderName || (r.saved ? "not in orders" : "")}</span>
-              <span className="pnl-scan-row-time">{r.at}</span>
-              <span className="pnl-scan-row-state">
-                {r.result === "error"
-                  ? "NOT SAVED"
-                  : r.saved
-                    ? KIND_LABEL[r.kind] || r.result
-                    : "…"}
-              </span>
-            </div>
-          ))
-        )}
-      </div>
-    </div>
-  );
 }

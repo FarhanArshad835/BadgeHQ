@@ -4,8 +4,7 @@
  * No tabs, because the operator should not have to classify a parcel by eye and
  * the data already knows. Measured on live data: of 3,000 RTO orders only 4
  * (0.1%) also carried a ReturnHQ request, and of orders WITH a request 2,381 of
- * 2,405 had been delivered first. The two signals barely overlap, so a request
- * means the customer sent it back and a courier RTO means it never arrived.
+ * 2,405 had been delivered first. The two signals barely overlap.
  *
  * The verdict is shown with its REASON, so a wrong call is visible rather than
  * silently filed. A parcel the data cannot place is marked "CHECK" instead of
@@ -18,10 +17,9 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { getPnlApp, isAuthed } from "../utils/pnl-app.server";
-import { recordScan, recordScanBulk, scanCountsToday } from "../utils/scan.server";
-import { PnlStyles } from "../utils/pnl-styles";
+import { recordScan, scanCountsToday } from "../utils/scan.server";
+import { ClaimsStyles } from "../components/ClaimsStyles";
 import { ScanPad } from "../components/ScanPad";
-import { BulkScan } from "../components/BulkScan";
 import { ScanNav } from "../components/ScanNav";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -38,42 +36,33 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (!shop) return json({ error: "not-configured" }, { status: 400 });
 
   const body = await request.json().catch(() => null);
-
-  // A pasted list takes the same path as the gun, one AWB at a time.
-  if (body?.bulk) {
-    return json(await recordScanBulk(shop, "inbound", String(body.bulk)));
-  }
-
   if (!body?.awb) return json({ error: "bad-request" }, { status: 400 });
 
   // "inbound" lets recordScan decide between rto and customer-return.
-  const outcome = await recordScan(shop, "inbound", String(body.awb));
-  return json(outcome);
+  return json(await recordScan(shop, "inbound", String(body.awb)));
 };
 
 export default function ReturnsScanner() {
   const d = useLoaderData<typeof loader>();
 
   return (
-    <div className="pnl">
-      <PnlStyles />
-      <div className="pnl-wrap">
+    <div className="claims-app">
+      <ClaimsStyles />
+      <div className="wrap">
         <ScanNav active="returns" counts={d.counts} />
 
         <ScanPad
           kind="inbound"
           title="Inbound parcels"
           hint="Scan any parcel coming back. RTO or customer return is worked out for you."
+          help={
+            <>
+              A parcel the courier returned undelivered is an <b>RTO</b>. One the customer sent back
+              with a ReturnHQ request is a <b>customer return</b>. When the data can't tell, the panel
+              says <b>CHECK</b> and gives the reason, so nothing is filed under a guess.
+            </>
+          }
         />
-
-        <BulkScan kind="inbound" label="Paste a list of AWBs instead" />
-
-        <p className="pnl-help" style={{ marginTop: 14 }}>
-          A parcel the courier returned undelivered is an <strong>RTO</strong>. One the customer
-          sent back with a ReturnHQ request is a <strong>customer return</strong>. When the data
-          cannot tell, the panel says <strong>CHECK</strong> and gives the reason, so nothing is
-          filed under a guess.
-        </p>
       </div>
     </div>
   );

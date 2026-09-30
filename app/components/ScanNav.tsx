@@ -1,8 +1,8 @@
 /**
- * The bar across the top of every scanner.
+ * The bar across the top of every scanner, matching the prototype.
  *
- * Carries today's counts as well as the links: an operator glancing up should be
- * able to see how the shift is going without opening another page.
+ * Carries today's counts as well as the links: an operator glancing up should
+ * be able to see how the shift is going without opening another page.
  */
 import { Link } from "@remix-run/react";
 
@@ -24,25 +24,30 @@ export function ScanNav({
   const today = (c.dispatch || 0) + (c.rto || 0) + (c["customer-return"] || 0);
 
   return (
-    <div className="pnl-scan-nav">
-      <div className="pnl-scan-tabs">
+    <div className="topbar">
+      <nav className="nav" aria-label="Main">
         {TABS.map((t) => (
           <Link
             key={t.key}
             to={t.href}
-            className={`pnl-scan-tab ${active === t.key ? "pnl-scan-tab--on" : ""}`}
+            className={active === t.key ? "active" : undefined}
+            aria-current={active === t.key ? "page" : undefined}
           >
             {t.label}
           </Link>
         ))}
-      </div>
-      <div className="pnl-scan-nav-right">
+      </nav>
+      <div className="top-right">
         {today > 0 && (
-          <span className="pnl-sub" style={{ fontSize: 12 }}>
-            Today: {c.dispatch || 0} dispatched, {c.rto || 0} RTO, {c["customer-return"] || 0} returns
+          <span className="today">
+            Today: {(c.dispatch || 0).toLocaleString("en-IN")} dispatched,{" "}
+            {(c.rto || 0).toLocaleString("en-IN")} RTO,{" "}
+            {(c["customer-return"] || 0).toLocaleString("en-IN")} returns
           </span>
         )}
-        <a className="pnl-scan-tab" href="/pnl-app/scan/logout">Sign out</a>
+        <a className="btn-ghost" href="/pnl-app/scan/logout">
+          Sign out
+        </a>
       </div>
     </div>
   );

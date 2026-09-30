@@ -1,5 +1,5 @@
 /**
- * The claims page's own stylesheet, lifted verbatim from the approved
+ * The scanner and claims stylesheet, lifted verbatim from the approved
  * prototype.
  *
  * Deliberately NOT rewritten in terms of the pnl-* tokens. The prototype is the
@@ -9,7 +9,8 @@
  *
  * Every selector is prefixed with .claims-app, including the custom properties
  * that were on :root, so the two systems sit side by side and neither bleeds
- * into the other.
+ * into the other. @keyframes bodies are left alone: their "50%" steps are not
+ * selectors and prefixing them would break the animation.
  */
 export function ClaimsStyles() {
   return (
@@ -134,6 +135,7 @@ const CSS = String.raw`
     box-shadow: 0 8px 24px rgba(0,0,0,.08);
   }
   .claims-app .pop[hidden] { display: none; }
+  .claims-app .backdrop { display: none; }
   .claims-app .pop .title { font-weight: 600; margin-bottom: 8px; }
   .claims-app .pop .range { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   .claims-app .pop label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 3px; }
@@ -203,22 +205,209 @@ const CSS = String.raw`
     .claims-app .c-act { grid-area: act; }
     .claims-app .act { height: 22px; padding: 0 7px; font-size: 11px; }
     .claims-app .footer { font-size: 11px; }
+
+    /* Custom date range as a bottom sheet */
+    .claims-app .backdrop { position: fixed; inset: 0; z-index: 19; background: rgba(0,0,0,.35); }
+    .claims-app .backdrop:not([hidden]) { display: block; }
+    .claims-app .pop {
+      left: 0 !important; right: 0; top: auto !important; bottom: 0;
+      width: 100%; max-height: 85vh; overflow-y: auto;
+      border-radius: 14px 14px 0 0; border: 0;
+      padding: 10px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+      box-shadow: 0 -8px 24px rgba(0,0,0,.12);
+    }
+    .claims-app .pop::before { content: ""; display: block; width: 36px; height: 4px; border-radius: 2px; background: var(--line-strong); margin: 0 auto 12px; }
+    .claims-app .pop .title { font-size: 15px; margin-bottom: 12px; }
+    .claims-app .pop .range { grid-template-columns: 1fr; gap: 10px; }
+    .claims-app .pop label { font-size: 13px; }
+    .claims-app .pop input { height: 44px; font-size: 16px; padding: 0 12px; }   /* 16px stops iOS zooming */
+    .claims-app .pop .presets { gap: 8px; margin-top: 14px; }
+    .claims-app .pop .presets button { height: 38px; font-size: 13px; }
+    .claims-app .pop .err { font-size: 13px; }
+    .claims-app .pop .row-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 16px; }
+    .claims-app .pop .row-btns button { height: 44px; font-size: 15px; }
   }
-  /* Sortable headers. Added on top of the prototype rather than editing its
-     rules, so its own CSS stays byte-identical. The button inherits the th's
-     type and colour, so a sortable header looks exactly like a static one
-     until it is active. */
-  .claims-app th button.sort {
-    background: none; border: 0; padding: 0; margin: 0;
-    font: inherit; color: inherit; cursor: pointer;
-    display: inline-flex; align-items: center; gap: 4px;
+
+  /* =================== ScanPad (Dispatch + Inbound) =================== */
+  .claims-app .sp-view { margin-top: 14px; }
+  .claims-app .sp-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 9px; margin-bottom: 12px; color: #444; }
+  .claims-app .sp-toolbar b { font-variant-numeric: tabular-nums; }
+  .claims-app .sp-toolbar .sub { color: var(--muted); margin-left: 6px; }
+
+  .claims-app .sp-title { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .claims-app .sp-title h1 { font-size: 20px; margin: 0; letter-spacing: -0.01em; }
+  .claims-app .sp-tally { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; justify-content: flex-end; }
+  .claims-app .sp-count { color: #555; white-space: nowrap; }
+  .claims-app .sp-count b { font-size: 26px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; margin-right: 4px; }
+  .claims-app .sp-pill { font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+  .claims-app .sp-pill.refused { background: #fdf3e6; color: #8a4f07; }
+  .claims-app .sp-pill.saving { background: #f1f0ee; color: #555; }
+  .claims-app .sp-pill.notsaved { background: #fdecea; color: #b42318; }
+
+  /* Verdict: slim bar when idle, compact side-by-side block when there's a result */
+  .claims-app .verdict {
+    margin-top: 10px; border-radius: 12px; padding: 14px 22px; background: #f1f0ee; color: #333;
+    display: grid; grid-template-columns: auto 1fr; grid-template-areas: "label awb" "label msg";
+    column-gap: 22px; row-gap: 2px; align-items: center; min-height: 104px; text-align: left;
+    transition: background-color .12s;
   }
-  .claims-app th.num button.sort { flex-direction: row-reverse; }
-  .claims-app th button.sort:hover { color: var(--ink); }
-  .claims-app th button.sort[aria-sort="ascending"],
-  .claims-app th button.sort[aria-sort="descending"] { color: var(--ink); font-weight: 500; }
-  .claims-app th button.sort .arrow { opacity: 0; font-size: 10px; }
-  .claims-app th button.sort:hover .arrow { opacity: .45; }
-  .claims-app th button.sort[aria-sort="ascending"] .arrow,
-  .claims-app th button.sort[aria-sort="descending"] .arrow { opacity: 1; }
+  .claims-app .verdict .v-label {
+    grid-area: label; align-self: stretch; display: flex; align-items: center;
+    font-size: 44px; font-weight: 800; letter-spacing: .03em; line-height: 1;
+    padding-right: 22px; border-right: 2px solid rgba(255,255,255,.35);
+  }
+  .claims-app .verdict .v-awb { grid-area: awb; align-self: end; font-size: 30px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: .04em; line-height: 1.15; }
+  .claims-app .verdict .v-msg { grid-area: msg; align-self: start; font-size: 16px; line-height: 1.4; max-width: 72ch; }
+  .claims-app .verdict .v-awb:empty { display: none; }
+  .claims-app .verdict.no-awb { grid-template-areas: "label msg" "label msg"; }
+
+  .claims-app .verdict.idle {
+    min-height: 0; padding: 9px 14px; grid-template-areas: "label msg"; column-gap: 12px;
+    background: var(--surface); border: 1px solid var(--line);
+  }
+  .claims-app .verdict.idle .v-label {
+    font-size: 13px; font-weight: 600; letter-spacing: 0; color: #1a7f37; border: 0; padding: 0; gap: 7px;
+  }
+  .claims-app .verdict.idle .v-label::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: #1a7f37; animation: sp-pulse 1.6s infinite; }
+  .claims-app .verdict.idle.paused .v-label { color: #8a4f07; }
+  .claims-app .verdict.idle.paused .v-label::before { background: #b1660a; animation: none; }
+  .claims-app .verdict.idle .v-msg { font-size: 14px; color: #555; align-self: center; }
+
+  .claims-app .verdict.checking .v-label { font-size: 22px; color: #666; border-right-color: rgba(0,0,0,.1); }
+  .claims-app .verdict.checking .v-awb { color: #555; }
+  .claims-app .verdict.ok { background: #1a7f37; color: #fff; }
+  .claims-app .verdict.duplicate { background: #b1660a; color: #fff; }
+  .claims-app .verdict.blocked, .claims-app .verdict.error { background: #b42318; color: #fff; }
+  .claims-app .verdict.notfound { background: #54308a; color: #fff; }
+  .claims-app .verdict.error { background-image: repeating-linear-gradient(135deg, rgba(255,255,255,.07) 0 14px, transparent 14px 28px); }
+
+  .claims-app .sp-input-wrap { position: relative; margin-top: 12px; }
+  .claims-app .sp-input { width: 100%; height: 64px; font-size: 26px; padding: 0 60px 0 18px; border: 2px solid #3b4bc8; border-radius: 12px; background: var(--surface); font-variant-numeric: tabular-nums; letter-spacing: .03em; }
+  .claims-app .sp-input:focus { outline: none; box-shadow: 0 0 0 4px rgba(59,75,200,.15); }
+  .claims-app .sp-input:disabled { border-color: var(--line-strong); background: #f6f6f6; }
+  .claims-app .sp-input.lost { border-color: #b1660a; }
+  .claims-app .sp-focus-note { font-size: 12px; color: #8a4f07; margin-top: 4px; min-height: 16px; }
+  .claims-app .sp-kb { display: none; position: absolute; right: 8px; top: 8px; height: 48px; width: 48px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); font-size: 20px; cursor: pointer; }
+  .claims-app .sp-kb.on { background: var(--ink); color: #fff; }
+
+  .claims-app .sp-list { margin-top: 8px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .claims-app .sp-empty { padding: 14px; color: var(--muted); text-align: center; }
+  .claims-app .sp-row { display: grid; grid-template-columns: minmax(150px, 1.2fr) 1.4fr 80px 170px; gap: 12px; align-items: center; padding: 8px 14px; border-bottom: 1px solid var(--line); }
+  .claims-app .sp-row:last-child { border-bottom: 0; }
+  .claims-app .sp-row.head { color: var(--muted); font-size: 12px; padding-top: 7px; padding-bottom: 7px; }
+  .claims-app .sp-row.fresh { animation: sp-flash 1s ease-out; }
+  @keyframes sp-flash { from { background: #fff8d6; } to { background: transparent; } }
+  .claims-app .sp-row .awb-cell { font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: .02em; }
+  .claims-app .sp-row .none { color: var(--muted); font-style: italic; }
+  .claims-app .sp-row .time { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .claims-app .sp-row.notfound { background: #faf7fd; }
+  .claims-app .sp-row.error { background: #fef6f5; }
+  .claims-app .res { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: 12px; white-space: nowrap; }
+  .claims-app .res .dot { width: 8px; height: 8px; }
+  .claims-app .res.ok { color: #1a7f37; } .claims-app .res.ok .dot { background: #1a7f37; }
+  .claims-app .res.check { color: #8a4f07; } .claims-app .res.check .dot { background: #b1660a; }
+  .claims-app .res.notfound { color: #54308a; } .claims-app .res.notfound .dot { background: #54308a; }
+  .claims-app .res.error { color: #b42318; } .claims-app .res.error .dot { background: #b42318; }
+  .claims-app .res.saving { color: var(--muted); } .claims-app .res.saving .dot { background: #bbb; animation: sp-pulse 1s infinite; }
+  .claims-app .res.duplicate { color: #8a4f07; } .claims-app .res.duplicate .dot { background: #b1660a; }
+  .claims-app .res.blocked { color: #b42318; } .claims-app .res.blocked .dot { background: #b42318; }
+  @keyframes sp-pulse { 50% { opacity: .3; } }
+  .claims-app .retry { height: 22px; padding: 0 7px; font-size: 11px; border: 1px solid #f0c2bd; background: #fff; color: #b42318; border-radius: 6px; cursor: pointer; }
+
+  .claims-app .sp-bulk { margin-top: 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+  .claims-app .sp-bulk-toggle { width: 100%; text-align: left; border: 0; background: none; padding: 11px 14px; color: #3b4bc8; cursor: pointer; display: flex; align-items: center; gap: 8px; }
+  .claims-app .sp-bulk-toggle .car { font-size: 10px; transition: transform .15s; }
+  .claims-app .sp-bulk-toggle[aria-expanded="true"] .car { transform: rotate(90deg); }
+  .claims-app .sp-bulk-body { padding: 0 14px 14px; }
+  .claims-app .sp-bulk-body[hidden] { display: none; }
+  .claims-app .sp-bulk textarea { width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; padding: 10px; border: 1px solid var(--line-strong); border-radius: 8px; resize: vertical; }
+  .claims-app .sp-bulk-actions { display: flex; align-items: center; gap: 10px; margin-top: 8px; flex-wrap: wrap; }
+  .claims-app .sp-bulk-actions .btn-primary:disabled { opacity: .45; cursor: default; }
+  .claims-app .sp-progress { flex: 1; min-width: 180px; display: flex; align-items: center; gap: 10px; }
+  .claims-app .sp-bar { flex: 1; height: 8px; background: #eee; border-radius: 99px; overflow: hidden; }
+  .claims-app .sp-bar i { display: block; height: 100%; background: #3b4bc8; width: 0; transition: width .2s; }
+  .claims-app .sp-bar.stopped i { background: #b42318; }
+  .claims-app .sp-bar.done i { background: #1a7f37; }
+  .claims-app .sp-prog-text { font-variant-numeric: tabular-nums; white-space: nowrap; color: #444; }
+  .claims-app .sp-bulk-msg { margin-top: 8px; font-size: 13px; }
+  .claims-app .sp-bulk-msg.err { color: #b42318; }
+  .claims-app .sp-counts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+  .claims-app .sp-counts span { font-size: 12px; padding: 3px 9px; border-radius: 999px; background: #f4f4f4; font-weight: 500; }
+  .claims-app .sp-results { margin-top: 8px; border: 1px solid var(--line); border-radius: 8px; max-height: 260px; overflow-y: auto; }
+  .claims-app .sp-results .sp-row { grid-template-columns: minmax(150px,1.2fr) 1.4fr 170px; padding: 5px 12px; font-size: 12px; }
+
+  .claims-app .sp-help { margin-top: 10px; padding: 10px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; color: #555; line-height: 1.5; }
+
+  /* Modal */
+  .claims-app .sp-modal { position: fixed; inset: 0; z-index: 50; background: rgba(20,20,20,.55); display: flex; align-items: center; justify-content: center; padding: 16px; }
+  .claims-app .sp-modal[hidden] { display: none; }
+  .claims-app .sp-card { width: min(620px, 100%); border-radius: 16px; overflow: hidden; background: var(--surface); box-shadow: 0 20px 60px rgba(0,0,0,.3); }
+  .claims-app .sp-card .band { padding: 26px 22px; text-align: center; color: #fff; }
+  .claims-app .sp-card.duplicate .band { background: #b1660a; }
+  .claims-app .sp-card.blocked .band { background: #b42318; }
+  .claims-app .sp-card .band .v-label { font-size: 56px; font-weight: 800; letter-spacing: .04em; line-height: 1; }
+  .claims-app .sp-card .band .v-awb { font-size: 30px; font-weight: 600; margin-top: 10px; font-variant-numeric: tabular-nums; letter-spacing: .04em; }
+  .claims-app .sp-card .body { padding: 18px 22px 22px; text-align: center; }
+  .claims-app .sp-card .body p { font-size: 17px; margin: 0 0 16px; line-height: 1.45; }
+  .claims-app .sp-card .dismiss { width: 100%; height: 56px; font-size: 18px; border-radius: 10px; }
+  .claims-app .sp-card .dismiss:focus-visible, .claims-app .sp-card .dismiss:focus { outline: 3px solid #3b4bc8; outline-offset: 3px; }
+  .claims-app .sp-card .hint { color: var(--muted); font-size: 13px; margin-top: 8px; }
+
+  /* Prototype switcher */
+  .claims-app .proto { position: fixed; right: 12px; bottom: 12px; z-index: 40; font-size: 12px; }
+  .claims-app .proto-toggle { background: #3b4bc8; color: #fff; border: 0; border-radius: 999px; padding: 7px 12px; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,.15); }
+  .claims-app .proto-body { position: absolute; right: 0; bottom: 38px; width: 300px; background: var(--surface); border: 1px solid var(--line-strong); border-radius: 10px; padding: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.12); }
+  .claims-app .proto-body[hidden] { display: none; }
+  .claims-app .proto-row { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+  .claims-app .proto-row button { height: 28px; border: 1px solid var(--line); background: var(--surface); border-radius: 6px; cursor: pointer; }
+  .claims-app .proto-row button:hover { border-color: var(--line-strong); }
+  .claims-app .proto-check { display: flex; gap: 6px; align-items: center; margin-top: 8px; }
+  .claims-app .proto-note { color: var(--muted); margin-top: 6px; }
+
+  @media (max-width: 640px) {
+    .claims-app .sp-view { margin-top: 10px; }
+    .claims-app .sp-toolbar { font-size: 12px; padding: 7px 10px; }
+    .claims-app .sp-toolbar .sub { display: block; margin: 0; }
+    .claims-app .sp-title h1 { font-size: 17px; }
+    .claims-app .sp-count b { font-size: 22px; }
+    .claims-app .verdict { grid-template-columns: 1fr; grid-template-areas: "label" "awb" "msg"; text-align: center; padding: 12px; min-height: 0; margin-top: 8px; row-gap: 4px; }
+    .claims-app .verdict.no-awb { grid-template-areas: "label" "msg"; }
+    .claims-app .verdict .v-label { justify-content: center; font-size: 32px; border: 0; padding: 0; }
+    .claims-app .verdict .v-awb { font-size: 22px; align-self: auto; }
+    .claims-app .verdict .v-msg { font-size: 14px; margin: 0 auto; }
+    .claims-app .verdict.idle { grid-template-columns: auto 1fr; grid-template-areas: "label msg"; text-align: left; padding: 8px 12px; }
+    .claims-app .verdict.idle .v-label { font-size: 13px; }
+    .claims-app .verdict.idle .v-msg { font-size: 13px; margin: 0; }
+    .claims-app .verdict.checking .v-label { font-size: 18px; }
+    .claims-app .sp-input { height: 56px; font-size: 20px; }
+    .claims-app .sp-kb { display: block; top: 4px; }
+    .claims-app .sp-row { grid-template-columns: 1fr auto; grid-template-areas: "awb res" "order time"; gap: 2px 8px; padding: 8px 10px; }
+    .claims-app .sp-row.head { display: none; }
+    .claims-app .sp-row .awb-cell { grid-area: awb; }
+    .claims-app .sp-row .order-cell { grid-area: order; font-size: 12px; color: #555; }
+    .claims-app .sp-row .time { grid-area: time; font-size: 12px; text-align: right; }
+    .claims-app .sp-row .res-cell { grid-area: res; text-align: right; }
+    .claims-app .sp-results .sp-row { grid-template-columns: 1fr auto; grid-template-areas: "awb res" "order order"; }
+    .claims-app .sp-bulk textarea { font-size: 16px; }
+    .claims-app .sp-bulk-actions .btn-primary { width: 100%; height: 44px; }
+    .claims-app .sp-card .band .v-label { font-size: 40px; }
+    .claims-app .sp-card .band .v-awb { font-size: 22px; }
+    .claims-app .sp-card .dismiss { height: 52px; }
+    .claims-app .proto-toggle { padding: 6px 10px; }
+    .claims-app .proto-body { width: min(300px, calc(100vw - 24px)); }
+  }
+  /* The nav is <a> here, not <button>: these are real page navigations, so a
+     link is the right element. The prototype's button rules are mirrored so a
+     link renders identically. */
+  .claims-app .nav a {
+    border: 0; background: none; padding: 5px 13px; border-radius: 6px;
+    cursor: pointer; color: #333; white-space: nowrap; text-decoration: none;
+    font: inherit; display: inline-block;
+  }
+  .claims-app .nav a:hover { background: #f3f3f3; }
+  .claims-app .nav a.active { background: var(--ink); color: #fff; font-weight: 500; }
+  .claims-app .top-right a.btn-ghost { text-decoration: none; display: inline-block; }
+  @media (max-width: 640px) {
+    .claims-app .nav a { padding: 5px 10px; }
+  }
 `;
