@@ -53,7 +53,11 @@ export function BulkScan({ kind, label }: { kind: string; label: string }) {
     // single silent request looks hung — and a connection that drops halfway
     // would lose the whole list with nothing to show for it. Chunking gives
     // real progress and keeps whatever already landed.
-    const CHUNK = 25;
+    //
+    // Five, not twenty-five: the bar moves five times as often, and a drop
+    // costs at most four recorded AWBs of uncertainty rather than twenty-four.
+    // The extra round trips are cheap next to the per-AWB lookups they carry.
+    const CHUNK = 5;
     const awbs = text.split(/[^0-9a-zA-Z]+/).filter((x) => x.length >= 6);
     const merged = {
       counts: {} as Record<string, number>,
