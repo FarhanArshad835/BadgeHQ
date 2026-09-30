@@ -191,6 +191,29 @@ export async function detectInbound(
   });
 
   if (!order) {
+    // OrderFinancials only holds the FORWARD AWB. A customer return travels on
+    // a reverse waybill (Delhivery's begin with "R"), so the label on a
+    // returning parcel will never be found above — and defaulting to RTO would
+    // file every reverse pickup as a courier return. ReturnHQ is the only place
+    // that waybill exists, so ask it before guessing.
+    try {
+      const { returnHqByReverseAwb } = await import("./returnhq.server");
+      const rev = await returnHqByReverseAwb(awb);
+      if (rev && rev.status !== "cancelled") {
+        return {
+          kind: "customer-return",
+          confident: true,
+          reason: `Reverse pickup for ${rev.orderName}: customer raised a ${rev.type} request.`,
+          orderName: rev.orderName,
+          deliveryStatus: "",
+          returnType: rev.type,
+        };
+      }
+    } catch {
+      // Falls through to the RTO default below; a ReturnHQ outage must not
+      // stop the packet being recorded.
+    }
+
     // Nothing to go on. RTO is the safer default: it is the commoner inbound
     // parcel, and miscalling a return as an RTO loses less than the reverse
     // (which would imply a customer request that does not exist).

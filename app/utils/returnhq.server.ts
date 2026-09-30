@@ -311,3 +311,55 @@ export async function unconfirmedReturns(
     return { rows: [], inFlight: 0, available: false };
   }
 }
+
+/**
+ * Find a return request by its REVERSE AWB — the waybill on the parcel the
+ * customer sends back.
+ *
+ * OrderFinancials only ever holds the FORWARD AWB, the one we shipped out on.
+ * A reverse pickup gets a different waybill entirely (Delhivery's start with
+ * "R"), so scanning the label on a returning parcel finds nothing there and the
+ * scanner falls back to "not in our orders yet, assumed RTO" — filing a
+ * customer return as an RTO, which is exactly the misclassification the
+ * auto-detection exists to prevent.
+ *
+ * ReturnHQ stores that reverse waybill on the request, so it is the only place
+ * this lookup can succeed.
+ */
+export async function returnHqByReverseAwb(awb: string): Promise<{
+  orderName: string;
+  type: string;
+  status: string;
+} | null> {
+  const db = returnHqClient();
+  if (!db) return null;
+  const clean = String(awb || "").replace(/[^0-9a-zA-Z]/g, "").trim();
+  if (clean.length < 6) return null;
+  try {
+    const shopId = await jmShopId(db);
+    if (shopId == null) return null;
+    // Compared with punctuation stripped on BOTH sides: the scanner normalises
+    // what the gun reads, and ReturnHQ's stored value may carry spacing or
+    // dashes from whatever created it.
+    const rows = await db.$queryRawUnsafe<
+      Array<{ order_name: string; type: string; status: string }>
+    >(
+      `SELECT shopify_order_number AS order_name,
+              type::text           AS type,
+              status::text         AS status
+         FROM return_requests
+        WHERE shop_id = $1
+          AND regexp_replace(COALESCE(awb_number, ''), '[^0-9a-zA-Z]', '', 'g') = $2
+        ORDER BY created_at DESC
+        LIMIT 1`,
+      shopId,
+      clean,
+    );
+    const r = rows[0];
+    return r ? { orderName: r.order_name, type: r.type, status: r.status } : null;
+  } catch (e: any) {
+    // A ReturnHQ outage must not stop a packet being booked in.
+    console.error("[returnhq] byReverseAwb", String(e?.message || e).slice(0, 200));
+    return null;
+  }
+}
