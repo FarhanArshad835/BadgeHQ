@@ -708,6 +708,11 @@ of which ${fmt(c.deliveredRevenue)} delivered`;
           <a className="pnl-btn" href={`/pnl-app/export?month=${d.month}`} download>
             Export orders
           </a>
+          {/* All-time, so no month: a return is raised weeks after the order
+              and belongs to neither month cleanly. */}
+          <a className="pnl-btn" href="/pnl-app/export?sheet=returns" download>
+            Export returns
+          </a>
           <div className="pnl-controls-right">
             {d.lastSyncAt && (
               <span className="pnl-sub" style={{ fontSize: 13 }}>

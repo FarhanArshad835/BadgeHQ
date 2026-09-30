@@ -35,7 +35,7 @@ import type { LoaderFunctionArgs } from "@remix-run/node";
 import prisma from "../db.server";
 import { getPnlApp, isAuthed } from "../utils/pnl-app.server";
 import { monthWindowIst } from "../utils/monthly-pnl.server";
-import { returnHqByOrder } from "../utils/returnhq.server";
+import { returnHqByOrder, returnHqExportRows } from "../utils/returnhq.server";
 
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 
@@ -65,6 +65,39 @@ function splitMinor(total: bigint | null, n: number): Array<bigint | null> {
 }
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
+  // ?sheet=returns is the ReturnHQ record, all-time and one row per item.
+  // Deliberately not folded into the monthly file: a return is raised weeks
+  // after the order, so it belongs to neither month cleanly, and its columns
+  // (reasons, fees, reverse AWBs, the timestamps) answer different questions
+  // than a per-unit sales row.
+  if (new URL(request.url).searchParams.get("sheet") === "returns") {
+    if (!isAuthed(request)) return new Response("Unauthorized", { status: 401 });
+    const rows = await returnHqExportRows();
+    if (!rows.length) {
+      return new Response("ReturnHQ is not reachable, so no file was produced.", {
+        status: 503,
+        headers: { "Content-Type": "text/plain; charset=utf-8" },
+      });
+    }
+    const headers = Object.keys(rows[0]);
+    const esc = (v: unknown) => {
+      const t = String(v ?? "");
+      return /[",\n\r]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
+    };
+    const csv = [
+      headers.join(","),
+      ...rows.map((r) => headers.map((h) => esc(r[h])).join(",")),
+    ].join("\n");
+    const today = new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    return new Response("\uFEFF" + csv, {
+      headers: {
+        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Disposition": `attachment; filename="returns-exchanges-all-time-${today}.csv"`,
+        "Cache-Control": "no-store",
+      },
+    });
+  }
+
   if (!isAuthed(request)) return new Response("Unauthorized", { status: 401 });
 
   const url = new URL(request.url);

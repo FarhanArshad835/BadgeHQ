@@ -394,3 +394,116 @@ export async function returnHqByReverseAwb(awb: string): Promise<{
     throw e;
   }
 }
+
+/**
+ * Every return and exchange request, one row per ITEM, for export.
+ *
+ * All-time rather than per-month, because a return is raised weeks after the
+ * order and belongs to neither month cleanly — the P&L's monthly export already
+ * assigns it to the order's month, and this file is the raw record behind that.
+ *
+ * One row per item, matching the per-unit export: a request for two pairs
+ * becomes two rows, so the file can be pivoted by SKU or reason without anyone
+ * having to weight by quantity first.
+ *
+ * Every timestamp ReturnHQ records is carried, because the gaps between them
+ * are the answerable questions: raised to picked up is the customer's delay,
+ * picked up to carrier-received is the courier's, and carrier-received to
+ * received is ours.
+ */
+export async function returnHqExportRows(): Promise<Array<Record<string, string>>> {
+  const db = await returnHqReady();
+  if (!db) return [];
+  const shopId = await jmShopId(db);
+  if (shopId == null) return [];
+
+  const rows = await db.$queryRawUnsafe<Array<Record<string, any>>>(
+    `SELECT r.shopify_order_number, r.ran, r.type::text AS type, r.status::text AS status,
+            r.customer_name, r.customer_email, r.customer_phone,
+            r.awb_number, r.logistics_provider, r.tracking_url,
+            r.total_fee_paise, r.restocking_fee_paise, r.shipping_fee_paise,
+            r.fee_collected, r.fee_deducted,
+            r.refund_method::text AS refund_method,
+            r.refund_amount_paise, r.refund_deductions_paise,
+            r.exchange_order_id, r.is_self_ship, r.received_source,
+            r.carrier_status_text, r.merchant_notes, r.rejection_reason,
+            r.created_at, r.approved_at, r.rejected_at, r.pickup_scheduled_at,
+            r.picked_up_at, r.carrier_received_at, r.received_at,
+            r.refunded_at, r.completed_at,
+            i.sku, i.product_title, i.variant_title, i.quantity,
+            i.price_paise, i.price_paid_paise,
+            i.reason_text, i.item_type::text AS item_type,
+            i.exchange_sku, i.exchange_variant_title, i.exchange_price_paise,
+            i.resolution_status::text AS resolution_status,
+            rr.label AS reason_label
+       FROM return_requests r
+       LEFT JOIN return_request_items i ON i.return_request_id = r.id
+       LEFT JOIN return_reasons rr ON rr.id = i.reason_id
+      WHERE r.shop_id = $1
+      ORDER BY r.created_at DESC, i.id ASC`,
+    shopId,
+  );
+
+  const IST = IST_OFFSET_MS;
+  // Dates in IST, so a file opened in Delhi shows the day the thing happened.
+  const d = (v: any) =>
+    v instanceof Date ? new Date(v.getTime() + IST).toISOString().slice(0, 16).replace("T", " ") : "";
+  const rup = (v: any) => (v == null ? "" : (Number(v) / 100).toFixed(2));
+  const str = (v: any) => (v == null ? "" : String(v));
+  const bool = (v: any) => (v === true ? "yes" : v === false ? "no" : "");
+  // Whole days between two stamps: the gap is the question, not the instants.
+  const gap = (a: any, b: any) =>
+    a instanceof Date && b instanceof Date
+      ? String(Math.floor((b.getTime() - a.getTime()) / 86400000))
+      : "";
+
+  return rows.map((r) => ({
+    order_name: str(r.shopify_order_number),
+    request_ref: str(r.ran),
+    type: str(r.type),
+    status: str(r.status),
+    sku: str(r.sku),
+    product_title: str(r.product_title),
+    variant_title: str(r.variant_title),
+    quantity: str(r.quantity),
+    item_price: rup(r.price_paise),
+    price_paid: rup(r.price_paid_paise),
+    item_type: str(r.item_type),
+    reason: str(r.reason_label || r.reason_text),
+    reason_detail: str(r.reason_text),
+    resolution_status: str(r.resolution_status),
+    exchange_sku: str(r.exchange_sku),
+    exchange_variant: str(r.exchange_variant_title),
+    exchange_price: rup(r.exchange_price_paise),
+    exchange_order_id: str(r.exchange_order_id),
+    fee_total: rup(r.total_fee_paise),
+    fee_restocking: rup(r.restocking_fee_paise),
+    fee_shipping: rup(r.shipping_fee_paise),
+    fee_collected: bool(r.fee_collected),
+    fee_deducted: bool(r.fee_deducted),
+    refund_method: str(r.refund_method),
+    refund_amount: rup(r.refund_amount_paise),
+    refund_deductions: rup(r.refund_deductions_paise),
+    reverse_awb: str(r.awb_number),
+    carrier: str(r.logistics_provider),
+    carrier_status: str(r.carrier_status_text),
+    self_ship: bool(r.is_self_ship),
+    received_source: str(r.received_source),
+    raised_at: d(r.created_at),
+    approved_at: d(r.approved_at),
+    rejected_at: d(r.rejected_at),
+    pickup_scheduled_at: d(r.pickup_scheduled_at),
+    picked_up_at: d(r.picked_up_at),
+    carrier_received_at: d(r.carrier_received_at),
+    received_at: d(r.received_at),
+    refunded_at: d(r.refunded_at),
+    completed_at: d(r.completed_at),
+    days_raised_to_pickup: gap(r.created_at, r.picked_up_at),
+    days_pickup_to_carrier: gap(r.picked_up_at, r.carrier_received_at),
+    days_carrier_to_received: gap(r.carrier_received_at, r.received_at),
+    days_raised_to_completed: gap(r.created_at, r.completed_at),
+    merchant_notes: str(r.merchant_notes),
+    rejection_reason: str(r.rejection_reason),
+    tracking_url: str(r.tracking_url),
+  }));
+}

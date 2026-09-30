@@ -127,6 +127,9 @@ export function ScanPad({
     signedOut?: boolean;
   }>({ state: "idle", awb: "", message: hint, kind: "", confident: true });
   const [pending, setPending] = useState(0);
+  // Refusals are counted but not listed: the operator needs to know the pile
+  // had some, without rows for packets that were never dispatched.
+  const [refused, setRefused] = useState(0);
 
   // A Set, built once: 3,000 linear scans per keystroke would defeat the point.
   const dispatchedSet = useRef<Set<string>>(new Set());
@@ -230,10 +233,12 @@ export function ScanPad({
       });
       beep(optimistic);
 
-      // A duplicate we can already see locally never enters the list: the
-      // panel says so, and the row would be a record of something that did
-      // not happen.
-      if (optimistic !== "duplicate") {
+      // A refusal never enters the list. Both "duplicate" and "blocked" mean
+      // the packet was NOT dispatched, so a row for either would be a record
+      // of something that did not happen — and the count already excluded
+      // them, so the list and the tally disagreed.
+      if (optimistic === "duplicate" || optimistic === "blocked") setRefused((n) => n + 1);
+      if (optimistic !== "duplicate" && optimistic !== "blocked") {
         const row: ScanRow = {
           awb,
           result: optimistic,
@@ -267,10 +272,13 @@ export function ScanPad({
         const data = decodeTurboStream(await res.text());
 
         // The server has the last word: it can see duplicates from other devices.
-        if (data.result === "duplicate") {
-          // Nothing was written, so nothing belongs in the list. Leaving a row
-          // would imply a second scan happened and would inflate the count the
-          // operator uses to check their pile against.
+        if (data.result === "duplicate" || data.result === "blocked") {
+          // Only when the server disagrees with an optimistic OK; otherwise it
+          // was already counted above.
+          if (optimistic !== "duplicate" && optimistic !== "blocked") setRefused((n) => n + 1);
+          // Nothing was dispatched, so nothing belongs in the list. Leaving a
+          // row would imply a scan happened and would disagree with the count
+          // the operator checks their pile against.
           setRows((r) => r.filter((x) => !(x.awb === awb && !x.saved)));
         } else {
           setRows((r) =>
@@ -320,7 +328,8 @@ export function ScanPad({
   );
 
   const look = PANEL[panel.state] || PANEL.idle;
-  const savedCount = rows.filter((r) => r.saved && r.result !== "blocked").length;
+  // Refusals never reach the list now, so this counts exactly what it shows.
+  const savedCount = rows.filter((r) => r.saved).length;
   const unsaved = rows.filter((r) => r.result === "error").length;
 
   return (
@@ -328,7 +337,18 @@ export function ScanPad({
       <div className="pnl-scan-head">
         <h1 className="pnl-h1" style={{ fontSize: 20, margin: 0 }}>{title}</h1>
         <div className="pnl-scan-counts">
-          <span><strong>{savedCount}</strong> scanned</span>
+          {/* The session tally, big enough to read from the bench. It is what
+              an operator counts their physical pile against, so it states the
+              number rather than mentioning it. */}
+          <span style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+            <strong style={{ fontSize: 26, lineHeight: 1 }}>{savedCount}</strong>
+            <span>scanned this session</span>
+          </span>
+          {refused > 0 && (
+            <span className="pnl-sub" style={{ fontSize: 12 }}>
+              {refused} refused
+            </span>
+          )}
           {pending > 0 && <span className="pnl-scan-pending">{pending} saving…</span>}
           {unsaved > 0 && <span className="pnl-scan-unsaved">{unsaved} NOT SAVED</span>}
         </div>
