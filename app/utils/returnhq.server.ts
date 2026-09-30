@@ -386,8 +386,11 @@ export async function returnHqByReverseAwb(awb: string): Promise<{
     const r = rows[0];
     return r ? { orderName: r.order_name, type: r.type, status: r.status } : null;
   } catch (e: any) {
-    // A ReturnHQ outage must not stop a packet being booked in.
+    // Rethrown, not swallowed. Returning null here would be indistinguishable
+    // from "this AWB is not a return", and the caller would file a customer
+    // return as an RTO and store that verdict permanently. The caller decides
+    // what to do with a failure; it must not be told a lie.
     console.error("[returnhq] byReverseAwb", String(e?.message || e).slice(0, 200));
-    return null;
+    throw e;
   }
 }

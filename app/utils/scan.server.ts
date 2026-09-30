@@ -25,7 +25,7 @@ export type ScanKind = "dispatch" | "rto" | "customer-return";
  * request is a deliberate act while a courier status is a guess about a parcel.
  */
 export type InboundKind = "rto" | "customer-return";
-export type ScanResult = "ok" | "duplicate" | "not-found" | "blocked";
+export type ScanResult = "ok" | "duplicate" | "not-found" | "blocked" | "error";
 
 /**
  * Normalise a scanned code the same way parseDeliveryCsv does.
@@ -81,6 +81,24 @@ export async function recordScan(
   if (requested === "inbound" && awb.length >= 6) {
     detected = await detectInbound(shop, awb);
     kind = detected.kind;
+    // Detection could not reach ReturnHQ, so we do not know what this parcel
+    // is. Writing it now would store a guess that the unique constraint then
+    // protects from correction: a re-scan is refused as a duplicate rather
+    // than reclassified. Refuse instead, and say so.
+    if (detected.lookupFailed) {
+      return {
+        awb,
+        kind,
+        detectedReason: detected.reason,
+        confident: false,
+        result: "error",
+        message: "NOT SAVED — could not check whether this is a return. Scan it again.",
+        orderName: "",
+        deliveryStatus: "",
+        returnType: "",
+        previousScanAt: "",
+      };
+    }
   }
   const base: ScanOutcome = {
     awb,
@@ -240,6 +258,8 @@ export async function detectInbound(
   orderName: string;
   deliveryStatus: string;
   returnType: string;
+  /** True when we could not reach ReturnHQ, so the verdict is not usable. */
+  lookupFailed?: boolean;
 }> {
   const order = await prisma.orderFinancials.findFirst({
     where: { shop, awb },
@@ -267,8 +287,20 @@ export async function detectInbound(
         };
       }
     } catch {
-      // Falls through to the RTO default below; a ReturnHQ outage must not
-      // stop the packet being recorded.
+      // The lookup FAILED — we do not know what this parcel is. Recording it
+      // as an RTO would store a guess permanently, and the unique constraint
+      // means a later re-scan is refused as a duplicate rather than correcting
+      // it. Marked unknown and not confident so the caller can refuse to file
+      // it and the operator can scan it again.
+      return {
+        kind: "rto",
+        confident: false,
+        reason: "LOOKUP FAILED — not recorded. Scan this packet again.",
+        orderName: "",
+        deliveryStatus: "",
+        returnType: "",
+        lookupFailed: true,
+      };
     }
 
     // Nothing to go on. RTO is the safer default: it is the commoner inbound
