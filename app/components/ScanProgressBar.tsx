@@ -21,12 +21,15 @@ export function ScanProgressBar({
   unscanned,
   undated,
   graceDays,
+  noun = "the courier returned",
 }: {
   scanned: number;
   unscanned: number;
   /** Returned parcels with no courier date — outside the bar, not part of it. */
   undated: number;
   graceDays: number;
+  /** How the parcels got here, so the heading reads true on either tab. */
+  noun?: string;
 }) {
   const total = scanned + unscanned;
   if (total === 0) return null;
@@ -42,7 +45,7 @@ export function ScanProgressBar({
   return (
     <div className="pnl-panel" style={{ marginBottom: 14 }}>
       <div className="pnl-section-label">
-        Of {fmt(total)} parcels the courier returned over {graceDays} days ago
+        Of {fmt(total)} parcels {noun} over {graceDays} days ago
       </div>
 
       {/* The headline: the gap, not the total. */}

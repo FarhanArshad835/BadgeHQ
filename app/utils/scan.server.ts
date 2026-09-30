@@ -441,6 +441,64 @@ export async function loadDispatchedSet(shop: string): Promise<string[]> {
   return rows.map((r) => r.awb);
 }
 
+/**
+ * Customer returns the courier delivered, split by whether the bench saw them.
+ *
+ * The same shape as claimCandidates, against a different counterparty. It joins
+ * two systems that do not know about each other: ReturnHQ holds the courier's
+ * delivery claim, ScanEvent holds our own physical confirmation.
+ *
+ * Matching is by AWB, and a return carries a REVERSE waybill — so this compares
+ * against the AWB recorded on the scan, which is what the operator's gun read.
+ * Comparing on order name instead would miss a scan recorded before the reverse
+ * lookup existed, and an order with two return requests would collide.
+ */
+export async function returnClaimCandidates(
+  shop: string,
+  graceDays: number,
+): Promise<{
+  rows: Array<{
+    orderName: string;
+    awb: string;
+    carrier: string;
+    receivedAt: string;
+    daysOld: number;
+    type: string;
+  }>;
+  /** Delivered returns past the cutoff: the denominator for the bar. */
+  eligibleCount: number;
+  scannedCount: number;
+  inFlight: number;
+  available: boolean;
+}> {
+  const { unconfirmedReturns } = await import("./returnhq.server");
+  const res = await unconfirmedReturns(graceDays);
+  if (!res.available) {
+    return { rows: [], eligibleCount: 0, scannedCount: 0, inFlight: res.inFlight, available: false };
+  }
+
+  // Which of these has the bench actually scanned? Chunked: an IN list of
+  // several thousand is refused by the planner well before it is slow.
+  const awbs = res.rows.map((r) => normaliseAwb(r.awb)).filter(Boolean);
+  const seen = new Set<string>();
+  for (let i = 0; i < awbs.length; i += 2000) {
+    const scans = await prisma.scanEvent.findMany({
+      where: { shop, kind: "customer-return", awb: { in: awbs.slice(i, i + 2000) } },
+      select: { awb: true },
+    });
+    for (const sc of scans) seen.add(sc.awb);
+  }
+
+  const rows = res.rows.filter((r) => !seen.has(normaliseAwb(r.awb)));
+  return {
+    rows,
+    eligibleCount: res.rows.length,
+    scannedCount: seen.size,
+    inFlight: res.inFlight,
+    available: true,
+  };
+}
+
 /** Recent scans for the history page and the session list. */
 export async function recentScans(shop: string, kind: ScanKind | null, limit = 200) {
   return prisma.scanEvent.findMany({

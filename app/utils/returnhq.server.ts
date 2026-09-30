@@ -212,19 +212,20 @@ export async function returnHqCountsForMonth(month: string): Promise<ReturnHqMon
 }
 
 /**
- * Customer returns the courier says it delivered to us, that nobody has
- * physically confirmed.
+ * Every customer return the courier says it delivered to us, past the grace
+ * period. The caller decides which of them the bench has actually scanned.
  *
  * The mirror of the RTO claim list, against a different counterparty. A reverse
  * pickup is still a courier holding our stock: they collected it from the
  * customer and told us they dropped it at the warehouse, so if it never turned
  * up that is their liability, not the customer's.
  *
- * Two dates make this possible without any new plumbing, and ReturnHQ already
- * records both:
- *   carrier_received_at - the courier's own claim that it reached us
- *   received_at         - a human confirming it physically arrived
- * A row with the first and not the second is exactly the gap worth chasing.
+ * Measured against ScanEvent, NOT against ReturnHQ's own received_at. That
+ * column is set by the QC step, and on live data every request carrying
+ * carrier_received_at already had it — so comparing the two columns asked
+ * ReturnHQ whether ReturnHQ agreed with itself and always answered zero. The
+ * bench scan is an independent observation, and a courier delivery that no
+ * scan corroborates is the gap actually worth chasing.
  *
  * Rows with no carrier date are counted separately rather than assumed missing:
  * a return still in transit has not been delivered yet, and dunning a courier
@@ -271,10 +272,9 @@ export async function unconfirmedReturns(
         WHERE shop_id = $1
           AND status::text <> 'cancelled'
           AND carrier_received_at IS NOT NULL
-          AND received_at IS NULL
           AND carrier_received_at < $2
         ORDER BY carrier_received_at ASC
-        LIMIT 5000`,
+        LIMIT 20000`,
       shopId,
       cutoff,
     );

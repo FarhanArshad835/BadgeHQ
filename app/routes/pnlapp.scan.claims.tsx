@@ -26,8 +26,7 @@ import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData, useSearchParams, useNavigation } from "@remix-run/react";
 import { getPnlApp, isAuthed } from "../utils/pnl-app.server";
-import { claimCandidates, scanCountsToday } from "../utils/scan.server";
-import { unconfirmedReturns } from "../utils/returnhq.server";
+import { claimCandidates, returnClaimCandidates, scanCountsToday } from "../utils/scan.server";
 import { PnlStyles } from "../utils/pnl-styles";
 import { ScanNav } from "../components/ScanNav";
 import { ScanProgressBar } from "../components/ScanProgressBar";
@@ -77,7 +76,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   // Only the visible half is queried. ReturnHQ is a second database over the
   // network; loading it to render the RTO tab would slow every page view.
   if (tab === "returns") {
-    const res = await unconfirmedReturns(days);
+    const res = await returnClaimCandidates(shop, days);
 
     if (url.searchParams.get("format") === "csv") {
       return csvResponse(
@@ -100,6 +99,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       counts,
       rows: res.rows.slice(0, 500),
       totalRows: res.rows.length,
+      scanned: res.scannedCount,
+      eligible: res.eligibleCount,
       inFlight: res.inFlight,
       available: res.available,
     });
@@ -201,19 +202,20 @@ export default function Claims() {
           </a>
         </div>
 
-        {!isReturns && d.eligible > 0 && (
+        {d.eligible > 0 && (
           <ScanProgressBar
             scanned={d.scanned}
             unscanned={d.totalRows}
-            undated={d.undated}
+            undated={isReturns ? 0 : d.undated}
             graceDays={d.days}
+            noun={isReturns ? "the customer sent back" : "the courier returned"}
           />
         )}
 
         <div className="pnl-panel" style={{ marginBottom: 14 }}>
           <div className="pnl-section-label">
             {isReturns
-              ? "Sent back by the customer, never confirmed on the bench"
+              ? "Delivered back by the courier, never scanned in"
               : "Returned by courier, never scanned in"}
           </div>
           <div style={{ display: "flex", gap: 28, flexWrap: "wrap", marginTop: 8 }}>
@@ -277,7 +279,7 @@ export default function Claims() {
             <p className="pnl-sub" style={{ margin: 0 }}>
               {isReturns
                 ? d.available
-                  ? `Nothing to claim. Every return the courier delivered more than ${d.days} days ago has been confirmed at the warehouse.`
+                  ? `Nothing to claim. Every return the courier delivered more than ${d.days} days ago has been scanned in.`
                   : "Nothing to show."
                 : d.undated > 0
                   ? "No claimable parcels yet: none of the returned parcels carry a courier return date."
