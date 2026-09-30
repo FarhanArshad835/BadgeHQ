@@ -137,6 +137,23 @@ export function ScanPad({
     dispatchedSet.current = new Set(dispatched || []);
   }, [dispatched]);
 
+  /**
+   * Start a fresh session.
+   *
+   * Clears only what is on screen — the list, the counters, the panel. The
+   * scans themselves stay recorded, and the duplicate check still sees them,
+   * so this cannot be used to sneak a packet through twice. It exists because
+   * a bench works in batches: finish a trolley, reset the tally, start the
+   * next one against a count that means something.
+   */
+  const startNewSession = useCallback(() => {
+    setRows([]);
+    setRefused(0);
+    setPending(0);
+    setPanel({ state: "idle", awb: "", message: hint, kind: "", confident: true });
+    inputRef.current?.focus();
+  }, [hint]);
+
   const dismiss = useCallback(
     () => setPanel({ state: "idle", awb: "", message: hint, kind: "", confident: true }),
     [hint],
@@ -421,6 +438,20 @@ export function ScanPad({
           )}
           {pending > 0 && <span className="pnl-scan-pending">{pending} saving…</span>}
           {unsaved > 0 && <span className="pnl-scan-unsaved">{unsaved} NOT SAVED</span>}
+          {rows.length > 0 && (
+            <button
+              type="button"
+              className="pnl-btn"
+              onClick={() => {
+                // Only worth confirming once there is something to lose.
+                if (unsaved > 0 && !confirm(`${unsaved} scan(s) were NOT saved. Start a new session anyway?`)) return;
+                startNewSession();
+              }}
+              style={{ fontSize: 12, padding: "4px 10px" }}
+            >
+              New session
+            </button>
+          )}
         </div>
       </div>
 

@@ -31,7 +31,21 @@ import { PnlStyles } from "../utils/pnl-styles";
 import { ScanNav } from "../components/ScanNav";
 import { ScanProgressBar } from "../components/ScanProgressBar";
 
-const DAY_OPTIONS = [7, 14, 30, 45];
+/**
+ * The grace period before a missing parcel is worth chasing.
+ *
+ * Labelled by what the operator is deciding — how long to wait — rather than
+ * by the date arithmetic behind it. "Delivered to us over 7 days ago" made the
+ * reader work out that a longer window means fewer, older, more certain
+ * parcels; saying so directly is the whole job of the label.
+ */
+const DAY_OPTIONS = [
+  { days: 7, label: "Missing over 1 week", note: "most parcels, some may still turn up" },
+  { days: 14, label: "Missing over 2 weeks", note: "fewer, and harder for a courier to dispute" },
+  { days: 30, label: "Missing over 1 month", note: "" },
+  { days: 45, label: "Missing over 6 weeks", note: "the strongest claims" },
+];
+const DAY_VALUES = DAY_OPTIONS.map((o) => o.days);
 const TABS = ["rto", "returns"] as const;
 type Tab = (typeof TABS)[number];
 
@@ -54,7 +68,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const url = new URL(request.url);
   const requested = Number(url.searchParams.get("days") || 7);
-  const days = DAY_OPTIONS.includes(requested) ? requested : 7;
+  const days = DAY_VALUES.includes(requested) ? requested : 7;
   const t = url.searchParams.get("tab");
   const tab: Tab = TABS.includes(t as Tab) ? (t as Tab) : "rto";
 
@@ -188,12 +202,17 @@ export default function Claims() {
             disabled={loading}
             onChange={(e) => go({ days: e.target.value })}
           >
-            {DAY_OPTIONS.map((n) => (
-              <option key={n} value={n}>
-                Delivered to us over {n} days ago
+            {DAY_OPTIONS.map((o) => (
+              <option key={o.days} value={o.days}>
+                {o.label}
               </option>
             ))}
           </select>
+          {/* What the choice actually means, so the dropdown does not have to
+              be decoded before it can be used. */}
+          <span className="pnl-sub" style={{ fontSize: 12.5 }}>
+            {DAY_OPTIONS.find((o) => o.days === d.days)?.note}
+          </span>
           <a
             className="pnl-btn"
             href={`/pnl-app/scan/claims?tab=${d.tab}&days=${d.days}&format=csv`}
@@ -208,7 +227,7 @@ export default function Claims() {
             unscanned={d.totalRows}
             undated={isReturns ? 0 : d.undated}
             graceDays={d.days}
-            noun={isReturns ? "the customer sent back" : "the courier returned"}
+            noun={isReturns ? "collected and delivered" : "returned"}
           />
         )}
 

@@ -21,14 +21,14 @@ export function ScanProgressBar({
   unscanned,
   undated,
   graceDays,
-  noun = "the courier returned",
+  noun = "returned",
 }: {
   scanned: number;
   unscanned: number;
   /** Returned parcels with no courier date — outside the bar, not part of it. */
   undated: number;
   graceDays: number;
-  /** How the parcels got here, so the heading reads true on either tab. */
+  /** Verb for how the parcel came back, so the sentence reads true per tab. */
   noun?: string;
 }) {
   const total = scanned + unscanned;
@@ -44,15 +44,17 @@ export function ScanProgressBar({
 
   return (
     <div className="pnl-panel" style={{ marginBottom: 14 }}>
-      <div className="pnl-section-label">
-        Of {fmt(total)} parcels {noun} over {graceDays} days ago
-      </div>
+      <div className="pnl-section-label">Stock the courier says we have</div>
 
-      {/* The headline: the gap, not the total. */}
-      <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginTop: 10 }}>
+      {/* The headline is a sentence, not a caption: the number, then what it
+          means, in the order someone reads it. */}
+      <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginTop: 10, flexWrap: "wrap" }}>
         <div style={{ fontSize: 34, fontWeight: 700, lineHeight: 1.1 }}>{fmt(unscanned)}</div>
-        <div className="pnl-sub" style={{ fontSize: 14 }}>
-          never scanned in — {pctUnscanned.toFixed(1)}% of them
+        <div style={{ fontSize: 15 }}>
+          parcels are missing.{" "}
+          <span className="pnl-sub">
+            The courier {noun} them over {graceDays} days ago and nobody here has seen them.
+          </span>
         </div>
       </div>
 
@@ -110,14 +112,19 @@ export function ScanProgressBar({
 
       {/* Legend with counts: identity never rests on colour alone. */}
       <div style={{ display: "flex", gap: 22, flexWrap: "wrap", marginTop: 12 }}>
-        <LegendItem color={SCANNED} label="Scanned in" value={fmt(scanned)} note="physically confirmed" />
-        <LegendItem color={UNSCANNED} label="Not scanned" value={fmt(unscanned)} note="claimable" />
+        <LegendItem color={SCANNED} label="Found" value={fmt(scanned)} note="scanned at the bench" />
+        <LegendItem
+          color={UNSCANNED}
+          label="Missing"
+          value={fmt(unscanned)}
+          note="claim these from the courier"
+        />
         {undated > 0 && (
           <LegendItem
             color="var(--line)"
-            label="No return date"
+            label="Can't tell yet"
             value={fmt(undated)}
-            note="not in this bar"
+            note="courier gave no return date"
           />
         )}
       </div>

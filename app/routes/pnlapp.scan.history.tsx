@@ -8,6 +8,7 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData, useSearchParams } from "@remix-run/react";
+import prisma from "../db.server";
 import { getPnlApp, isAuthed } from "../utils/pnl-app.server";
 import { recentScans, scanCountsToday, type ScanKind, type ScanResult } from "../utils/scan.server";
 import { PnlStyles } from "../utils/pnl-styles";
@@ -23,7 +24,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (!isAuthed(request, "scan")) return redirect("/pnl-app/scan/login");
   const app = await getPnlApp();
   const shop = app.shopDomain;
-  if (!shop) return json({ rows: [], counts: {}, kind: "", result: "" });
+  if (!shop) return json({ rows: [], counts: {}, total: 0, kind: "", result: "" });
 
   const url = new URL(request.url);
   const raw = url.searchParams.get("kind") || "";
@@ -34,6 +35,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     : null) as ScanResult | null;
 
   const rows = await recentScans(shop, kind, 500, result);
+  // Counted separately: the list is capped at 500, so rows.length would
+  // silently understate a filter that matches more than that.
+  const total = await prisma.scanEvent.count({
+    where: { shop, ...(kind ? { kind } : {}), ...(result ? { result } : {}) },
+  });
 
   if (url.searchParams.get("format") === "csv") {
     const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
@@ -63,6 +69,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const counts = await scanCountsToday(shop);
   return json({
     counts,
+    total,
     kind: kind || "",
     result: result || "",
     rows: rows.map((r) => ({
@@ -94,6 +101,7 @@ export default function ScanHistory() {
   const d = useLoaderData<typeof loader>() as {
     rows: Row[];
     counts: Record<string, number>;
+    total: number;
     kind: string;
     result: string;
   };
@@ -142,6 +150,13 @@ export default function ScanHistory() {
             <option value="duplicate">Duplicate</option>
             <option value="blocked">Blocked</option>
           </select>
+          {/* States what the filter actually matched. rows.length would report
+              the page size, which is a different and misleading number. */}
+          <span className="pnl-sub" style={{ fontSize: 13 }}>
+            <strong>{d.total.toLocaleString("en-IN")}</strong>{" "}
+            {d.total === 1 ? "scan" : "scans"}
+            {d.total > d.rows.length && <> · showing the latest {d.rows.length}</>}
+          </span>
           <a
             className="pnl-btn"
             href={`/pnl-app/scan/history?format=csv${d.kind ? `&kind=${d.kind}` : ""}${d.result ? `&result=${d.result}` : ""}`}
