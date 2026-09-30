@@ -228,6 +228,88 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     });
   }
 
+  // Read-only: ?notinsheet=YYYY-MM lists unresolved orders that DO have an AWB.
+  // Those cannot be explained by a missing tracking number: the AWB exists, so
+  // either the tracking sheet has no row for it or the sheet's status is one we
+  // do not map. Three sampled AWBs were confirmed absent from the sheet while
+  // Shiprocket reported them Delivered, so the sheet — not the courier — is the
+  // gap. Add &format=csv to download and re-feed them into the sheet.
+  const notInSheetMonth = new URL(request.url).searchParams.get("notinsheet");
+  if (notInSheetMonth) {
+    const app = await getPnlApp();
+    const shop = app.shopDomain;
+    if (!shop) return json({ error: "not-configured" }, { status: 400 });
+
+    const [sy, sm] = notInSheetMonth.split("-").map(Number);
+    const sStart = new Date(Date.UTC(sy, sm - 1, 1) - IST_OFFSET_MS);
+    const sEnd = new Date(Date.UTC(sy, sm, 1) - IST_OFFSET_MS);
+
+    const rows = await prisma.orderFinancials.findMany({
+      where: {
+        shop,
+        orderCreatedAt: { gte: sStart, lt: sEnd },
+        awb: { not: "" },
+        deliveryStatus: { notIn: ["delivered", "rto", "rto_in_transit", "cancelled", "abandoned", "lost"] },
+      },
+      select: {
+        orderName: true,
+        awb: true,
+        carrier: true,
+        deliveryStatus: true,
+        orderCreatedAt: true,
+        deliverySyncedAt: true,
+        grossRevenueMinor: true,
+      },
+      orderBy: { orderCreatedAt: "asc" },
+    });
+
+    const byStatus: Record<string, number> = {};
+    let valueMinor = 0n;
+    for (const r of rows) {
+      byStatus[r.deliveryStatus] = (byStatus[r.deliveryStatus] || 0) + 1;
+      valueMinor += r.grossRevenueMinor;
+    }
+
+    if (new URL(request.url).searchParams.get("format") === "csv") {
+      const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+      const csv = [
+        "order_name,awb,carrier,delivery_status,order_date,last_sheet_sync,order_value",
+        ...rows.map((r) =>
+          [
+            esc(r.orderName),
+            esc(r.awb),
+            esc(r.carrier),
+            esc(r.deliveryStatus),
+            esc(r.orderCreatedAt.toISOString().slice(0, 10)),
+            esc(r.deliverySyncedAt ? r.deliverySyncedAt.toISOString().slice(0, 10) : ""),
+            (Number(r.grossRevenueMinor) / 100).toFixed(2),
+          ].join(","),
+        ),
+      ].join("\n");
+      return new Response(csv, {
+        headers: {
+          "Content-Type": "text/csv; charset=utf-8",
+          "Content-Disposition": `attachment; filename="not-in-sheet-${notInSheetMonth}.csv"`,
+          "Cache-Control": "no-store",
+        },
+      });
+    }
+
+    return json({
+      ok: true,
+      month: notInSheetMonth,
+      hasAwbButUnresolved: rows.length,
+      valueRupees: Number(valueMinor) / 100,
+      byStatus,
+      sample: rows.slice(0, 40).map((r) => ({
+        order: r.orderName,
+        awb: r.awb,
+        carrier: r.carrier,
+        status: r.deliveryStatus,
+      })),
+    });
+  }
+
   // Read-only: ?noawb=YYYY-MM lists every order in the month with no AWB and
   // no delivered/rto outcome — the orders stuck as "no-awb". Add &format=csv to
   // download. These are the ones that can never resolve without a tracking no.
