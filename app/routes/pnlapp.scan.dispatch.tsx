@@ -12,9 +12,10 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData, useNavigation, useSubmit } from "@remix-run/react";
 import { getPnlApp, isAuthed } from "../utils/pnl-app.server";
-import { loadDispatchedSet, recordScan, syncDispatchedAwbs, scanCountsToday } from "../utils/scan.server";
+import { loadDispatchedSet, recordScan, syncDispatchedAwbs, scanCountsToday , recordScanBulk} from "../utils/scan.server";
 import { PnlStyles } from "../utils/pnl-styles";
 import { ScanPad } from "../components/ScanPad";
+import { BulkScan } from "../components/BulkScan";
 import { ScanNav } from "../components/ScanNav";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -45,6 +46,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const type = request.headers.get("Content-Type") || "";
   if (type.includes("application/json")) {
     const body = await request.json().catch(() => null);
+    if (body?.bulk) {
+      return json(await recordScanBulk(shop, "dispatch", String(body.bulk)));
+    }
     if (!body?.awb) return json({ error: "bad-request" }, { status: 400 });
     const outcome = await recordScan(shop, "dispatch", String(body.awb));
     return json(outcome);
@@ -97,6 +101,8 @@ export default function DispatchScanner() {
           hint="Scan a packet before it goes out."
           dispatched={d.dispatched}
         />
+
+        <BulkScan kind="dispatch" label="Paste a list of AWBs instead" />
       </div>
     </div>
   );

@@ -18,9 +18,10 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { getPnlApp, isAuthed } from "../utils/pnl-app.server";
-import { recordScan, scanCountsToday } from "../utils/scan.server";
+import { recordScan, recordScanBulk, scanCountsToday } from "../utils/scan.server";
 import { PnlStyles } from "../utils/pnl-styles";
 import { ScanPad } from "../components/ScanPad";
+import { BulkScan } from "../components/BulkScan";
 import { ScanNav } from "../components/ScanNav";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -37,6 +38,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (!shop) return json({ error: "not-configured" }, { status: 400 });
 
   const body = await request.json().catch(() => null);
+
+  // A pasted list takes the same path as the gun, one AWB at a time.
+  if (body?.bulk) {
+    return json(await recordScanBulk(shop, "inbound", String(body.bulk)));
+  }
+
   if (!body?.awb) return json({ error: "bad-request" }, { status: 400 });
 
   // "inbound" lets recordScan decide between rto and customer-return.
@@ -58,6 +65,8 @@ export default function ReturnsScanner() {
           title="Inbound parcels"
           hint="Scan any parcel coming back. RTO or customer return is worked out for you."
         />
+
+        <BulkScan kind="inbound" label="Paste a list of AWBs instead" />
 
         <p className="pnl-help" style={{ marginTop: 14 }}>
           A parcel the courier returned undelivered is an <strong>RTO</strong>. One the customer

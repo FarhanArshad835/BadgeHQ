@@ -167,6 +167,63 @@ export async function recordScan(
 }
 
 /**
+ * Record a pasted list of AWBs.
+ *
+ * For reconciling a pile that was worked through offline, or clearing a backlog
+ * the gun never saw. Each AWB goes through recordScan unchanged, so detection,
+ * the duplicate constraint and the not-found path behave exactly as they do at
+ * the bench — a bulk paste must not be a second, looser way in.
+ *
+ * Sequential on purpose. Detection hits ReturnHQ per AWB, and firing a few
+ * hundred of those at once would make a bulk paste the heaviest thing the app
+ * does. A list this size is pasted rarely and can afford to take its time.
+ *
+ * Capped, because the caller is a text box: a runaway paste should be refused
+ * with a clear message rather than holding a request open for minutes.
+ */
+export const BULK_SCAN_LIMIT = 500;
+
+export async function recordScanBulk(
+  shop: string,
+  requested: ScanKind | "inbound",
+  rawList: string,
+): Promise<{
+  results: ScanOutcome[];
+  counts: Record<string, number>;
+  skipped: number;
+  truncated: boolean;
+}> {
+  // Split on anything that is not part of an AWB: newlines, commas, tabs,
+  // spaces, semicolons. A pasted column and a pasted CSV both work.
+  const seen = new Set<string>();
+  const list: string[] = [];
+  let skipped = 0;
+  for (const piece of String(rawList || "").split(/[^0-9a-zA-Z]+/)) {
+    const awb = normaliseAwb(piece);
+    if (!awb) continue;
+    if (awb.length < 6) { skipped++; continue; }
+    // A list pasted from a spreadsheet often repeats a row. Deduplicating here
+    // keeps the report honest: the same packet listed twice is one parcel, not
+    // one scan and one duplicate.
+    if (seen.has(awb)) { skipped++; continue; }
+    seen.add(awb);
+    list.push(awb);
+  }
+
+  const truncated = list.length > BULK_SCAN_LIMIT;
+  const work = truncated ? list.slice(0, BULK_SCAN_LIMIT) : list;
+
+  const results: ScanOutcome[] = [];
+  const counts: Record<string, number> = {};
+  for (const awb of work) {
+    const outcome = await recordScan(shop, requested, awb);
+    results.push(outcome);
+    counts[outcome.result] = (counts[outcome.result] || 0) + 1;
+  }
+  return { results, counts, skipped, truncated };
+}
+
+/**
  * Work out whether an inbound parcel is an RTO or a customer return.
  *
  * Returns the reason as well as the verdict: an operator who can see WHY will
