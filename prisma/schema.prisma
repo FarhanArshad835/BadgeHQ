@@ -957,6 +957,30 @@ model UsdOrder {
 /// tracking sheet owns OrderFinancials.deliveryStatus and the twice-daily cron
 /// would overwrite anything written here. Scans accumulate on their own so they
 /// can later be reconciled AGAINST the sheet rather than fight it.
+/// A courier claim raised on a parcel that never arrived.
+///
+/// Keyed by AWB rather than order: a claim is an argument with a courier about
+/// one waybill, and the same order can carry two parcels. Kept out of
+/// OrderFinancials because that table is rebuilt from Shopify on every sync and
+/// would lose this.
+model ParcelClaim {
+  id        String   @id @default(cuid())
+  shop      String
+  /// Normalised as everywhere else: [^0-9a-zA-Z] stripped, case KEPT.
+  awb       String
+  /// rto | customer-return — which list it was raised from.
+  kind      String
+  /// raised | received | settled | rejected
+  status    String   @default("raised")
+  /// Free text: a courier ticket number, who filed it, what they said.
+  note      String   @default("")
+  raisedAt  DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([shop, awb])
+  @@index([shop, kind, status])
+}
+
 model ScanEvent {
   id        String   @id @default(cuid())
   shop      String
@@ -972,10 +996,16 @@ model ScanEvent {
   result    String
   /// Free note, e.g. why a blocked scan was let through anyway.
   note      String   @default("")
+  /// The named batch this was scanned into — a trolley, a shift, a pallet.
+  /// Blank for scans recorded before sessions existed and for anyone who never
+  /// names one: the scanners work exactly as before without it.
+  session   String   @default("")
   scannedAt DateTime @default(now())
 
   @@unique([shop, kind, awb])
   @@index([shop, kind, scannedAt])
+  /// Reopening a session lists its scans newest-first.
+  @@index([shop, session, scannedAt])
 }
 
 /// AWBs already handed to a courier, synced from the dispatch sheet.

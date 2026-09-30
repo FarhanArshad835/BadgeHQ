@@ -649,6 +649,47 @@ export async function sessionScans(shop: string, kind: ScanKind, session: string
   });
 }
 
+
+/** Claim statuses the bench can set, matching the prototype's two actions. */
+export type ClaimStatus = "received" | "raised";
+
+/** Set or clear a claim status on one parcel. Clicking the active one clears. */
+export async function setParcelClaim(
+  shop: string,
+  awb: string,
+  kind: ScanKind,
+  status: ClaimStatus | "",
+  note = "",
+): Promise<void> {
+  const clean = normaliseAwb(awb);
+  if (!clean) return;
+  if (!status) {
+    await prisma.parcelClaim.deleteMany({ where: { shop, awb: clean } });
+    return;
+  }
+  await prisma.parcelClaim.upsert({
+    where: { shop_awb: { shop, awb: clean } },
+    create: { shop, awb: clean, kind, status, note },
+    update: { status, note, kind },
+  });
+}
+
+/** Claim statuses for a set of AWBs, so the table can show them. */
+export async function claimStatuses(
+  shop: string,
+  awbs: string[],
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  for (let i = 0; i < awbs.length; i += 2000) {
+    const rows = await prisma.parcelClaim.findMany({
+      where: { shop, awb: { in: awbs.slice(i, i + 2000) } },
+      select: { awb: true, status: true },
+    });
+    for (const r of rows) out.set(r.awb, r.status);
+  }
+  return out;
+}
+
 /** Recent scans for the history page and the session list. */
 export async function recentScans(
   shop: string,
