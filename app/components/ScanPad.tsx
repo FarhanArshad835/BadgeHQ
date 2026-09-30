@@ -134,6 +134,19 @@ export function ScanPad({
     dispatchedSet.current = new Set(dispatched || []);
   }, [dispatched]);
 
+  // A duplicate warning clears itself: the operator has set the packet aside
+  // and the next scan is often seconds away, but if they pause, a stale red
+  // panel from a minute ago is worse than an idle one. Escape clears it too.
+  const dismiss = useCallback(
+    () => setPanel({ state: "idle", awb: "", message: hint, kind: "", confident: true }),
+    [hint],
+  );
+  useEffect(() => {
+    if (panel.state !== "duplicate" && panel.state !== "blocked") return;
+    const t = setTimeout(dismiss, 6000);
+    return () => clearTimeout(t);
+  }, [panel.state, panel.awb, dismiss]);
+
   // The gun types into whatever has focus, so the input must never lose it.
   const refocus = useCallback(() => inputRef.current?.focus(), []);
   useEffect(() => {
@@ -168,16 +181,21 @@ export function ScanPad({
       });
       beep(optimistic);
 
-      const row: ScanRow = {
-        awb,
-        result: optimistic,
-        message: "",
-        orderName: "",
-        kind: "",
-        at: new Date().toLocaleTimeString(),
-        saved: false,
-      };
-      setRows((r) => [row, ...r].slice(0, 200));
+      // A duplicate we can already see locally never enters the list: the
+      // panel says so, and the row would be a record of something that did
+      // not happen.
+      if (optimistic !== "duplicate") {
+        const row: ScanRow = {
+          awb,
+          result: optimistic,
+          message: "",
+          orderName: "",
+          kind: "",
+          at: new Date().toLocaleTimeString(),
+          saved: false,
+        };
+        setRows((r) => [row, ...r].slice(0, 200));
+      }
       setPending((n) => n + 1);
 
       try {
@@ -200,20 +218,27 @@ export function ScanPad({
         const data = decodeTurboStream(await res.text());
 
         // The server has the last word: it can see duplicates from other devices.
-        setRows((r) =>
-          r.map((x) =>
-            x.awb === awb && !x.saved
-              ? {
-                  ...x,
-                  result: data.result,
-                  message: data.message,
-                  orderName: data.orderName,
-                  kind: data.kind || "",
-                  saved: true,
-                }
-              : x,
-          ),
-        );
+        if (data.result === "duplicate") {
+          // Nothing was written, so nothing belongs in the list. Leaving a row
+          // would imply a second scan happened and would inflate the count the
+          // operator uses to check their pile against.
+          setRows((r) => r.filter((x) => !(x.awb === awb && !x.saved)));
+        } else {
+          setRows((r) =>
+            r.map((x) =>
+              x.awb === awb && !x.saved
+                ? {
+                    ...x,
+                    result: data.result,
+                    message: data.message,
+                    orderName: data.orderName,
+                    kind: data.kind || "",
+                    saved: true,
+                  }
+                : x,
+            ),
+          );
+        }
         if (data.result !== optimistic) beep(data.result);
         setPanel({
           state: data.result,
@@ -267,6 +292,16 @@ export function ScanPad({
         </div>
         <div className="pnl-scan-awb">{panel.awb || " "}</div>
         <div className="pnl-scan-msg">{panel.message}</div>
+        {(panel.state === "duplicate" || panel.state === "blocked") && (
+          <button
+            type="button"
+            className="pnl-btn"
+            onClick={() => { dismiss(); refocus(); }}
+            style={{ marginTop: 10 }}
+          >
+            Dismiss
+          </button>
+        )}
         {/* A signed-out operator should not have to know the URL. */}
         {panel.signedOut && (
           <a
@@ -287,6 +322,11 @@ export function ScanPad({
         autoCorrect="off"
         spellCheck={false}
         onKeyDown={(e) => {
+          if (e.key === "Escape") {
+            (e.target as HTMLInputElement).value = "";
+            dismiss();
+            return;
+          }
           // Guns send Enter after the code. Everything else is a normal keypress.
           if (e.key !== "Enter") return;
           e.preventDefault();
