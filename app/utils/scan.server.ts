@@ -8,6 +8,7 @@
  * accumulate on their own so they can later be reconciled AGAINST the sheet.
  */
 import prisma from "../db.server";
+import { getPnlApp } from "./pnl-app.server";
 
 export type ScanKind = "dispatch" | "rto" | "customer-return";
 
@@ -171,16 +172,41 @@ export async function recordScan(
     }
   }
 
-  const result: ScanResult = order ? "ok" : "not-found";
-  await writeScan(shop, kind, awb, order?.orderName || "", result, opts.note || "");
+  // Our own data first; the sheet only answers where it cannot. A packet
+  // scanned the day it ships has no AWB on its order yet, and the sheet has
+  // that mapping from the moment the label is printed.
+  let orderName = order?.orderName || "";
+  let fromSheet = false;
+  if (!orderName) {
+    try {
+      const app = await getPnlApp();
+      if (app.deliverySheetUrl) {
+        const map = await loadSheetAwbMap(app.deliverySheetUrl);
+        const hit = map.get(awb);
+        if (hit) {
+          orderName = hit;
+          fromSheet = true;
+        }
+      }
+    } catch {
+      // The sheet is a convenience here; a scan must still be recorded.
+    }
+  }
+
+  const result: ScanResult = orderName ? "ok" : "not-found";
+  await writeScan(shop, kind, awb, orderName, result, opts.note || (fromSheet ? "order from sheet" : ""));
 
   return {
     ...base,
     result,
-    orderName: order?.orderName || "",
+    orderName,
     deliveryStatus: order?.deliveryStatus || "",
     returnType,
-    message: detected?.reason || buildMessage(kind, result, order?.deliveryStatus || "", returnType),
+    message:
+      detected?.reason ||
+      (fromSheet
+        ? `Matched ${orderName} from the tracking sheet.`
+        : buildMessage(kind, result, order?.deliveryStatus || "", returnType)),
   };
 }
 
@@ -529,6 +555,59 @@ export async function returnClaimCandidates(
     inFlight: res.inFlight,
     available: true,
   };
+}
+
+/**
+ * AWB to order name, read from the tracking sheet.
+ *
+ * OrderFinancials only knows an AWB once Shopify has reported the fulfillment,
+ * which lags dispatch: a packet scanned on the bench the day it ships has no
+ * AWB on its order yet, so the lookup missed and the scan was filed
+ * "not in orders" even though we hold the order perfectly well.
+ *
+ * The sheet has that mapping from the moment the label is printed, so it
+ * answers exactly the window our own data cannot. Used ONLY as a fallback,
+ * after OrderFinancials: our own data is the authority when it has an answer.
+ *
+ * Cached in memory for the life of the warm function — the sheet is ~128,000
+ * rows and re-fetching it per scan would make every scan slower than the
+ * database lookup it is backing up.
+ */
+const SHEET_CACHE_MS = 10 * 60 * 1000;
+let _sheetMap: Map<string, string> | null = null;
+let _sheetAt = 0;
+let _sheetLoading: Promise<Map<string, string>> | null = null;
+
+async function loadSheetAwbMap(url: string): Promise<Map<string, string>> {
+  if (_sheetMap && Date.now() - _sheetAt < SHEET_CACHE_MS) return _sheetMap;
+  // One fetch shared by concurrent scans: a bulk paste would otherwise pull
+  // the whole sheet once per AWB.
+  if (_sheetLoading) return _sheetLoading;
+
+  _sheetLoading = (async () => {
+    const map = new Map<string, string>();
+    try {
+      const res = await fetch(url, { redirect: "follow", signal: AbortSignal.timeout(30000) });
+      if (!res.ok) throw new Error(`sheet ${res.status}`);
+      const text = await res.text();
+      const lines = text.split(/\r?\n/);
+      for (let i = 1; i < lines.length; i++) {
+        const cells = lines[i].split(",");
+        const awb = normaliseAwb(cells[0] || "");
+        // "#238043.1" is one shipment of order #238043; the suffix is the
+        // sheet's own split-shipment marker and is not part of the name.
+        const order = String(cells[1] || "").trim().replace(/\.\d+$/, "");
+        if (awb.length >= 6 && order) map.set(awb, order);
+      }
+    } catch (e: any) {
+      console.error("[scan] sheet map", String(e?.message || e).slice(0, 160));
+    }
+    _sheetMap = map;
+    _sheetAt = Date.now();
+    _sheetLoading = null;
+    return map;
+  })();
+  return _sheetLoading;
 }
 
 /** Recent scans for the history page and the session list. */
