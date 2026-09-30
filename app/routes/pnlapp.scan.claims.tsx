@@ -30,6 +30,7 @@ import { claimCandidates, scanCountsToday } from "../utils/scan.server";
 import { unconfirmedReturns } from "../utils/returnhq.server";
 import { PnlStyles } from "../utils/pnl-styles";
 import { ScanNav } from "../components/ScanNav";
+import { ScanProgressBar } from "../components/ScanProgressBar";
 
 const DAY_OPTIONS = [7, 14, 30, 45];
 const TABS = ["rto", "returns"] as const;
@@ -65,6 +66,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     rows: [] as any[],
     totalRows: 0,
     scanned: 0,
+    eligible: 0,
     undated: 0,
     inFlight: 0,
     available: true,
@@ -129,6 +131,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     rows: res.rows.slice(0, 500),
     totalRows: res.rows.length,
     scanned: res.scannedCount,
+    eligible: res.eligibleCount,
     undated: res.undatedCount,
     totals: {
       cogs: res.totalCogsMinor.toString(),
@@ -198,6 +201,15 @@ export default function Claims() {
           </a>
         </div>
 
+        {!isReturns && d.eligible > 0 && (
+          <ScanProgressBar
+            scanned={d.scanned}
+            unscanned={d.totalRows}
+            undated={d.undated}
+            graceDays={d.days}
+          />
+        )}
+
         <div className="pnl-panel" style={{ marginBottom: 14 }}>
           <div className="pnl-section-label">
             {isReturns
@@ -250,12 +262,6 @@ export default function Claims() {
             else would start the claim clock on a date the courier never agreed to. Run{" "}
             <strong>backfillDeliveryDates</strong> in the tracking script to fill them in.
           </div>
-        )}
-
-        {!isReturns && d.scanned > 0 && (
-          <p className="pnl-sub" style={{ marginBottom: 12 }}>
-            {d.scanned.toLocaleString("en-IN")} of these were scanned in and are excluded.
-          </p>
         )}
 
         {isReturns && d.inFlight > 0 && (

@@ -500,6 +500,8 @@ export async function claimCandidates(
   totalCogsMinor: bigint;
   totalRevenueMinor: bigint;
   scannedCount: number;
+  /** Dated RTOs past the cutoff: the denominator scannedCount is a share OF. */
+  eligibleCount: number;
   /** RTOs with no courier return date, so they cannot be claimed yet. */
   undatedCount: number;
 }> {
@@ -539,7 +541,7 @@ export async function claimCandidates(
     // The row list is trimmed for display in the route instead.
   });
   if (!rtos.length) {
-    return { rows: [], totalCogsMinor: 0n, totalRevenueMinor: 0n, scannedCount: 0, undatedCount };
+    return { rows: [], totalCogsMinor: 0n, totalRevenueMinor: 0n, scannedCount: 0, eligibleCount: 0, undatedCount };
   }
 
   // Which of those have actually been scanned in? Chunked: an IN list of
@@ -575,5 +577,5 @@ export async function claimCandidates(
     totalRevenueMinor += r.grossRevenueMinor;
   }
 
-  return { rows, totalCogsMinor, totalRevenueMinor, scannedCount: seen.size, undatedCount };
+  return { rows, totalCogsMinor, totalRevenueMinor, scannedCount: seen.size, eligibleCount: rtos.length, undatedCount };
 }
