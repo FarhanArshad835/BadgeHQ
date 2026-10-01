@@ -5,6 +5,9 @@ import prisma from "../db.server";
 import { getPnlApp, isAuthed, validateShopifyToken } from "../utils/pnl-app.server";
 import { PnlStyles } from "../utils/pnl-styles";
 
+/** The stored secrets a reveal can ask for. The list is ours, not the caller's. */
+const SECRET_FIELDS = ["adminToken", "shiprocketPassword", "delhiveryApiKey", "metaAccessToken"] as const;
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (!isAuthed(request)) return redirect("/pnl-app/login");
   const app = await getPnlApp();
@@ -28,6 +31,28 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 export const action = async ({ request }: ActionFunctionArgs) => {
   if (!isAuthed(request)) return redirect("/pnl-app/login");
   const form = await request.formData();
+
+  // Revealed only when asked for, and only one named secret at a time. The
+  // loader never ships these into the page, so a settings tab left open does
+  // not hold a token in its HTML — it has to be fetched deliberately.
+  //
+  // The P&L password already gates this page, and these are the merchant's own
+  // credentials for their own store. Shopify shows a custom-app token once at
+  // install and never again, so without this the only way to recover a lost
+  // token is to uninstall and reinstall the app.
+  if (String(form.get("intent")) === "reveal") {
+    const which = String(form.get("which") || "");
+    const app = await getPnlApp();
+    const secrets: Record<string, string> = {
+      adminToken: app.adminToken,
+      shiprocketPassword: app.shiprocketPassword,
+      delhiveryApiKey: app.delhiveryApiKey,
+      metaAccessToken: app.metaAccessToken,
+    };
+    // An unknown name reveals nothing rather than throwing: the field list is
+    // ours, so a mismatch is a bug, not something to report back to a caller.
+    return json({ revealed: { which, value: secrets[which] ?? "" } });
+  }
 
   const shopDomain = String(form.get("shopDomain") || "")
     .trim()
@@ -95,6 +120,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 export default function PnlSettings() {
   const d = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
+  // The action answers two different questions, so narrow once here rather
+  // than guarding every use.
+  const saved = actionData && "saved" in actionData ? actionData : null;
+  const revealed = actionData && "revealed" in actionData ? actionData.revealed : null;
+
   return (
     <div className="pnl">
       <PnlStyles />
@@ -107,9 +137,9 @@ export default function PnlSettings() {
           </div>
         </div>
 
-        {actionData?.saved && (
-          <div className={`pnl-banner ${actionData.tokenNote ? "warn" : "ok"}`} style={{ marginBottom: 18 }}>
-            {actionData.tokenNote ? `Saved, but: ${actionData.tokenNote}` : "Saved. Shopify token verified."}
+        {saved?.saved && (
+          <div className={`pnl-banner ${saved.tokenNote ? "warn" : "ok"}`} style={{ marginBottom: 18 }}>
+            {saved.tokenNote ? `Saved, but: ${saved.tokenNote}` : "Saved. Shopify token verified."}
           </div>
         )}
 
@@ -124,37 +154,49 @@ export default function PnlSettings() {
           A custom app on your own store gets order access automatically; no Protected Customer Data approval.
         </div>
 
-        <Form method="post" className="pnl-panel pnl-form">
+        {/* One bare form per secret, outside the settings form, so a reveal
+            cannot carry a half-edited settings payload with it. */}
+        {SECRET_FIELDS.map((f) => (
+          <Form key={f} method="post" id={`reveal-${f}`} hidden>
+            <input type="hidden" name="intent" value="reveal" />
+          </Form>
+        ))}
+
+        <Form method="post" id="settings-form" className="pnl-panel pnl-form">
           <Field label="Store domain" name="shopDomain" defaultValue={d.shopDomain} placeholder="yourstore.myshopify.com" />
-          <Field
+          <SecretField
             label="Shopify Admin API token"
             name="adminToken"
-            type="password"
-            placeholder={d.hasToken ? "•••••••• saved, paste to replace" : "shpat_…"}
+            saved={d.hasToken}
+            placeholder="shpat_…"
+            revealed={revealed?.which === "adminToken" ? revealed.value : null}
           />
           <hr className="pnl-rule" />
           <div className="pnl-section-label">Shipping cost (actual billed, optional)</div>
           <Field label="Shiprocket email" name="shiprocketEmail" defaultValue={d.shiprocketEmail} placeholder="you@store.com" />
-          <Field
+          <SecretField
             label="Shiprocket password"
             name="shiprocketPassword"
-            type="password"
-            placeholder={d.hasShiprocketPassword ? "•••••••• saved" : "Shiprocket password"}
+            saved={d.hasShiprocketPassword}
+            placeholder="Shiprocket password"
+            revealed={revealed?.which === "shiprocketPassword" ? revealed.value : null}
           />
-          <Field
+          <SecretField
             label="Delhivery API token"
             name="delhiveryApiKey"
-            type="password"
-            placeholder={d.hasDelhiveryKey ? "•••••••• saved" : "Delhivery token"}
+            saved={d.hasDelhiveryKey}
+            placeholder="Delhivery token"
+            revealed={revealed?.which === "delhiveryApiKey" ? revealed.value : null}
           />
           <hr className="pnl-rule" />
           <div className="pnl-section-label">Meta ad spend (for the ad-spend line)</div>
           <Field label="Meta ad account id" name="metaAdAccountId" defaultValue={d.metaAdAccountId} placeholder="act_908549380106884" />
-          <Field
+          <SecretField
             label="Meta access token (ads_read)"
             name="metaAccessToken"
-            type="password"
-            placeholder={d.hasMetaToken ? "•••••••• saved" : "EAAG… (ads_read token)"}
+            saved={d.hasMetaToken}
+            placeholder="EAAG… (ads_read token)"
+            revealed={revealed?.which === "metaAccessToken" ? revealed.value : null}
           />
           <hr className="pnl-rule" />
           <div className="pnl-section-label">GST on sales</div>
@@ -225,5 +267,73 @@ function Field({
       <span className="pnl-field-label">{label}</span>
       <input className="pnl-input" type={type} name={name} defaultValue={defaultValue} placeholder={placeholder} autoComplete="off" />
     </label>
+  );
+}
+
+/**
+ * A stored secret: paste to replace, or reveal what is already saved.
+ *
+ * The reveal is its own form, posting a different intent. It cannot be nested
+ * inside the settings form — an inner form is invalid HTML and submitting it
+ * would carry the whole settings payload with it, saving a half-edited page as
+ * a side effect of looking at a token.
+ */
+function SecretField({
+  label,
+  name,
+  saved,
+  placeholder,
+  revealed,
+}: {
+  label: string;
+  name: string;
+  saved: boolean;
+  placeholder: string;
+  /** The value, when this is the field the last reveal asked for. */
+  revealed: string | null;
+}) {
+  return (
+    <div className="pnl-field">
+      <span className="pnl-field-label">{label}</span>
+      <input
+        className="pnl-input"
+        type="password"
+        name={name}
+        form="settings-form"
+        placeholder={saved ? "•••••••• saved, paste to replace" : placeholder}
+        autoComplete="off"
+      />
+      {saved && (
+        <div style={{ marginTop: 6 }}>
+          {revealed ? (
+            <code
+              style={{
+                display: "block",
+                padding: "8px 10px",
+                background: "var(--surface)",
+                border: "1px solid var(--line)",
+                borderRadius: 6,
+                fontSize: 12.5,
+                wordBreak: "break-all",
+                userSelect: "all",
+              }}
+            >
+              {revealed}
+            </code>
+          ) : (
+            <button
+              type="submit"
+              name="which"
+              value={name}
+              form={`reveal-${name}`}
+              className="pnl-btn"
+              style={{ fontSize: 12, padding: "3px 9px" }}
+            >
+              Show saved value
+            </button>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
