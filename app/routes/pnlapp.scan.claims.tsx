@@ -14,7 +14,7 @@
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { useLoaderData, useSearchParams } from "@remix-run/react";
+import { useLoaderData } from "@remix-run/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getPnlApp, isAuthed } from "../utils/pnl-app.server";
 import {
@@ -29,11 +29,10 @@ import { ClaimsStyles } from "../components/ClaimsStyles";
 import { ScanNav } from "../components/ScanNav";
 import { BusyBar } from "../components/BusyBar";
 
-const TABS = ["rto", "returns"] as const;
-type Tab = (typeof TABS)[number];
-
 /** Rows the client filters over. Money is in rupees: the client only displays it. */
 type ClaimRow = {
+  /** Which bucket the parcel came from — the column that replaced the tabs. */
+  type: "rto" | "return";
   order: string;
   awb: string;
   carrier: string;
@@ -52,51 +51,27 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const app = await getPnlApp();
   const shop = app.shopDomain;
 
-  const url = new URL(request.url);
-  const t = url.searchParams.get("tab");
-  const tab: Tab = TABS.includes(t as Tab) ? (t as Tab) : "rto";
-
   if (!shop) {
-    return json({ tab, rows: [] as ClaimRow[], counts: {}, undated: 0, inFlight: 0, available: true });
+    return json({ rows: [] as ClaimRow[], counts: {}, undated: 0, inFlight: 0, available: true });
   }
 
   const counts = await scanCountsToday(shop);
+
+  // Both sources in one list. A parcel on the bench is a parcel; which kind it
+  // is belongs in a column, not in a tab the operator has to remember to
+  // switch. The two were already the same row shape.
+  const [rto, ret] = await Promise.all([
+    claimCandidates(shop, 0, "days", "desc"),
+    returnClaimCandidates(shop, 0),
+  ]);
+
+  const awbs = [...rto.rows.map((r) => r.awb), ...ret.rows.map((r) => r.awb)].filter(Boolean);
+  const statuses = await claimStatuses(shop, awbs);
   const rupees = (minor: string | null) => (minor == null ? null : Math.round(Number(minor) / 100));
 
-  if (tab === "returns") {
-    // Grace of 0: the browser does the ageing, so the server must not pre-filter
-    // by a window the user can still change.
-    const res = await returnClaimCandidates(shop, 0);
-    const statuses = await claimStatuses(shop, res.rows.map((r) => r.awb).filter(Boolean));
-    return json({
-      tab,
-      counts,
-      undated: 0,
-      inFlight: res.inFlight,
-      available: res.available,
-      rows: res.rows.map((r) => ({
-        order: r.orderName,
-        awb: r.awb,
-        carrier: r.carrier || "Unknown",
-        delivered: r.receivedAt,
-        days: r.daysOld,
-        cost: null,
-        orderValue: 0,
-        status: statuses.get(r.awb) || "",
-        scanned: r.scanned,
-      })),
-    });
-  }
-
-  const res = await claimCandidates(shop, 0, "days", "desc");
-  const statuses = await claimStatuses(shop, res.rows.map((r) => r.awb));
-  return json({
-    tab,
-    counts,
-    undated: res.undatedCount,
-    inFlight: 0,
-    available: true,
-    rows: res.rows.map((r) => ({
+  const rows: ClaimRow[] = [
+    ...rto.rows.map((r) => ({
+      type: "rto" as const,
       order: r.orderName,
       awb: r.awb,
       carrier: r.carrier || "Unknown",
@@ -107,6 +82,28 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       status: statuses.get(r.awb) || "",
       scanned: r.scanned,
     })),
+    ...ret.rows.map((r) => ({
+      type: "return" as const,
+      order: r.orderName,
+      awb: r.awb,
+      carrier: r.carrier || "Unknown",
+      delivered: r.receivedAt,
+      days: r.daysOld,
+      // ReturnHQ holds no stock cost, so a return shows unknown rather than a
+      // zero that would read as free.
+      cost: null,
+      orderValue: 0,
+      status: statuses.get(r.awb) || "",
+      scanned: r.scanned,
+    })),
+  ];
+
+  return json({
+    counts,
+    rows,
+    undated: rto.undatedCount,
+    inFlight: ret.inFlight,
+    available: ret.available,
   });
 };
 
@@ -135,14 +132,12 @@ const fmtDate = (iso: string) =>
 
 export default function Claims() {
   const d = useLoaderData<typeof loader>() as {
-    tab: Tab;
     rows: ClaimRow[];
     counts: Record<string, number>;
     undated: number;
     inFlight: number;
     available: boolean;
   };
-  const [, setParams] = useSearchParams();
 
   // Local copy so a status click repaints immediately; the POST follows.
   const [rows, setRows] = useState<ClaimRow[]>(d.rows);
@@ -152,11 +147,16 @@ export default function Claims() {
   const [custom, setCustom] = useState<{ from: string; to: string } | null>(null);
   const [search, setSearch] = useState("");
   const [carrier, setCarrier] = useState("");
+  // What the two tabs used to do, as a filter — so both kinds can also be seen
+  // together, which is how a bench actually works through a pile.
+  const [typeFilter, setTypeFilter] = useState("");
   const [step, setStep] = useState("");
   const [claimWindow, setClaimWindow] = useState(60);
   // The sort dropdown and the column headers set the same state, so they can
   // never disagree about what the table is showing.
-  const [sortCol, setSortCol] = useState<"days" | "cost" | "order" | "carrier" | "delivered">("days");
+  const [sortCol, setSortCol] = useState<
+    "days" | "cost" | "order" | "carrier" | "delivered" | "type"
+  >("days");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   // Found parcels are hidden by default: this is a list of what is missing.
   const [showScanned, setShowScanned] = useState(false);
@@ -170,7 +170,6 @@ export default function Claims() {
   const popRef = useRef<HTMLDivElement>(null);
   const customChipRef = useRef<HTMLButtonElement>(null);
 
-  const isReturns = d.tab === "returns";
 
   const nextStep = (r: ClaimRow) => {
     // The bench found it, so there is nothing to claim regardless of age.
@@ -211,6 +210,8 @@ export default function Claims() {
           return sign * a.order.localeCompare(b.order, undefined, { numeric: true });
         case "carrier":
           return sign * a.carrier.localeCompare(b.carrier);
+        case "type":
+          return sign * a.type.localeCompare(b.type);
         case "delivered":
           return sign * a.delivered.localeCompare(b.delivered);
         default:
@@ -222,13 +223,14 @@ export default function Claims() {
         (r) =>
           (showScanned || !r.scanned) &&
           inRange(r) &&
+          (!typeFilter || r.type === typeFilter) &&
           (!carrier || r.carrier === carrier) &&
           (!step || nextStep(r) === step) &&
           (!q || r.order.toLowerCase().includes(q) || r.awb.toLowerCase().includes(q)),
       )
       .sort(cmp);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, search, carrier, step, sortCol, sortDir, age, custom, claimWindow, showScanned]);
+  }, [rows, search, carrier, step, sortCol, sortDir, age, custom, claimWindow, showScanned, typeFilter]);
 
   /**
    * A sortable header.
@@ -299,14 +301,17 @@ export default function Claims() {
       : "0.0";
 
   async function setStatus(awb: string, next: "received" | "raised") {
-    const current = rows.find((r) => r.awb === awb)?.status || "";
+    const row = rows.find((r) => r.awb === awb);
+    const current = row?.status || "";
     const value = current === next ? "" : next;
     setRows((rs) => rs.map((r) => (r.awb === awb ? { ...r, status: value } : r)));
     try {
       await fetch(window.location.pathname + ".data" + window.location.search, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ awb, status: value, tab: d.tab }),
+        // The row's own type, not the tab it was under: with one list there is
+              // no tab, and defaulting would file every customer return as an RTO.
+        body: JSON.stringify({ awb, status: value, tab: row?.type === "return" ? "returns" : "rto" }),
         credentials: "same-origin",
       });
     } catch {
@@ -390,12 +395,13 @@ export default function Claims() {
 
   function exportCsv() {
     const list = selected.size ? rows.filter((r) => selected.has(r.awb)) : filtered;
-    const head = ["Order", "AWB", "Carrier", "Marked delivered", "Days", "Stock cost", "Order value", "Next step"];
+    const head = ["Order", "AWB", "Type", "Carrier", "Marked delivered", "Days", "Stock cost", "Order value", "Next step"];
     const csv = [head]
       .concat(
         list.map((r) => [
           r.order,
           r.awb,
+          r.type === "return" ? "Customer return" : "RTO",
           r.carrier,
           fmtDate(r.delivered),
           String(r.days),
@@ -408,7 +414,11 @@ export default function Claims() {
       .join("\n");
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob(["\uFEFF" + csv], { type: "text/csv" }));
-    a.download = isReturns ? "return-claims.csv" : "rto-claims.csv";
+    a.download = typeFilter === "return"
+      ? "return-claims.csv"
+      : typeFilter === "rto"
+        ? "rto-claims.csv"
+        : "claims.csv";
     a.click();
   }
 
@@ -423,31 +433,12 @@ export default function Claims() {
             History off the edge here after it had been moved everywhere else. */}
         <ScanNav active="claims" counts={d.counts} />
 
-        <div className="subtabs" role="tablist">
-          <button
-            className={!isReturns ? "active" : ""}
-            role="tab"
-            aria-selected={!isReturns}
-            onClick={() => setParams({ tab: "rto" })}
-          >
-            RTO parcels
-          </button>
-          <button
-            className={isReturns ? "active" : ""}
-            role="tab"
-            aria-selected={isReturns}
-            onClick={() => setParams({ tab: "returns" })}
-          >
-            Customer returns
-          </button>
-        </div>
-
         <section className="summary">
           <div className="headline">
             <div className="big">{missing.length.toLocaleString("en-IN")}</div>
             <div className="big-sub">
               <span className="long">
-                parcels marked {isReturns ? "returned" : "RTO delivered"} but never scanned in ·{" "}
+                parcels marked returned but never scanned in ·{" "}
                 {pctOfReturns}% of returns
               </span>
               <span className="short">never scanned in · {pctOfReturns}% of returns</span>
@@ -621,6 +612,18 @@ export default function Claims() {
               <option value="cost">Highest cost</option>
             </select>
             <select
+              aria-label="Type"
+              value={typeFilter}
+              onChange={(e) => {
+                setTypeFilter(e.target.value);
+                setPage(0);
+              }}
+            >
+              <option value="">Both kinds</option>
+              <option value="rto">RTO only</option>
+              <option value="return">Customer returns only</option>
+            </select>
+            <select
               aria-label="Carrier"
               value={carrier}
               onChange={(e) => {
@@ -675,6 +678,7 @@ export default function Claims() {
                   />
                 </th>
                 <SortTh col="order" label="Order" />
+                <SortTh col="type" label="Type" />
                 <SortTh col="carrier" label="Carrier" />
                 <SortTh col="delivered" label="Marked delivered" />
                 <SortTh col="days" label="Days" num />
@@ -686,7 +690,7 @@ export default function Claims() {
             <tbody>
               {!slice.length ? (
                 <tr>
-                  <td colSpan={8} className="empty">
+                  <td colSpan={9} className="empty">
                     No parcels match these filters. Clear the search or pick another carrier.
                   </td>
                 </tr>
@@ -718,6 +722,11 @@ export default function Claims() {
                       <td className="c-order">
                         <div className="order">{r.order}</div>
                         <div className="awb">{r.awb}</div>
+                      </td>
+                      <td className="c-type">
+                        <span className={`type-tag ${r.type}`}>
+                          {r.type === "return" ? "Return" : "RTO"}
+                        </span>
                       </td>
                       <td
                         className={"c-carrier" + (r.carrier === "Unknown" ? " unknown" : "")}

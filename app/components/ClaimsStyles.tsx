@@ -673,4 +673,17 @@ const CSS = String.raw`
     color: #3b4bc8; text-decoration: none; font-weight: 500;
   }
   .claims-app .c-session a:hover { text-decoration: underline; }
+  /* The Type column that replaced the two tabs. Quiet tags: they distinguish
+     rows at a glance without competing with the money beside them. */
+  .claims-app .c-type { white-space: nowrap; }
+  .claims-app .type-tag {
+    display: inline-block; font-size: 11px; font-weight: 700;
+    padding: 3px 8px; border-radius: 6px; letter-spacing: .02em;
+  }
+  .claims-app .type-tag.rto { background: #DBEAFE; color: #1E3A8A; }
+  .claims-app .type-tag.return { background: #DCFCE7; color: #14532D; }
+  @media (max-width: 640px) {
+    /* The card layout is already dense; the type filter covers this. */
+    .claims-app .c-type { display: none; }
+  }
 `;
