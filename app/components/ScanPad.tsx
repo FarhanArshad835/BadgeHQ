@@ -542,43 +542,11 @@ export function ScanPad({
             <b>{scanned.toLocaleString("en-IN")}</b>
             <span className="sp-count-label">scanned this session</span>
           </span>
-          {/* The batch, and a way back into an earlier one. A trolley that
-              spans a break or a shift change is the same batch, so continuing
-              it has to be possible without starting a parallel list. */}
-          {sessions && sessions.length > 0 ? (
-            <select
-              className="sp-session sp-session-pick"
-              value={session}
-              title="This batch — pick an earlier one to carry on adding to it"
-              onChange={(e) => {
-                const v = e.target.value;
-                if (v === session) return;
-                // A full load, not local state: the batch's existing scans have
-                // to come from the server, and the URL makes the choice
-                // survive a refresh.
-                const url = new URL(window.location.href);
-                if (v === "__new") url.searchParams.delete("session");
-                else url.searchParams.set("session", v);
-                window.location.assign(url.toString());
-              }}
-            >
-              {/* The current one first, even when it is brand new and has
-                  nothing in it yet. */}
-              {!sessions.some((x) => x.name === session) && (
-                <option value={session}>{session} · new</option>
-              )}
-              {sessions.map((x) => (
-                <option key={x.name} value={x.name}>
-                  {x.name} · {x.count.toLocaleString("en-IN")}
-                </option>
-              ))}
-              <option value="__new">Start a new batch…</option>
-            </select>
-          ) : (
-            <span className="sp-session" title="This batch's name">
-              {session}
-            </span>
-          )}
+          {/* The name only. Carrying on with an earlier batch is done from the
+              list below, where its size and age are visible. */}
+          <span className="sp-session" title="This batch's name">
+            {session}
+          </span>
           {refused > 0 && <span className="sp-pill refused">{refused} refused</span>}
           {saving > 0 && <span className="sp-pill saving">{saving} saving…</span>}
           {bad > 0 && <span className="sp-pill notsaved">{bad} NOT SAVED</span>}
@@ -771,6 +739,37 @@ export function ScanPad({
               </div>
             )}
           </>
+        )}
+      </div>
+
+
+      {/* Earlier batches, as a list rather than a dropdown: an operator picking
+          up a trolley someone else started needs to SEE what is there — when it
+          ran and how much is in it — not choose a name blind. */}
+      <div className="sp-past">
+        <div className="sp-past-head">Earlier sessions</div>
+        {!sessions || sessions.length === 0 ? (
+          <div className="sp-past-empty">
+            No earlier sessions yet. This one is named <b>{session}</b>, and it will appear here
+            once something is scanned into it.
+          </div>
+        ) : (
+          sessions.map((x) => {
+            const isCurrent = x.name === session;
+            return (
+              <div key={x.name} className={"sp-past-row" + (isCurrent ? " on" : "")}>
+                <span className="sp-past-name">{x.name}</span>
+                <span className="sp-past-count">{x.count.toLocaleString("en-IN")} scanned</span>
+                {isCurrent ? (
+                  <span className="sp-past-here">open</span>
+                ) : (
+                  <a className="btn-ghost" href={`?session=${encodeURIComponent(x.name)}`}>
+                    Carry on
+                  </a>
+                )}
+              </div>
+            );
+          })
         )}
       </div>
 

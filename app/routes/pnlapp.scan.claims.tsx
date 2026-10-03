@@ -355,8 +355,14 @@ export default function Claims() {
     else if (p === "last") {
       from = new Date(today.getFullYear(), today.getMonth() - 1, 1);
       to = new Date(today.getFullYear(), today.getMonth(), 0);
-    } else if (p === "old") to = ago(91);
-    else from = ago(Number(p));
+    } else if (p === "0") {
+      from = new Date(today);
+    } else if (p === "1") {
+      // A single day, both ends. Falling through to the range below would give
+      // yesterday-to-today, which is two days and not what the label says.
+      from = ago(1);
+      to = ago(1);
+    } else from = ago(Number(p));
     const f = from ? iso(from) : "";
     const t = iso(to);
     setFromDate(f);
@@ -567,12 +573,16 @@ export default function Claims() {
               </div>
             </div>
             <div className="presets">
+              {/* Today and Yesterday first: a parcel marked returned today is
+                  the one someone is most likely to be looking for. The two
+                  90-day presets are gone — the age chips above already cover
+                  "old", and a claim that far back is past most windows. */}
+              <button onClick={() => preset("0")}>Today</button>
+              <button onClick={() => preset("1")}>Yesterday</button>
               <button onClick={() => preset("7")}>Last 7 days</button>
               <button onClick={() => preset("30")}>Last 30 days</button>
               <button onClick={() => preset("this")}>This month</button>
               <button onClick={() => preset("last")}>Last month</button>
-              <button onClick={() => preset("90")}>Last 90 days</button>
-              <button onClick={() => preset("old")}>Older than 90 days</button>
             </div>
             <div className="err">{customErr}</div>
             <div className="row-btns">

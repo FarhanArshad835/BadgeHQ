@@ -629,21 +629,36 @@ const CSS = String.raw`
        The session is in the CSV and the filter for anyone who needs it. */
     .claims-app .c-session { display: none; }
   }
-  /* The session pill becomes a picker when there are earlier batches to go
-     back to. It keeps the pill's quiet look rather than becoming another
-     control competing with the count beside it. */
-  .claims-app select.sp-session-pick {
-    appearance: none; cursor: pointer; font: inherit; font-size: 12px;
-    color: var(--muted); background: var(--surface);
-    border: 1px solid var(--line); border-radius: 999px;
-    padding: 2px 22px 2px 8px; max-width: 190px;
-    background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%),
-                      linear-gradient(135deg, var(--muted) 50%, transparent 50%);
-    background-position: calc(100% - 12px) 52%, calc(100% - 8px) 52%;
-    background-size: 4px 4px, 4px 4px; background-repeat: no-repeat;
+  /* ---------- Earlier sessions ---------- */
+  .claims-app .sp-past {
+    margin-top: 14px; background: var(--surface);
+    border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
   }
-  .claims-app select.sp-session-pick:hover { border-color: var(--line-strong); }
-  @media (max-width: 420px) {
-    .claims-app select.sp-session-pick { max-width: 120px; border-color: transparent; }
+  .claims-app .sp-past-head {
+    padding: 9px 14px; font-size: 13px; font-weight: 600; color: var(--muted);
+    border-bottom: 1px solid var(--line);
+  }
+  .claims-app .sp-past-empty { padding: 14px; font-size: 13px; color: var(--muted); }
+  .claims-app .sp-past-row {
+    display: flex; align-items: center; gap: 12px;
+    padding: 9px 14px; border-top: 1px solid var(--line-soft);
+  }
+  .claims-app .sp-past-row:first-of-type { border-top: 0; }
+  .claims-app .sp-past-row.on { background: #f7f8fd; }
+  .claims-app .sp-past-name {
+    flex: 1; min-width: 0; font-weight: 600; font-variant-numeric: tabular-nums;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .claims-app .sp-past-count { color: var(--muted); font-size: 13px; white-space: nowrap; }
+  .claims-app .sp-past-here {
+    font-size: 12px; font-weight: 600; color: #1a7f37; white-space: nowrap;
+  }
+  .claims-app .sp-past-row a.btn-ghost {
+    text-decoration: none; font-size: 13px; padding: 4px 10px; white-space: nowrap;
+  }
+  @media (max-width: 640px) {
+    /* The count drops before the name or the action: it is the least useful of
+       the three when deciding which batch to carry on. */
+    .claims-app .sp-past-count { display: none; }
   }
 `;
