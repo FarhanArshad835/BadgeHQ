@@ -342,7 +342,13 @@ export function ScanPad({
 
     }
 
-    const saved = results.filter((r) => ["ok", "not-found"].includes(r.result)).length;
+    // A duplicate is not a failure: the packet IS recorded, from an earlier
+    // scan or from earlier in this same list. Counting only new writes and
+    // calling the rest unsaved read as "724 of these failed", which sent
+    // someone looking for a problem that was not there.
+    const newly = results.filter((r) => ["ok", "not-found"].includes(r.result)).length;
+    const already = results.filter((r) => r.result === "duplicate").length;
+    const blocked = results.filter((r) => r.result === "blocked").length;
     setBulk({
       total: codes.length,
       done,
@@ -351,13 +357,15 @@ export function ScanPad({
       retry: retryLater,
       results,
     });
+    const parts = [`${newly.toLocaleString("en-IN")} newly recorded`];
+    if (already) parts.push(`${already.toLocaleString("en-IN")} already scanned`);
+    if (blocked) parts.push(`${blocked.toLocaleString("en-IN")} blocked`);
+    if (retryLater.length) parts.push(`${retryLater.length.toLocaleString("en-IN")} not saved`);
     setV(
       retryLater.length ? "error" : "ok",
       retryLater.length ? "SOME NOT SAVED" : "LIST RECORDED",
-      `${saved} of ${codes.length} saved`,
-      retryLater.length
-        ? `${retryLater.length} did not save. Use Retry in the paste box — the rest are recorded.`
-        : "Refused and unmatched AWBs are listed in the paste box results.",
+      `${(newly + already).toLocaleString("en-IN")} of ${codes.length.toLocaleString("en-IN")} on record`,
+      parts.join(" · "),
     );
     play(retryLater.length ? "error" : "ok");
     if (!retryLater.length) setText("");
@@ -607,9 +615,16 @@ function BulkMessage({
   bulk: { total: number; done: number; running: boolean; stopped: boolean; retry: string[]; results: any[] };
   onRetry: () => void;
 }) {
-  const saved = bulk.results.filter((r) => ["ok", "not-found"].includes(r.result)).length;
+  const newly = bulk.results.filter((r) => ["ok", "not-found"].includes(r.result)).length;
+  const already = bulk.results.filter((r) => r.result === "duplicate").length;
+  const saved = newly + already;
   if (bulk.running) {
-    return <div className="sp-bulk-msg">Recording in chunks of 5 · {saved} saved so far.</div>;
+    return (
+      <div className="sp-bulk-msg">
+        Recording in chunks of 5 · {newly.toLocaleString("en-IN")} new
+        {already ? `, ${already.toLocaleString("en-IN")} already scanned` : ""}.
+      </div>
+    );
   }
   if (bulk.stopped) {
     return (
@@ -623,7 +638,8 @@ function BulkMessage({
   }
   return (
     <div className="sp-bulk-msg">
-      Done. {saved} of {bulk.total} saved.
+      Done. {saved.toLocaleString("en-IN")} of {bulk.total.toLocaleString("en-IN")} on record
+      {already ? ` — ${newly.toLocaleString("en-IN")} new, ${already.toLocaleString("en-IN")} already scanned` : ""}.
     </div>
   );
 }
