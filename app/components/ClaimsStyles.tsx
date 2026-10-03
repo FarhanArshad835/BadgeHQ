@@ -601,12 +601,22 @@ const CSS = String.raw`
        away from the four links. */
     .claims-app .top-right { display: none; }
     .claims-app .nav { width: 100%; }
+    /* Rendered right after the nav, so in document order it sits at the TOP —
+       which looked like a stray button under the tabs. Taken out of flow and
+       pinned to the bottom corner instead: reachable, and nowhere near the
+       tabs or the scan field. */
     .claims-app .sign-out-foot {
-      display: block; margin: 22px auto 4px; width: fit-content;
-      padding: 8px 16px; font-size: 13px; color: var(--muted);
-      border: 1px solid var(--line); border-radius: 8px;
+      display: block; position: fixed;
+      right: 10px; bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+      z-index: 30;
+      padding: 7px 14px; font-size: 12px; font-weight: 600; color: var(--muted);
+      border: 1px solid var(--line-strong); border-radius: 999px;
       background: var(--surface); text-decoration: none;
+      box-shadow: 0 2px 10px rgba(17,24,39,.08);
     }
     .claims-app .sign-out-foot:active { filter: brightness(.95); }
+    /* Room beneath the content so the pinned button never covers the last row
+       of a list someone has scrolled to the end of. */
+    .claims-app .wrap { padding-bottom: 64px; }
   }
 `;
