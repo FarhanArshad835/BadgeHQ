@@ -48,6 +48,16 @@ export type TrackingResult = {
    *  to ours ("R1790086147-232696"), so the order is the tail after the dash.
    *  The only bridge to an order when no table of ours knows the waybill. */
   orderRef?: string;
+  /**
+   * True when the carrier COLLECTED this parcel from the customer, rather than
+   * carrying it to them and bringing it back.
+   *
+   * The difference is the whole RTO-versus-customer-return question, and the
+   * status text cannot answer it: a reverse pickup arrives reading "DTO" with
+   * "Dispatched for RTO" in its history, exactly like a parcel the customer
+   * refused. Only the direction of the journey separates them.
+   */
+  pickedUpFromCustomer?: boolean;
 };
 
 /**
@@ -228,6 +238,37 @@ async function trackShiprocket(
 
 /** Delhivery: GET /api/v1/packages/json/?waybill=. Mirrors ReturnHQ's
  *  getTrackingStatusBatch for a single AWB. */
+/**
+ * Did Delhivery collect this parcel FROM the customer?
+ *
+ * OrderType is the carrier's own word for the job it was given: "Pickup" means
+ * a courier went to the consignee's address and took the parcel away, which is
+ * a customer return however the status later reads.
+ *
+ * Corroborated by the scan trail rather than trusted alone — a reverse pickup
+ * carries "Out for pickup" and "Pickup completed" at the consignee's location,
+ * and those phrases never appear on a forward shipment, which is dispatched
+ * from our warehouse instead.
+ *
+ * This matters because the end state is identical either way: both arrive
+ * reading "DTO"/"RETURN Accepted", so anything reading only the status files
+ * every manually-booked return as a courier RTO.
+ */
+function isReversePickup(shipment: any): boolean {
+  if (String(shipment?.OrderType || "").trim().toLowerCase() === "pickup") return true;
+  const scans: any[] = Array.isArray(shipment?.Scans) ? shipment.Scans : [];
+  return scans.some((x) => {
+    const d = x?.ScanDetail || {};
+    const text = `${d.Instructions || ""}`.toLowerCase();
+    // "Out for pickup" / "Pickup completed" — the courier going TO the customer.
+    // ScanType "PP" is Delhivery's own marker for the pickup leg.
+    return (
+      String(d.ScanType || "").toUpperCase() === "PP" ||
+      /out for pickup|pickup completed/.test(text)
+    );
+  });
+}
+
 async function trackDelhivery(apiKey: string, awb: string): Promise<TrackingResult | null> {
   const res = await fetch(
     `${DELHIVERY_API_URL}/api/v1/packages/json/?waybill=${encodeURIComponent(awb)}`,
@@ -253,6 +294,7 @@ async function trackDelhivery(apiKey: string, awb: string): Promise<TrackingResu
     delivered: isDelivered(status),
     failedAttempt: isFailedAttempt(status) || isFailedAttempt(instructions),
     orderRef: String(shipment.ReferenceNo || "").trim(),
+    pickedUpFromCustomer: isReversePickup(shipment),
   };
 }
 
