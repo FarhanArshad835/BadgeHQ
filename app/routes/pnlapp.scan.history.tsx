@@ -20,6 +20,7 @@ import {
   type ScanResult,
 } from "../utils/scan.server";
 import { ClaimsStyles } from "../components/ClaimsStyles";
+import { ColumnFilter } from "../components/ColumnFilter";
 import { BusyBar, useBusy } from "../components/BusyBar";
 import { ScanNav } from "../components/ScanNav";
 
@@ -144,8 +145,9 @@ export default function ScanHistory() {
     session: string;
     sessions: Array<{ name: string; count: number }>;
   };
-  const [params, setParams] = useSearchParams();
-  const kind = params.get("kind") || "";
+  // Only the setter: every filter's current value comes from the loader, so
+  // the page and the URL cannot disagree about what is being shown.
+  const [, setParams] = useSearchParams();
 
   /**
    * The IST day, as YYYY-MM-DD.
@@ -182,6 +184,38 @@ export default function ScanHistory() {
     for (const k of Object.keys(merged)) if (!merged[k].trim()) delete merged[k];
     setParams(merged);
   };
+
+  /**
+   * A header that filters its own column.
+   *
+   * History filters on the server through the URL, so picking an option
+   * reloads rather than filtering in place — but the control belongs on the
+   * column either way.
+   */
+  const FilterTh = ({
+    label,
+    value,
+    onPick,
+    any,
+    options,
+  }: {
+    label: string;
+    value: string;
+    onPick: (v: string) => void;
+    any: string;
+    options: Array<{ value: string; label: string }>;
+  }) => (
+    <th className={"has-filter" + (value ? " filtered" : "")}>
+      <span className="th-in">
+        {/* A filtered column says what it is filtered to, so a narrowed list
+            never reads as a short one. */}
+        <span className="th-label">
+          {value ? options.find((o) => o.value === value)?.label || label : label}
+        </span>
+        <ColumnFilter label={label} value={value} onPick={onPick} any={any} options={options} />
+      </span>
+    </th>
+  );
 
   return (
     <div className="claims-app">
@@ -254,46 +288,6 @@ export default function ScanHistory() {
               max={istDay(0)}
               onChange={(e) => setFilters({ to: e.target.value })}
             />
-            {d.sessions.length > 0 && (
-              <select
-                aria-label="Session"
-                disabled={busy}
-                value={d.session}
-                onChange={(e) => setFilters({ session: e.target.value })}
-              >
-                <option value="">All sessions</option>
-                {d.sessions.map((x) => (
-                  <option key={x.name} value={x.name}>
-                    {x.name} · {x.count.toLocaleString("en-IN")}
-                  </option>
-                ))}
-              </select>
-            )}
-            <select
-              aria-label="Type"
-              disabled={busy}
-              value={kind}
-              onChange={(e) => setFilters({ kind: e.target.value })}
-            >
-              <option value="">All scans</option>
-              <option value="dispatch">Dispatch</option>
-              <option value="rto">RTO received</option>
-              <option value="customer-return">Customer return</option>
-            </select>
-            {/* Result is its own axis: "which RTOs did not match an order" is a
-                question the type list alone cannot ask. */}
-            <select
-              aria-label="Result"
-              disabled={busy}
-              value={d.result}
-              onChange={(e) => setFilters({ result: e.target.value })}
-            >
-              <option value="">Any result</option>
-              <option value="ok">Matched an order</option>
-              <option value="not-found">Not found</option>
-              <option value="duplicate">Duplicate</option>
-              <option value="blocked">Blocked</option>
-            </select>
             <a
               className="btn-primary"
               href={`/pnl-app/scan/history?format=csv${d.kind ? `&kind=${d.kind}` : ""}${d.result ? `&result=${d.result}` : ""}${d.search ? `&q=${encodeURIComponent(d.search)}` : ""}${d.from ? `&from=${d.from}` : ""}${d.to ? `&to=${d.to}` : ""}${d.session ? `&session=${encodeURIComponent(d.session)}` : ""}`}
@@ -308,17 +302,55 @@ export default function ScanHistory() {
             <thead>
               <tr>
                 <th>When (IST)</th>
-                <th>Type</th>
+                {/* The filters used to sit in a row above the table, naming
+                    these same columns a second time. */}
+                <FilterTh
+                  label="Type"
+                  value={d.kind}
+                  onPick={(v) => setFilters({ kind: v })}
+                  any="All scans"
+                  options={[
+                    { value: "dispatch", label: "Dispatch" },
+                    { value: "rto", label: "RTO received" },
+                    { value: "customer-return", label: "Customer return" },
+                  ]}
+                />
                 <th>AWB</th>
                 <th>Order</th>
-                <th>Session</th>
-                <th>Result</th>
+                {d.sessions.length > 0 ? (
+                  <FilterTh
+                    label="Session"
+                    value={d.session}
+                    onPick={(v) => setFilters({ session: v })}
+                    any="All sessions"
+                    options={d.sessions.map((x) => ({
+                      value: x.name,
+                      label: `${x.name} · ${x.count.toLocaleString("en-IN")}`,
+                    }))}
+                  />
+                ) : (
+                  <th>Session</th>
+                )}
+                {/* Result is its own axis: "which RTOs did not match an order"
+                    is a question the type list alone cannot ask. */}
+                <FilterTh
+                  label="Result"
+                  value={d.result}
+                  onPick={(v) => setFilters({ result: v })}
+                  any="Any result"
+                  options={[
+                    { value: "ok", label: "Matched an order" },
+                    { value: "not-found", label: "Not found" },
+                    { value: "duplicate", label: "Duplicate" },
+                    { value: "blocked", label: "Blocked" },
+                  ]}
+                />
               </tr>
             </thead>
             <tbody>
               {!d.rows.length ? (
                 <tr>
-                  <td colSpan={5} className="empty">
+                  <td colSpan={6} className="empty">
                     {d.search
                       ? `No scan matches "${d.search}". Check the AWB, or clear the type and result filters.`
                       : "Nothing matches these filters. Pick another type or result."}

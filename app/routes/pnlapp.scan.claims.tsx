@@ -26,6 +26,7 @@ import {
   type ClaimStatus,
 } from "../utils/scan.server";
 import { ClaimsStyles } from "../components/ClaimsStyles";
+import { ColumnFilter } from "../components/ColumnFilter";
 import { ScanNav } from "../components/ScanNav";
 import { BusyBar } from "../components/BusyBar";
 
@@ -196,11 +197,6 @@ export default function Claims() {
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [customErr, setCustomErr] = useState("");
-  // Which column's filter menu is open, by label. The native select's popup
-  // could not be styled — it arrived with OS chrome and a blue highlight
-  // against a table that looks nothing like it — so the menu is ours.
-  const [menu, setMenu] = useState("");
-  const menuRef = useRef<HTMLDivElement>(null);
   const popRef = useRef<HTMLDivElement>(null);
   const customChipRef = useRef<HTMLButtonElement>(null);
 
@@ -273,67 +269,6 @@ export default function Claims() {
    * descending — "most days waiting" and "highest cost" are what someone
    * chasing claims wants on the first click.
    */
-  /**
-   * A column's filter, as a menu that matches the page.
-   *
-   * The options are few and known, so the list is built rather than handed to
-   * a native select whose popup cannot be styled at all.
-   */
-  const FilterMenu = ({
-    label,
-    value,
-    set,
-    any,
-    options,
-  }: {
-    label: string;
-    value: string;
-    set: (v: string) => void;
-    any: string;
-    options: Array<{ value: string; label: string }>;
-  }) => {
-    const open = menu === label;
-    const on = !!value;
-    const choose = (v: string) => {
-      set(v);
-      setPage(0);
-      setMenu("");
-    };
-    return (
-      <span className="th-fw" ref={open ? menuRef : undefined}>
-        <button
-          type="button"
-          className={"th-filter" + (on ? " on" : "")}
-          aria-label={`Filter ${label}`}
-          aria-haspopup="menu"
-          aria-expanded={open}
-          onClick={() => setMenu(open ? "" : label)}
-        >
-          <span aria-hidden>{"≡"}</span>
-        </button>
-        {open && (
-          <div className="th-menu" role="menu">
-            {[{ value: "", label: any }, ...options].map((o) => (
-              <button
-                key={o.value || "any"}
-                type="button"
-                role="menuitemradio"
-                aria-checked={value === o.value}
-                className={"th-opt" + (value === o.value ? " on" : "")}
-                onClick={() => choose(o.value)}
-              >
-                <span className="tick" aria-hidden>
-                  {value === o.value ? "✓" : ""}
-                </span>
-                {o.label}
-              </button>
-            ))}
-          </div>
-        )}
-      </span>
-    );
-  };
-
   const SortTh = ({
     col,
     label,
@@ -379,10 +314,13 @@ export default function Claims() {
             </span>
           </button>
           {filter && (
-            <FilterMenu
+            <ColumnFilter
               label={label}
               value={filter.value}
-              set={filter.set}
+              onPick={(v) => {
+                filter.set(v);
+                setPage(0);
+              }}
               any={filter.any}
               options={filter.options}
             />
@@ -478,26 +416,6 @@ export default function Claims() {
 
   // The popover closes on an outside click, a resize or a scroll, as the
   // prototype does — it is positioned fixed, so it would otherwise detach.
-  useEffect(() => {
-    if (!menu) return;
-    const onDown = (e: MouseEvent) => {
-      if (menuRef.current?.contains(e.target as Node)) return;
-      setMenu("");
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setMenu("");
-    };
-    const close = () => setMenu("");
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    window.addEventListener("resize", close);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-      window.removeEventListener("resize", close);
-    };
-  }, [menu]);
-
   useEffect(() => {
     if (!popOpen) return;
     const onDown = (e: MouseEvent) => {
@@ -750,10 +668,13 @@ export default function Claims() {
                 <th className={"has-filter" + (step ? " filtered" : "")}>
                   <span className="th-in">
                     <span className="th-label">{step || "Next step"}</span>
-                    <FilterMenu
+                    <ColumnFilter
                       label="Next step"
                       value={step}
-                      set={setStep}
+                      onPick={(v) => {
+                        setStep(v);
+                        setPage(0);
+                      }}
                       any="Any step"
                       options={STEPS.map((x) => ({ value: x, label: x }))}
                     />
