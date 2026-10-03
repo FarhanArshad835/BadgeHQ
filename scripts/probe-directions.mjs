@@ -120,15 +120,33 @@ async function raw(courier, awb) {
 /**
  * Does this payload look like the courier went TO the customer?
  *
- * Deliberately loose: it only has to SORT samples so one of each direction
- * gets printed. The real rule is written afterwards, against the output.
+ * The first version searched the whole payload for "pickup" and "return", and
+ * labelled two genuine RTOs as reverse: EVERY forward parcel contains "Out For
+ * Pickup" (the courier collecting from US) and "Return To Origin". The words
+ * appear in both directions; only their subject differs.
+ *
+ * So each courier is asked the one question that separates them: was the
+ * parcel collected FROM the consignee, or carried to them first?
  */
 function looksReverse(courier, body) {
-  const s = JSON.stringify(body || {}).toLowerCase();
   if (courier === "delhivery") {
-    return /"ordertype":\s*"pickup"/.test(s) || /out for pickup|pickup completed/.test(s);
+    // The job Delhivery was given. A forward parcel reads COD or Prepaid.
+    return String(body?.OrderType || "").toLowerCase() === "pickup";
   }
-  return /reverse|pickup|return_type|rvp|\bpick ?up\b/.test(s);
+  if (courier === "shiprocket") {
+    const t = body?.tracking_data || {};
+    if (t.is_return === true) return true;
+    // A forward parcel that came back carries an NDR: a delivery attempted and
+    // failed. A collection from the customer never has one.
+    return !t?.ndr?.reason;
+  }
+  // Shadowfax: was a delivery ever attempted? "ofd" and "assigned_for_delivery"
+  // mean the courier took it TO someone, which only a forward parcel does.
+  const trail = body?.data?.[0]?.tracking_details || [];
+  const ids = trail.map((x) => String(x.status_id || "").toLowerCase());
+  const attempted = ids.some((i) => i === "ofd" || i === "assigned_for_delivery");
+  const returned = ids.some((i) => i.includes("rto") || i.includes("rts"));
+  return returned && !attempted;
 }
 
 for (const courier of ["delhivery", "shiprocket", "shadowfax"]) {

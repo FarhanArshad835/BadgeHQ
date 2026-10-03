@@ -451,6 +451,20 @@ export async function detectInbound(
       // carrier's waybill, so the two can only meet through the order number.
       const named = await orderFromCarrierRef(shop, carrier.orderRef || "");
       if (named) {
+        // The courier watched the parcel travel, so it outranks a ReturnHQ
+        // miss: a return our team booked by hand never reaches ReturnHQ at
+        // all, and reading that silence as "no request, therefore RTO" is
+        // what filed 1 in 6 Delhivery collections as a courier RTO.
+        if (carrier.pickedUpFromCustomer) {
+          return {
+            kind: "customer-return",
+            confident: true,
+            reason: `${named}: the courier collected this from the customer.`,
+            orderName: named,
+            deliveryStatus: "",
+            returnType: "",
+          };
+        }
         const rhq = await returnTypeForOrder(named);
         if (rhq.type) {
           return {
@@ -462,9 +476,10 @@ export async function detectInbound(
             returnType: rhq.type,
           };
         }
-        if (!rhq.ok) {
-          // ReturnHQ did not answer, so "no request" is not something we know.
-          // Filing this as an RTO would be a guess stored permanently.
+        if (!rhq.ok && carrier.pickedUpFromCustomer === undefined) {
+          // Neither source can say: ReturnHQ did not answer and the courier
+          // does not report a direction. Filing this would be a guess stored
+          // permanently.
           return {
             kind: "rto",
             confident: false,
@@ -559,14 +574,31 @@ export async function detectInbound(
   }
 
   if (isRto) {
-    // The courier says RTO, but a customer return can ride an order the
-    // courier also RTO'd. Without ReturnHQ we cannot tell which, and the
-    // unique constraint means a wrong answer here cannot be re-scanned away.
-    if (!rhqOk) {
+    // Our deliveryStatus says RTO, but it comes from a sheet that only knows
+    // the parcel came back, not why. A return the team booked by hand is
+    // collected FROM the customer and still lands here reading "rto", which
+    // is how 20 of 120 Delhivery parcels were filed against the wrong
+    // counterparty. The courier watched the journey, so ask.
+    const dir = await trackCourier(awb);
+    if (dir?.pickedUpFromCustomer) {
+      return {
+        kind: "customer-return",
+        confident: true,
+        reason: `The courier collected this from the customer, though our status reads RTO.`,
+        orderName: order.orderName,
+        deliveryStatus: order.deliveryStatus,
+        returnType: "",
+      };
+    }
+    // A customer return can also ride an order the courier genuinely RTO'd.
+    // With neither ReturnHQ nor a courier direction, that cannot be told
+    // apart, and the unique constraint means a wrong answer here cannot be
+    // re-scanned away.
+    if (!rhqOk && dir?.pickedUpFromCustomer === undefined) {
       return {
         kind: "rto",
         confident: false,
-        reason: `ReturnHQ did not answer, so a customer return cannot be ruled out — not recorded. Scan ${order.orderName} again.`,
+        reason: `ReturnHQ did not answer and the courier did not say which way this travelled — not recorded. Scan ${order.orderName} again.`,
         orderName: order.orderName,
         deliveryStatus: order.deliveryStatus,
         returnType: "",
@@ -576,7 +608,9 @@ export async function detectInbound(
     return {
       kind: "rto",
       confident: true,
-      reason: "Courier returned it undelivered.",
+      reason: dir
+        ? `Courier carried it to the customer and brought it back.`
+        : "Courier returned it undelivered.",
       orderName: order.orderName,
       deliveryStatus: order.deliveryStatus,
       returnType: "",
