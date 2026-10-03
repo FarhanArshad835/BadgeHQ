@@ -830,12 +830,18 @@ function backfillDeliveryDates() {
     // backfill is needed at all. Its tracker wrote the bare scan code "RTO"
     // or "DTO", which contains no word isArrivalStatus recognises, so the
     // date was never captured AND the row is now invisible to the very pass
-    // that would repair it. Rows reading plain RTO/DTO are precisely the
-    // stranded ones, so the carrier is asked instead of the stale label.
+    // that would repair it.
+    //
+    // The exemption is not limited to rows reading RTO/DTO. Delhivery rows go
+    // stale exactly as Shadowfax ones do: parcels scanned in at the warehouse
+    // on 3 Oct were still reading "in_transit" in the sheet, last touched on
+    // 19 and 22 Sept, while the carrier had them as "RETURN Accepted". A stale
+    // label cannot be trusted to decide whether to ask. A row that has not
+    // actually arrived returns no date and is left alone, so asking costs
+    // nothing but an API call.
     const courierForGate = detectCourier(awb);
-    const staleReturnCode = /^(rto|dto)$/i.test((status || '').toString().trim());
     if (courierForGate !== 'SHADOWFAX' &&
-        !(courierForGate === 'DELHIVERY' && staleReturnCode) &&
+        courierForGate !== 'DELHIVERY' &&
         !isArrivalStatus(status)) continue;
     remaining++;
     // Collect a pass-sized chunk. The clock, not a fixed cap, decides how much

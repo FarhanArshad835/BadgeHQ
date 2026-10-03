@@ -29,7 +29,11 @@ export function mapSheetStatus(raw: string): DeliveryOutcome | "no-awb" | null {
   const s = String(raw || "").toLowerCase().replace(/[_\-\s]+/g, " ").trim();
   if (!s) return null;
 
-  const isReturn = /\brto\b|\brts\b|return(ed)? to (origin|seller|client)/.test(s);
+  // "dto" is Delhivery's code for a parcel it collected FROM the customer — a
+  // customer return. Without it here, "DTO Delivered" falls through to the
+  // plain "delivered" rule below and the P&L books a returned parcel as a
+  // completed sale, which is the most expensive way to be wrong.
+  const isReturn = /\brto\b|\brts\b|\bdto\b|return(ed)? to (origin|seller|client)/.test(s);
 
   if (isReturn) {
     // A return that FAILED is not a completed return. Checked first because
