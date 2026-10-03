@@ -329,8 +329,34 @@ export const CSS = `
   60%  { transform: scaleX(0.7); }
   100% { transform: scaleX(0.92); }
 }
-/* Content dims slightly while a navigation is in flight. */
-.pnl-busy { opacity: 0.6; transition: opacity 160ms var(--ease); pointer-events: none; }
+/* Content dims slightly while a navigation is in flight, and stops taking
+   clicks — a second press on a row that is already loading queues a second
+   navigation and the first result is thrown away. */
+.pnl-busy { opacity: 0.55; transition: opacity 160ms var(--ease); pointer-events: none; }
+
+/* The element you actually clicked holds its pressed look until the page
+   answers. The 2px bar at the top of the window is easy to miss when you are
+   looking at the thing you pressed. */
+.pnl-busy .pnl-row-click:active,
+.pnl-busy .pnl-btn:active,
+.pnl-busy .pnl-chip:active { opacity: 1; }
+
+/* A link had no pressed state at all, so a click that starts a page load was
+   indistinguishable from one that did nothing. */
+.pnl-link:active { color: var(--accent); opacity: 0.75; }
+.pnl-link { transition: color 80ms var(--ease), opacity 80ms var(--ease); }
+
+/* Same for the controls that submit rather than navigate. */
+.pnl-select:disabled { opacity: 0.55; cursor: default; }
+.pnl-btn, .pnl-chip, .pnl-tab {
+  transition: transform 60ms var(--ease), background 120ms var(--ease),
+              border-color 120ms var(--ease), opacity 120ms var(--ease);
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pnl-btn:active, .pnl-chip:active, .pnl-row-click:active { transform: none; }
+}
 
 /* pill for pending/status */
 .pnl-pill { display: inline-block; padding: 2px 9px; border-radius: 20px; font-size: 12px; font-weight: 550; }

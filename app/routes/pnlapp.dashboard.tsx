@@ -666,7 +666,10 @@ of which ${fmt(c.deliveredRevenue)} delivered`;
       <PnlStyles />
       {/* Navigation in flight (drill-in, month change, compare): show it. */}
       {navigating && <div className="pnl-progress" key={nav.location?.key} />}
-      <div className="pnl-wrap">
+      {/* Dimmed and click-blocked while a navigation is in flight: a second
+          press on a row that is already loading queues another navigation and
+          discards the first answer. */}
+      <div className={`pnl-wrap${navigating ? " pnl-busy" : ""}`}>
         <div className="pnl-head">
           <h1 className="pnl-h1">Profit &amp; Loss</h1>
           <div className="pnl-headlinks">
