@@ -175,10 +175,5 @@
       "destination": "https://jmlooks-ops.vercel.app/pnl-app/scan/history",
       "permanent": false
     }
-  ],
-  "functions": {
-    "app/**": {
-      "maxDuration": 60
-    }
-  }
+  ]
 }

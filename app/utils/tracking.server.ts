@@ -141,7 +141,7 @@ async function trackShadowfax(token: string, awb: string): Promise<TrackingResul
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Token ${token}` },
     body: JSON.stringify({ awb_numbers: [awb] }),
-    signal: AbortSignal.timeout(10000),
+    signal: AbortSignal.timeout(4000),
   });
   if (!res.ok) return null;
   const body = await res.json().catch(() => null);
@@ -186,14 +186,14 @@ async function trackShiprocket(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, password }),
-    signal: AbortSignal.timeout(10000),
+    signal: AbortSignal.timeout(4000),
   });
   const auth = await authRes.json().catch(() => ({}));
   if (!authRes.ok || !auth?.token) return null;
 
   const res = await fetch(
     `${SHIPROCKET_BASE_URL}/courier/track/awb/${encodeURIComponent(awb)}`,
-    { headers: { Authorization: `Bearer ${auth.token}` }, signal: AbortSignal.timeout(10000) },
+    { headers: { Authorization: `Bearer ${auth.token}` }, signal: AbortSignal.timeout(4000) },
   );
   if (!res.ok) return null;
   const data = await res.json().catch(() => ({}));
@@ -231,7 +231,7 @@ async function trackShiprocket(
 async function trackDelhivery(apiKey: string, awb: string): Promise<TrackingResult | null> {
   const res = await fetch(
     `${DELHIVERY_API_URL}/api/v1/packages/json/?waybill=${encodeURIComponent(awb)}`,
-    { headers: { Authorization: `Token ${apiKey}` }, signal: AbortSignal.timeout(10000) },
+    { headers: { Authorization: `Token ${apiKey}` }, signal: AbortSignal.timeout(4000) },
   );
   if (!res.ok) return null;
   const data = await res.json().catch(() => ({}));

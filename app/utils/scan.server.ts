@@ -320,7 +320,17 @@ async function returnTypeForOrder(orderName: string): Promise<string> {
  * A scan must never wait on a third party that is having a bad day, so this is
  * capped well below the time an operator would notice.
  */
-async function trackCourier(awb: string, budgetMs = 4000) {
+/**
+ * The whole carrier step must fit inside Vercel's 10s function limit, and a
+ * route-level `export const config` is NOT an option here: lifting it that way
+ * previously broke this kind of route's single-fetch .data endpoint, and every
+ * scan posts to .data. So the budget is enforced here instead.
+ *
+ * 2.5s covers a healthy carrier answering and leaves room for the order and
+ * ReturnHQ lookups that follow. A carrier slower than that is not worth making
+ * an operator wait for — the recheck script resolves it afterwards.
+ */
+async function trackCourier(awb: string, budgetMs = 2500) {
   try {
     const app = await getPnlApp();
     if (!app.shiprocketEmail && !app.delhiveryApiKey && !app.shadowfaxApiToken) return null;
