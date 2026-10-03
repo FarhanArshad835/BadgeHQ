@@ -803,17 +803,26 @@ export function ScanPad({
           sessions.map((x) => {
             const isCurrent = x.name === session;
             return (
-              <div key={x.name} className={"sp-past-row" + (isCurrent ? " on" : "")}>
-                <span className="sp-past-name">{x.name}</span>
-                <span className="sp-past-count">{x.count.toLocaleString("en-IN")} scanned</span>
-                {isCurrent ? (
+              // The whole row is the link, not just the button on the end of
+              // it: a row that looks clickable and is not is a worse target
+              // than a small button, especially on a touchscreen.
+              isCurrent ? (
+                <div key={x.name} className="sp-past-row on">
+                  <span className="sp-past-name">{x.name}</span>
+                  <span className="sp-past-count">{x.count.toLocaleString("en-IN")} scanned</span>
                   <span className="sp-past-here">open</span>
-                ) : (
-                  <a className="btn-ghost" href={`?session=${encodeURIComponent(x.name)}`}>
-                    Carry on
-                  </a>
-                )}
-              </div>
+                </div>
+              ) : (
+                <a
+                  key={x.name}
+                  className="sp-past-row"
+                  href={`?session=${encodeURIComponent(x.name)}`}
+                >
+                  <span className="sp-past-name">{x.name}</span>
+                  <span className="sp-past-count">{x.count.toLocaleString("en-IN")} scanned</span>
+                  <span className="sp-past-go">Carry on</span>
+                </a>
+              )
             );
           })
         )}

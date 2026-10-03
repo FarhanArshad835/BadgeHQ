@@ -334,7 +334,19 @@ export default function ScanHistory() {
                       {r.orderName || <span className="unknown">not in orders</span>}
                     </td>
                     <td className="c-session">
-                      {r.session || <span className="unknown">—</span>}
+                      {r.session ? (
+                        // Opens the batch in the scanner it belongs to, ready
+                        // to carry on. Dispatch and inbound are separate
+                        // scanners, so the kind decides where it goes.
+                        <a
+                          href={`/pnl-app/scan/${r.kind === "dispatch" ? "dispatch" : "returns"}?session=${encodeURIComponent(r.session)}`}
+                          title={`Open ${r.session} and carry on scanning`}
+                        >
+                          {r.session}
+                        </a>
+                      ) : (
+                        <span className="unknown">—</span>
+                      )}
                     </td>
                     <td className="c-res">
                       <span className={"res " + RES_CLASS[r.result]}>

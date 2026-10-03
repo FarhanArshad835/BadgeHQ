@@ -642,6 +642,13 @@ const CSS = String.raw`
   .claims-app .sp-past-row {
     display: flex; align-items: center; gap: 12px;
     padding: 9px 14px; border-top: 1px solid var(--line-soft);
+    color: inherit; text-decoration: none;
+  }
+  .claims-app a.sp-past-row:hover { background: #f7f8fd; }
+  .claims-app a.sp-past-row:active { background: #eef0fb; }
+  /* Reads as the action it is without being a separate target. */
+  .claims-app .sp-past-go {
+    font-size: 13px; font-weight: 600; color: #3b4bc8; white-space: nowrap;
   }
   .claims-app .sp-past-row:first-of-type { border-top: 0; }
   .claims-app .sp-past-row.on { background: #f7f8fd; }
@@ -661,4 +668,9 @@ const CSS = String.raw`
        the three when deciding which batch to carry on. */
     .claims-app .sp-past-count { display: none; }
   }
+  /* A session in History opens that batch in its scanner. */
+  .claims-app .c-session a {
+    color: #3b4bc8; text-decoration: none; font-weight: 500;
+  }
+  .claims-app .c-session a:hover { text-decoration: underline; }
 `;
