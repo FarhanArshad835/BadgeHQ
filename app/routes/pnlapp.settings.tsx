@@ -4,6 +4,7 @@ import { Form, useActionData, useLoaderData } from "@remix-run/react";
 import prisma from "../db.server";
 import { getPnlApp, isAuthed, validateShopifyToken } from "../utils/pnl-app.server";
 import { PnlStyles } from "../utils/pnl-styles";
+import { BusyBar, useBusy } from "../components/BusyBar";
 
 /** The stored secrets a reveal can ask for. The list is ours, not the caller's. */
 const SECRET_FIELDS = [
@@ -128,6 +129,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function PnlSettings() {
+  // A second press re-submits the form, so the button stands down while
+  // the first is in flight.
+  const busy = useBusy();
   const d = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   // The action answers two different questions, so narrow once here rather
@@ -138,6 +142,7 @@ export default function PnlSettings() {
   return (
     <div className="pnl">
       <PnlStyles />
+      <BusyBar />
       <div className="pnl-wrap narrow">
         <div className="pnl-head">
           <h1 className="pnl-h1">Settings</h1>
@@ -257,7 +262,7 @@ export default function PnlSettings() {
             on every scan: that endpoint takes seconds to respond and a scan cannot wait.
           </div>
           <Field label="Dispatched AWBs URL" name="dispatchSheetUrl" defaultValue={d.dispatchSheetUrl} placeholder="https://script.google.com/macros/s/…/exec" />
-          <button type="submit" className="pnl-btn pnl-btn-primary" style={{ marginTop: 4, alignSelf: "flex-start" }}>
+          <button type="submit" className="pnl-btn pnl-btn-primary" disabled={busy} style={{ marginTop: 4, alignSelf: "flex-start" }}>
             Save
           </button>
         </Form>

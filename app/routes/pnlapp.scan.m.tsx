@@ -22,6 +22,7 @@ import {
   type ScanKind,
 } from "../utils/scan.server";
 import { InboundMobileStyles } from "../components/InboundMobileStyles";
+import { BusyBar } from "../components/BusyBar";
 
 /**
  * The prototype's viewport, which the app's default does not cover.
@@ -392,6 +393,7 @@ export default function InboundMobile() {
   return (
     <div className="inbound-m">
       <InboundMobileStyles />
+      <BusyBar />
       <div className="app">
         <header className="top">
           <div className="count" aria-label="Scanned this session">

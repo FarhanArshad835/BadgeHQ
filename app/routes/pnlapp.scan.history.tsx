@@ -19,6 +19,7 @@ import {
   type ScanResult,
 } from "../utils/scan.server";
 import { ClaimsStyles } from "../components/ClaimsStyles";
+import { BusyBar, useBusy } from "../components/BusyBar";
 import { ScanNav } from "../components/ScanNav";
 
 const KINDS: Record<string, string> = {
@@ -119,6 +120,9 @@ type Row = {
 };
 
 export default function ScanHistory() {
+  // Filters stand down while the page reloads: a second change races the
+  // first and the earlier answer wins at random.
+  const busy = useBusy();
   const d = useLoaderData<typeof loader>() as {
     rows: Row[];
     counts: Record<string, number>;
@@ -170,6 +174,7 @@ export default function ScanHistory() {
   return (
     <div className="claims-app">
       <ClaimsStyles />
+      <BusyBar />
       <div className="wrap">
         <ScanNav active="history" counts={d.counts} />
 
@@ -204,6 +209,7 @@ export default function ScanHistory() {
             />
             <select
               aria-label="Date range"
+              disabled={busy}
               value={activeRange}
               onChange={(e) => {
                 const r = RANGES.find((x) => x.label === e.target.value);
@@ -222,6 +228,7 @@ export default function ScanHistory() {
             <input
               type="date"
               aria-label="From date"
+              disabled={busy}
               value={d.from}
               max={d.to || istDay(0)}
               onChange={(e) => setFilters({ from: e.target.value })}
@@ -229,6 +236,7 @@ export default function ScanHistory() {
             <input
               type="date"
               aria-label="To date"
+              disabled={busy}
               value={d.to}
               min={d.from}
               max={istDay(0)}
@@ -236,6 +244,7 @@ export default function ScanHistory() {
             />
             <select
               aria-label="Type"
+              disabled={busy}
               value={kind}
               onChange={(e) => setFilters({ kind: e.target.value })}
             >
@@ -248,6 +257,7 @@ export default function ScanHistory() {
                 question the type list alone cannot ask. */}
             <select
               aria-label="Result"
+              disabled={busy}
               value={d.result}
               onChange={(e) => setFilters({ result: e.target.value })}
             >

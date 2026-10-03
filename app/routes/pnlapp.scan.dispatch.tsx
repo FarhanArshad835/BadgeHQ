@@ -20,6 +20,7 @@ import {
   scanCountsToday,
 } from "../utils/scan.server";
 import { ClaimsStyles } from "../components/ClaimsStyles";
+import { BusyBar } from "../components/BusyBar";
 import { ScanPad } from "../components/ScanPad";
 import { ScanNav } from "../components/ScanNav";
 
@@ -71,6 +72,7 @@ export default function DispatchScanner() {
   return (
     <div className="claims-app">
       <ClaimsStyles />
+      <BusyBar />
       <div className="wrap">
         <ScanNav active="dispatch" counts={d.counts} />
 

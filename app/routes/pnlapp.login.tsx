@@ -9,6 +9,7 @@ import {
   isAuthed,
 } from "../utils/pnl-app.server";
 import { PnlStyles } from "../utils/pnl-styles";
+import { BusyBar, useBusy } from "../components/BusyBar";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (isAuthed(request)) return redirect("/pnl-app/home");
@@ -47,11 +48,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function PnlLogin() {
+  // A second press re-submits the form, so the button stands down while
+  // the first is in flight.
+  const busy = useBusy();
   const { needsSetup, adminUrl } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   return (
     <div className="pnl" style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
       <PnlStyles />
+      <BusyBar />
       <div className="pnl-panel" style={{ width: 380 }}>
         <h1 className="pnl-h1" style={{ fontSize: 22 }}>Profit &amp; Loss</h1>
         <p className="pnl-sub" style={{ marginTop: 6, marginBottom: 22 }}>
@@ -68,7 +73,7 @@ export default function PnlLogin() {
             autoFocus
           />
           {actionData?.error && <div className="pnl-err">{actionData.error}</div>}
-          <button type="submit" className="pnl-btn pnl-btn-primary">
+          <button type="submit" className="pnl-btn pnl-btn-primary" disabled={busy}>
             {needsSetup ? "Set password and enter" : "Enter"}
           </button>
         </Form>

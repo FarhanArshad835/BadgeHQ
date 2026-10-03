@@ -19,6 +19,7 @@ import { useLoaderData } from "@remix-run/react";
 import { getPnlApp, isAuthed } from "../utils/pnl-app.server";
 import { loadScannedSet, recordScan, scanCountsToday } from "../utils/scan.server";
 import { ClaimsStyles } from "../components/ClaimsStyles";
+import { BusyBar } from "../components/BusyBar";
 import { ScanPad } from "../components/ScanPad";
 import { ScanNav } from "../components/ScanNav";
 
@@ -55,6 +56,7 @@ export default function ReturnsScanner() {
   return (
     <div className="claims-app">
       <ClaimsStyles />
+      <BusyBar />
       <div className="wrap">
         <ScanNav active="returns" counts={d.counts} />
 

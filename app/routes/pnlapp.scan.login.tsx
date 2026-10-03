@@ -18,6 +18,7 @@ import {
   isAuthed,
 } from "../utils/pnl-app.server";
 import { ClaimsStyles } from "../components/ClaimsStyles";
+import { BusyBar, useBusy } from "../components/BusyBar";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (isAuthed(request, "scan")) return redirect("/pnl-app/scan/dispatch");
@@ -53,12 +54,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function ScanLogin() {
+  // A second press re-submits the form, so the button stands down while
+  // the first is in flight.
+  const busy = useBusy();
   const { needsSetup } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
 
   return (
     <div className="claims-app login-app">
       <ClaimsStyles />
+      <BusyBar />
       <div className="login-card">
         <h1>Warehouse Scanner</h1>
         <p>
@@ -75,7 +80,7 @@ export default function ScanLogin() {
             autoFocus
           />
           {actionData?.error && <div className="login-err">{actionData.error}</div>}
-          <button type="submit" className="btn-primary">
+          <button type="submit" className="btn-primary" disabled={busy}>
             {needsSetup ? "Set password and enter" : "Enter"}
           </button>
         </Form>

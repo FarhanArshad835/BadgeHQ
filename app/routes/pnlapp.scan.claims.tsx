@@ -26,6 +26,7 @@ import {
   type ClaimStatus,
 } from "../utils/scan.server";
 import { ClaimsStyles } from "../components/ClaimsStyles";
+import { BusyBar } from "../components/BusyBar";
 
 const TABS = ["rto", "returns"] as const;
 type Tab = (typeof TABS)[number];
@@ -410,6 +411,7 @@ export default function Claims() {
   return (
     <div className="claims-app">
       <ClaimsStyles />
+      <BusyBar />
       <div className="wrap">
         <div className="topbar">
           <nav className="nav" aria-label="Main">

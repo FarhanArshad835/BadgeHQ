@@ -21,6 +21,7 @@ import {
   makeSessionCookie,
 } from "../utils/pnl-app.server";
 import { PnlStyles } from "../utils/pnl-styles";
+import { BusyBar, useBusy } from "../components/BusyBar";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const token = new URL(request.url).searchParams.get("token") || "";
@@ -64,12 +65,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function PnlReset() {
+  // A second press re-submits the form, so the button stands down while
+  // the first is in flight.
+  const busy = useBusy();
   const { valid, token } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
 
   return (
     <div className="pnl" style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
       <PnlStyles />
+      <BusyBar />
       <div className="pnl-panel" style={{ width: 380 }}>
         <h1 className="pnl-h1" style={{ fontSize: 22 }}>Set a new password</h1>
 
@@ -107,7 +112,7 @@ export default function PnlReset() {
                 autoComplete="new-password"
               />
               {actionData?.error && <div className="pnl-err">{actionData.error}</div>}
-              <button type="submit" className="pnl-btn pnl-btn-primary">
+              <button type="submit" className="pnl-btn pnl-btn-primary" disabled={busy}>
                 Save and enter
               </button>
             </Form>
