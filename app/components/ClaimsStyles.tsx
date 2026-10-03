@@ -619,4 +619,14 @@ const CSS = String.raw`
        of a list someone has scrolled to the end of. */
     .claims-app .wrap { padding-bottom: 64px; }
   }
+  /* The session a scan belongs to. Quiet — it groups rows rather than being
+     the point of any one of them. */
+  .claims-app .c-session {
+    color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap;
+  }
+  @media (max-width: 640px) {
+    /* The card layout already carries four fields; a fifth makes it a wall.
+       The session is in the CSV and the filter for anyone who needs it. */
+    .claims-app .c-session { display: none; }
+  }
 `;

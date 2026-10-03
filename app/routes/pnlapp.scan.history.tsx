@@ -64,13 +64,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
     const IST = 5.5 * 60 * 60 * 1000;
     const csv = [
-      "scanned_ist,kind,awb,order_name,result,note",
+      "scanned_ist,kind,awb,order_name,session,result,note",
       ...rows.map((r) =>
         [
           esc(new Date(r.scannedAt.getTime() + IST).toISOString().slice(0, 19).replace("T", " ")),
           esc(r.kind),
           esc(r.awb),
           esc(r.orderName),
+          esc(r.session),
           esc(r.result),
           esc(r.note),
         ].join(","),
@@ -101,6 +102,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       orderName: r.orderName,
       result: r.result,
       note: r.note,
+      session: r.session,
       at: new Date(r.scannedAt.getTime() + 5.5 * 60 * 60 * 1000)
         .toISOString()
         .slice(0, 16)
@@ -116,6 +118,7 @@ type Row = {
   orderName: string;
   result: string;
   note: string;
+  session: string;
   at: string;
 };
 
@@ -284,6 +287,7 @@ export default function ScanHistory() {
                 <th>Type</th>
                 <th>AWB</th>
                 <th>Order</th>
+                <th>Session</th>
                 <th>Result</th>
               </tr>
             </thead>
@@ -304,6 +308,9 @@ export default function ScanHistory() {
                     <td className="c-awb">{r.awb}</td>
                     <td className="c-order">
                       {r.orderName || <span className="unknown">not in orders</span>}
+                    </td>
+                    <td className="c-session">
+                      {r.session || <span className="unknown">—</span>}
                     </td>
                     <td className="c-res">
                       <span className={"res " + RES_CLASS[r.result]}>
