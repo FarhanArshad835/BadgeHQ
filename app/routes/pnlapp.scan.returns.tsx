@@ -80,7 +80,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (!body?.awb) return json({ error: "bad-request" }, { status: 400 });
 
   // "inbound" lets recordScan decide between rto and customer-return.
-  return json(await recordScan(shop, "inbound", String(body.awb)));
+  // The session is what makes a batch a thing that can be reopened and
+  // reported on. The client has been sending it; this never read it, so
+  // every scan was filed under no batch at all.
+  return json(
+    await recordScan(shop, "inbound", String(body.awb), { session: String(body.session || "") }),
+  );
 };
 
 export default function ReturnsScanner() {

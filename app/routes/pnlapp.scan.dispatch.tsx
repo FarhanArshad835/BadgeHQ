@@ -73,7 +73,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (type.includes("application/json")) {
     const body = await request.json().catch(() => null);
     if (!body?.awb) return json({ error: "bad-request" }, { status: 400 });
-    return json(await recordScan(shop, "dispatch", String(body.awb)));
+    return json(
+      await recordScan(shop, "dispatch", String(body.awb), {
+        session: String(body.session || ""),
+      }),
+    );
   }
 
   const form = await request.formData();

@@ -83,7 +83,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   if (!body?.awb) return json({ error: "bad-request" }, { status: 400 });
-  return json(await recordScan(shop, "inbound", String(body.awb)));
+  return json(
+    await recordScan(shop, "inbound", String(body.awb), { session: String(body.session || "") }),
+  );
 };
 
 type Verdict = "rto" | "return" | "check" | "hold";
@@ -151,6 +153,13 @@ export default function InboundMobile() {
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteText, setPasteText] = useState("");
   const [kbd, setKbd] = useState(false);
+  // Named like the desktop scanners, so a batch started on a phone is the same
+  // kind of thing and shows up in the same lists.
+  const [session] = useState(() => {
+    const d = new Date();
+    const mon = d.toLocaleDateString("en-GB", { month: "short" });
+    return `${d.getDate()} ${mon} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  });
   const [flash, setFlash] = useState(0);
 
   const itemsRef = useRef<Item[]>([]);
@@ -277,7 +286,7 @@ export default function InboundMobile() {
       const res = await fetch(window.location.pathname + ".data", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ awb }),
+        body: JSON.stringify({ awb, session }),
         credentials: "same-origin",
       });
       if (!res.ok) throw new Error(String(res.status));
