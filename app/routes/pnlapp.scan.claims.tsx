@@ -120,8 +120,34 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   return json({ ok: true });
 };
 
-const AGES = [0, 7, 14, 30, 45];
+/** A date as YYYY-MM-DD in the browser's own day, not UTC. */
+const isoDay = (x: Date) =>
+  new Date(x.getTime() - x.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+
+/** One whole day, n days back, as the inclusive range the filter wants. */
+const dayRange = (ago: number) => {
+  const x = new Date();
+  x.setDate(x.getDate() - ago);
+  const d = isoDay(x);
+  return { from: d, to: d };
+};
+
+const DAY_CHIPS = [
+  { label: "Today", ago: 0 },
+  { label: "Yesterday", ago: 1 },
+];
 const PAGE_SIZE = 50;
+/** The steps nextStep() can return, in the order a claim moves through them. */
+const STEPS = [
+  "File claim",
+  "Closing soon",
+  "Fix carrier",
+  "Past window",
+  "Found",
+  "Received",
+  "Claim raised",
+];
+
 const inr = (n: number) => "\u20B9" + n.toLocaleString("en-IN");
 const fmtDate = (iso: string) =>
   new Date(iso + "T00:00:00").toLocaleDateString("en-GB", {
@@ -167,6 +193,11 @@ export default function Claims() {
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [customErr, setCustomErr] = useState("");
+  // Which column's filter menu is open, by label. The native select's popup
+  // could not be styled — it arrived with OS chrome and a blue highlight
+  // against a table that looks nothing like it — so the menu is ours.
+  const [menu, setMenu] = useState("");
+  const menuRef = useRef<HTMLDivElement>(null);
   const popRef = useRef<HTMLDivElement>(null);
   const customChipRef = useRef<HTMLButtonElement>(null);
 
@@ -239,6 +270,67 @@ export default function Claims() {
    * descending — "most days waiting" and "highest cost" are what someone
    * chasing claims wants on the first click.
    */
+  /**
+   * A column's filter, as a menu that matches the page.
+   *
+   * The options are few and known, so the list is built rather than handed to
+   * a native select whose popup cannot be styled at all.
+   */
+  const FilterMenu = ({
+    label,
+    value,
+    set,
+    any,
+    options,
+  }: {
+    label: string;
+    value: string;
+    set: (v: string) => void;
+    any: string;
+    options: Array<{ value: string; label: string }>;
+  }) => {
+    const open = menu === label;
+    const on = !!value;
+    const choose = (v: string) => {
+      set(v);
+      setPage(0);
+      setMenu("");
+    };
+    return (
+      <span className="th-fw" ref={open ? menuRef : undefined}>
+        <button
+          type="button"
+          className={"th-filter" + (on ? " on" : "")}
+          aria-label={`Filter ${label}`}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          onClick={() => setMenu(open ? "" : label)}
+        >
+          <span aria-hidden>{"≡"}</span>
+        </button>
+        {open && (
+          <div className="th-menu" role="menu">
+            {[{ value: "", label: any }, ...options].map((o) => (
+              <button
+                key={o.value || "any"}
+                type="button"
+                role="menuitemradio"
+                aria-checked={value === o.value}
+                className={"th-opt" + (value === o.value ? " on" : "")}
+                onClick={() => choose(o.value)}
+              >
+                <span className="tick" aria-hidden>
+                  {value === o.value ? "✓" : ""}
+                </span>
+                {o.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </span>
+    );
+  };
+
   const SortTh = ({
     col,
     label,
@@ -284,27 +376,13 @@ export default function Claims() {
             </span>
           </button>
           {filter && (
-            // The filter sits on the column it filters. A native select keeps
-            // the keyboard and touch behaviour a custom menu would have to
-            // rebuild, and it is invisible over the funnel mark.
-            <span className={"th-filter" + (on ? " on" : "")}>
-              <span aria-hidden>{on ? "✕" : "≡"}</span>
-              <select
-                aria-label={`Filter ${label}`}
-                value={filter.value}
-                onChange={(e) => {
-                  filter.set(e.target.value);
-                  setPage(0);
-                }}
-              >
-                <option value="">{filter.any}</option>
-                {filter.options.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </span>
+            <FilterMenu
+              label={label}
+              value={filter.value}
+              set={filter.set}
+              any={filter.any}
+              options={filter.options}
+            />
           )}
         </span>
       </th>
@@ -386,7 +464,7 @@ export default function Claims() {
 
   function preset(p: string) {
     const today = new Date();
-    const iso = (x: Date) => new Date(x.getTime() - x.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+    const iso = isoDay;
     const ago = (n: number) => {
       const x = new Date(today);
       x.setDate(x.getDate() - n);
@@ -415,6 +493,26 @@ export default function Claims() {
 
   // The popover closes on an outside click, a resize or a scroll, as the
   // prototype does — it is positioned fixed, so it would otherwise detach.
+  useEffect(() => {
+    if (!menu) return;
+    const onDown = (e: MouseEvent) => {
+      if (menuRef.current?.contains(e.target as Node)) return;
+      setMenu("");
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenu("");
+    };
+    const close = () => setMenu("");
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    window.addEventListener("resize", close);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("resize", close);
+    };
+  }, [menu]);
+
   useEffect(() => {
     if (!popOpen) return;
     const onDown = (e: MouseEvent) => {
@@ -512,24 +610,43 @@ export default function Claims() {
 
         <div className="controls">
           <div className="chips">
-            {AGES.map((a) => (
-              <button
-                key={a}
-                className={"chip" + (age === a && !custom ? " active" : "")}
-                onClick={() => {
-                  setAge(a);
-                  setCustom(null);
-                  setPage(0);
-                }}
-              >
-                {a ? `${a}+ days` : "All"}{" "}
-                <span>
-                  {(showScanned ? rows : missing)
-                    .filter((r) => r.days >= a)
-                    .length.toLocaleString("en-IN")}
-                </span>
-              </button>
-            ))}
+            {/* All, then the two days someone actually asks for by name. The
+                "7+ days" ladder is gone: age is a column now, so sorting by
+                Days answers "what is oldest" better than four fixed steps,
+                and the custom range covers any other span. */}
+            <button
+              className={"chip" + (!age && !custom ? " active" : "")}
+              onClick={() => {
+                setAge(0);
+                setCustom(null);
+                setPage(0);
+              }}
+            >
+              All{" "}
+              <span>{(showScanned ? rows : missing).length.toLocaleString("en-IN")}</span>
+            </button>
+            {DAY_CHIPS.map((c) => {
+              const r = dayRange(c.ago);
+              const on = custom?.from === r.from && custom?.to === r.to;
+              return (
+                <button
+                  key={c.label}
+                  className={"chip" + (on ? " active" : "")}
+                  onClick={() => {
+                    setFromDate(r.from);
+                    setToDate(r.to);
+                    applyCustom(r.from, r.to);
+                  }}
+                >
+                  {c.label}{" "}
+                  <span>
+                    {(showScanned ? rows : missing)
+                      .filter((x) => x.delivered >= r.from && x.delivered <= r.to)
+                      .length.toLocaleString("en-IN")}
+                  </span>
+                </button>
+              );
+            })}
             {scannedCount > 0 && (
               <button
                 className={"chip" + (showScanned ? " active" : "")}
@@ -602,10 +719,8 @@ export default function Claims() {
               </div>
             </div>
             <div className="presets">
-              {/* Today and Yesterday first: a parcel marked returned today is
-                  the one someone is most likely to be looking for. The two
-                  90-day presets are gone — the age chips above already cover
-                  "old", and a claim that far back is past most windows. */}
+              {/* Today and Yesterday lead here too, matching the chips above:
+                  the same day picked either way lights the same chip. */}
               <button onClick={() => preset("0")}>Today</button>
               <button onClick={() => preset("1")}>Yesterday</button>
               <button onClick={() => preset("7")}>Last 7 days</button>
@@ -689,26 +804,13 @@ export default function Claims() {
                 <th className={"has-filter" + (step ? " filtered" : "")}>
                   <span className="th-in">
                     <span className="th-label">{step || "Next step"}</span>
-                    <span className={"th-filter" + (step ? " on" : "")}>
-                      <span aria-hidden>{step ? "✕" : "≡"}</span>
-                      <select
-                        aria-label="Filter Next step"
-                        value={step}
-                        onChange={(e) => {
-                          setStep(e.target.value);
-                          setPage(0);
-                        }}
-                      >
-                        <option value="">Any step</option>
-                        <option>File claim</option>
-                        <option>Closing soon</option>
-                        <option>Fix carrier</option>
-                        <option>Past window</option>
-                        <option>Found</option>
-                        <option>Received</option>
-                        <option>Claim raised</option>
-                      </select>
-                    </span>
+                    <FilterMenu
+                      label="Next step"
+                      value={step}
+                      set={setStep}
+                      any="Any step"
+                      options={STEPS.map((x) => ({ value: x, label: x }))}
+                    />
                   </span>
                 </th>
                 <th />

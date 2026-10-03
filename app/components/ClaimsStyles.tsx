@@ -714,13 +714,14 @@ const CSS = String.raw`
   .claims-app th[aria-sort="descending"] .sort { color: var(--ink); font-weight: 500; }
   .claims-app .th-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
-  /* A native select laid invisibly over the mark: the keyboard, the touch
-     target and the long carrier list all behave without rebuilding them. */
+  /* The filter menu. Anchored to its column, and styled like the rest of the
+     page rather than like the operating system. */
+  .claims-app .th-fw { position: relative; display: inline-flex; }
   .claims-app .th-filter {
-    position: relative; display: inline-flex; align-items: center; justify-content: center;
-    width: 19px; height: 19px; border-radius: 4px; cursor: pointer;
-    font-size: 12px; line-height: 1; color: #5a5a5a;
-    background: #f1f1f1; border: 1px solid var(--line);
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 19px; height: 19px; padding: 0; margin: 0; border-radius: 4px;
+    cursor: pointer; font-family: inherit; font-size: 12px; line-height: 1;
+    color: #5a5a5a; background: #f1f1f1; border: 1px solid var(--line);
     transition: background .12s, color .12s, border-color .12s;
   }
   .claims-app .th-filter:hover { background: #e4e4e4; color: var(--ink); border-color: #c8c8c8; }
@@ -730,10 +731,26 @@ const CSS = String.raw`
   .claims-app .th-filter.on {
     color: #fff; background: var(--ink); border-color: var(--ink);
   }
-  .claims-app .th-filter select {
-    position: absolute; inset: 0; width: 100%; height: 100%;
-    opacity: 0; cursor: pointer; border: 0; padding: 0; margin: 0;
+  .claims-app .th-menu {
+    position: absolute; top: calc(100% + 5px); left: 0; z-index: 30;
+    min-width: 150px; padding: 4px;
+    background: var(--surface); border: 1px solid var(--line-strong);
+    border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.12);
+    display: flex; flex-direction: column; gap: 1px;
   }
+  /* A menu on the last columns would otherwise open past the table edge. */
+  .claims-app th:nth-last-child(-n+3) .th-menu { left: auto; right: 0; }
+  .claims-app .th-opt {
+    display: flex; align-items: center; gap: 6px;
+    border: 0; background: none; cursor: pointer; text-align: left;
+    font: inherit; font-size: 13px; font-weight: 400; color: var(--ink);
+    padding: 6px 8px; border-radius: 6px; white-space: nowrap;
+  }
+  .claims-app .th-opt:hover { background: #f1f1f1; }
+  .claims-app .th-opt:active { background: #e8e8e8; }
+  .claims-app .th-opt.on { font-weight: 600; }
+  /* Reserved whether or not it holds a tick, so the labels line up. */
+  .claims-app .th-opt .tick { width: 11px; flex-shrink: 0; font-size: 11px; }
   /* A filtered column stays legible as filtered once the pointer leaves. */
   .claims-app th.filtered { color: var(--ink); }
   .claims-app th.filtered .th-label { font-weight: 500; }
