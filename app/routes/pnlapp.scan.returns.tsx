@@ -17,7 +17,7 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { getPnlApp, isAuthed } from "../utils/pnl-app.server";
-import { recordScan, scanCountsToday } from "../utils/scan.server";
+import { loadScannedSet, recordScan, scanCountsToday } from "../utils/scan.server";
 import { ClaimsStyles } from "../components/ClaimsStyles";
 import { ScanPad } from "../components/ScanPad";
 import { ScanNav } from "../components/ScanNav";
@@ -25,8 +25,15 @@ import { ScanNav } from "../components/ScanNav";
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (!isAuthed(request, "scan")) return redirect("/pnl-app/scan/login");
   const app = await getPnlApp();
-  const counts = app.shopDomain ? await scanCountsToday(app.shopDomain) : {};
-  return json({ counts });
+  const shop = app.shopDomain;
+  // Both kinds: an inbound scan can be filed either way, so a parcel already
+  // booked in as an RTO must not be re-sent as a customer return.
+  const [counts, rto, cr] = await Promise.all([
+    shop ? scanCountsToday(shop) : Promise.resolve({}),
+    shop ? loadScannedSet(shop, "rto") : Promise.resolve([]),
+    shop ? loadScannedSet(shop, "customer-return") : Promise.resolve([]),
+  ]);
+  return json({ counts, alreadyScanned: [...rto, ...cr] });
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -55,6 +62,7 @@ export default function ReturnsScanner() {
           kind="inbound"
           title="Inbound parcels"
           hint="Scan any parcel coming back. RTO or customer return is worked out for you."
+          alreadyScanned={d.alreadyScanned}
           help={
             <>
               A parcel the courier returned undelivered is an <b>RTO</b>. One the customer sent back

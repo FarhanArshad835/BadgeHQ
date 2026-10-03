@@ -100,6 +100,7 @@ export function ScanPad({
   hint,
   help,
   dispatched,
+  alreadyScanned,
   toolbar,
 }: {
   kind: ScanKind;
@@ -109,6 +110,10 @@ export function ScanPad({
   help: React.ReactNode;
   /** Preloaded already-dispatched AWBs. Empty for non-dispatch scanners. */
   dispatched?: string[];
+  /** AWBs an earlier session already booked in, so a pasted list can drop them
+   *  without spending a round trip each to be told what we already know. The
+   *  server still has the final say. */
+  alreadyScanned?: string[];
   /** The dispatch page's sync strip, rendered above the title. */
   toolbar?: React.ReactNode;
 }) {
@@ -132,6 +137,8 @@ export function ScanPad({
     results: Array<{ awb: string; result: string; label: string; order: string | null }>;
   } | null>(null);
   const [kbOn, setKbOn] = useState(false);
+  // What the last paste skipped without asking the server.
+  const [dropped, setDropped] = useState({ repeated: 0, known: 0 });
 
   // A Set, built once: several thousand linear scans per keystroke would defeat
   // the point of preloading the list at all.
@@ -139,6 +146,13 @@ export function ScanPad({
   useEffect(() => {
     dispatchedSet.current = new Set(dispatched || []);
   }, [dispatched]);
+
+  // A Set, built once: a linear scan per AWB over thousands would cost more
+  // than the requests it saves.
+  const scannedSet = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    scannedSet.current = new Set(alreadyScanned || []);
+  }, [alreadyScanned]);
 
   // Ignore a verdict from a scan the operator has already moved past.
   const seq = useRef(0);
@@ -337,6 +351,29 @@ export function ScanPad({
   }
 
   /* ---------- Bulk paste, in chunks of five ---------- */
+  /**
+   * Drop what we already know is recorded, before anything is sent.
+   *
+   * Two kinds, both free to remove here: repeats inside the pasted list, and
+   * AWBs an earlier session booked in. Each would otherwise cost a request to
+   * be told what we already know — on a 1,200-row paste that is most of the
+   * work, and the time is paid by an operator watching a progress bar.
+   */
+  function dedupe(codes: string[]): string[] {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    let repeated = 0;
+    let known = 0;
+    for (const a of codes) {
+      if (seen.has(a)) { repeated++; continue; }
+      seen.add(a);
+      if (scannedSet.current.has(a)) { known++; continue; }
+      out.push(a);
+    }
+    setDropped({ repeated, known });
+    return out;
+  }
+
   async function runBulk(codes: string[]) {
     if (!codes.length || bulk?.running) return;
     seq.current++;
@@ -378,14 +415,23 @@ export function ScanPad({
       retry: retryLater,
       results,
     });
+    // The skipped ones are counted here too, or the numbers would not add up
+    // to what was pasted and the operator would be left wondering where the
+    // rest went.
+    const skipped = dropped.repeated + dropped.known;
     const parts = [`${newly.toLocaleString("en-IN")} newly recorded`];
-    if (already) parts.push(`${already.toLocaleString("en-IN")} already scanned`);
+    if (already + dropped.known) {
+      parts.push(`${(already + dropped.known).toLocaleString("en-IN")} already scanned`);
+    }
+    if (dropped.repeated) {
+      parts.push(`${dropped.repeated.toLocaleString("en-IN")} repeated in the list`);
+    }
     if (blocked) parts.push(`${blocked.toLocaleString("en-IN")} blocked`);
     if (retryLater.length) parts.push(`${retryLater.length.toLocaleString("en-IN")} not saved`);
     setV(
       retryLater.length ? "error" : "ok",
       retryLater.length ? "SOME NOT SAVED" : "LIST RECORDED",
-      `${(newly + already).toLocaleString("en-IN")} of ${codes.length.toLocaleString("en-IN")} on record`,
+      `${(newly + already + skipped).toLocaleString("en-IN")} of ${(codes.length + skipped).toLocaleString("en-IN")} on record`,
       parts.join(" · "),
     );
     play(retryLater.length ? "error" : "ok");
@@ -541,7 +587,7 @@ export function ScanPad({
             <button
               className="btn-primary"
               disabled={!listCount || Boolean(bulk?.running)}
-              onClick={() => void runBulk(parseList(text))}
+              onClick={() => void runBulk(dedupe(parseList(text)))}
             >
               Record {listCount.toLocaleString("en-IN")} AWB{listCount === 1 ? "" : "s"}
             </button>

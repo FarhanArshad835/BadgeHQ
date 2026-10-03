@@ -695,6 +695,26 @@ export async function loadDispatchedSet(shop: string): Promise<string[]> {
 }
 
 /**
+ * Every AWB already scanned for this purpose, for the page to hold.
+ *
+ * A pasted list is mostly parcels someone has already booked in, and each one
+ * costs a round trip to learn that. Preloading lets the browser drop them
+ * before a single request is sent — one query at page load instead of hundreds
+ * of pointless ones.
+ *
+ * The server still has the final say: the unique key on (shop, kind, awb) is
+ * what actually prevents a double record, and two benches scanning at once
+ * cannot both win. This set only saves asking.
+ */
+export async function loadScannedSet(shop: string, kind: ScanKind): Promise<string[]> {
+  const rows = await prisma.scanEvent.findMany({
+    where: { shop, kind },
+    select: { awb: true },
+  });
+  return rows.map((r) => r.awb);
+}
+
+/**
  * Customer returns the courier delivered, split by whether the bench saw them.
  *
  * The same shape as claimCandidates, against a different counterparty. It joins
