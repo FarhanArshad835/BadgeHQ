@@ -177,7 +177,10 @@ export default function Claims() {
   // together, which is how a bench actually works through a pile.
   const [typeFilter, setTypeFilter] = useState("");
   const [step, setStep] = useState("");
-  const [claimWindow, setClaimWindow] = useState(60);
+  // The claim window still decides "Past window" and "Closing soon" in the
+  // Next step column. The summary strip that used to let it be changed is
+  // gone, so it holds at the figure that was its default.
+  const claimWindow = 60;
   // The sort dropdown and the column headers set the same state, so they can
   // never disagree about what the table is showing.
   const [sortCol, setSortCol] = useState<
@@ -393,28 +396,10 @@ export default function Claims() {
   const pageIdx = Math.min(page, pages - 1);
   const slice = filtered.slice(pageIdx * PAGE_SIZE, (pageIdx + 1) * PAGE_SIZE);
 
-  const claimableTotal = useMemo(
-    () =>
-      rows
-        .filter((r) => ["File claim", "Closing soon"].includes(nextStep(r)))
-        .reduce((s, r) => s + (r.cost ?? 0), 0),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [rows, claimWindow],
-  );
-  // A parcel the bench has scanned is not at risk — it is on the shelf.
-  const atRisk = useMemo(
-    () =>
-      rows
-        .filter((r) => !r.scanned && r.status !== "received")
-        .reduce((s, r) => s + (r.cost ?? 0), 0),
-    [rows],
-  );
+  // Still counted: the chips show how many are missing and how many the bench
+  // has found. The money totals went with the summary strip.
   const missing = rows.filter((r) => !r.scanned);
   const scannedCount = rows.filter((r) => r.scanned).length;
-  const pctOfReturns =
-    rows.length + d.undated > 0
-      ? ((missing.length / (rows.length + d.undated)) * 100).toFixed(1)
-      : "0.0";
 
   async function setStatus(awb: string, next: "received" | "raised") {
     const row = rows.find((r) => r.awb === awb);
@@ -568,45 +553,6 @@ export default function Claims() {
             to one left the other behind — which is how Sign out kept pushing
             History off the edge here after it had been moved everywhere else. */}
         <ScanNav active="claims" counts={d.counts} />
-
-        <section className="summary">
-          <div className="headline">
-            <div className="big">{missing.length.toLocaleString("en-IN")}</div>
-            <div className="big-sub">
-              <span className="long">
-                parcels marked returned but never scanned in ·{" "}
-                {pctOfReturns}% of returns
-              </span>
-              <span className="short">never scanned in · {pctOfReturns}% of returns</span>
-            </div>
-          </div>
-          <div className="stats">
-            <div className="stat">
-              <div className="label">Claimable now</div>
-              <div className="value green">{inr(claimableTotal)}</div>
-            </div>
-            <div className="stat">
-              <div className="label">
-                <span className="long">Stock cost at risk</span>
-                <span className="short">At risk</span>
-              </div>
-              <div className="value">{inr(atRisk)}</div>
-            </div>
-            <div className="stat">
-              <div className="label">Claim window</div>
-              <select
-                aria-label="Claim window"
-                value={claimWindow}
-                onChange={(e) => setClaimWindow(Number(e.target.value))}
-              >
-                <option value="30">30 days</option>
-                <option value="45">45 days</option>
-                <option value="60">60 days</option>
-                <option value="90">90 days</option>
-              </select>
-            </div>
-          </div>
-        </section>
 
         <div className="controls">
           <div className="chips">

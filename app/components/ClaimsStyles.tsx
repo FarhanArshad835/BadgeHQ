@@ -62,18 +62,6 @@ const CSS = String.raw`
   .claims-app .subtabs button { border: 0; background: none; font-size: 14px; color: var(--muted); padding: 0 0 7px; margin-bottom: -1px; border-bottom: 2px solid transparent; cursor: pointer; }
   .claims-app .subtabs button.active { color: var(--ink); border-bottom-color: var(--ink); font-weight: 500; }
 
-  /* Summary strip */
-  .claims-app .summary { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-top: 14px; }
-  .claims-app .headline { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
-  .claims-app .big { font-size: 30px; font-weight: 700; letter-spacing: -0.03em; line-height: 1; }
-  .claims-app .big-sub { color: #555; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-  .claims-app .stats { flex-shrink: 0; }
-  .claims-app .stats { display: flex; gap: 28px; }
-  .claims-app .stat .label { color: var(--muted); font-size: 12px; white-space: nowrap; }
-  .claims-app .stat .value { font-size: 18px; font-weight: 600; margin-top: 2px; white-space: nowrap; }
-  .claims-app .stat .value.green { color: var(--green); }
-  .claims-app .stat select { font-size: 18px; font-weight: 600; border: 0; background: transparent; padding: 0; margin-top: 2px; cursor: pointer; }
-
   /* Controls */
   .claims-app .controls { display: flex; align-items: center; gap: 8px; margin-top: 14px; }
   .claims-app .chips { display: flex; gap: 6px; min-width: 0; overflow-x: auto; scrollbar-width: none; flex: 0 1 auto; }
@@ -123,7 +111,6 @@ const CSS = String.raw`
   .claims-app .empty { text-align: center; color: var(--muted); padding: 32px 12px; white-space: normal; }
   .claims-app .footer { display: flex; justify-content: space-between; align-items: center; padding: 8px 2px 0; color: var(--muted); font-size: 12px; }
   .claims-app .pager { display: flex; gap: 6px; }
-  .claims-app .short { display: none; }
 
   /* Custom range popover */
   .claims-app .custom-wrap { position: relative; flex-shrink: 0; }
@@ -155,15 +142,6 @@ const CSS = String.raw`
     .claims-app .top-right .today { display: none; }
     .claims-app .subtabs { margin-top: 10px; gap: 16px; }
     .claims-app .subtabs button { font-size: 13px; }
-
-    .claims-app .summary { margin-top: 10px; gap: 8px; }
-    .claims-app .headline { width: 100%; gap: 8px; }
-    .claims-app .big { font-size: 24px; }
-    .claims-app .big-sub { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .claims-app .long { display: none; } .claims-app .short { display: inline; }
-    .claims-app .stats { width: 100%; display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; }
-    .claims-app .stat .label { font-size: 11px; }
-    .claims-app .stat .value, .claims-app .stat select { font-size: 15px; }
 
     .claims-app .controls { margin-top: 8px; gap: 6px; }
     .claims-app .chips { width: 100%; overflow-x: auto; scrollbar-width: none; margin: 0 -10px; padding: 0 10px; width: calc(100% + 20px); }
