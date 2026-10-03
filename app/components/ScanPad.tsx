@@ -249,17 +249,30 @@ export function ScanPad({
       if (!res.ok) throw new Error(String(res.status));
       const data = decodeTurboStream(await res.text());
 
-      // A reply that decoded but carries no result is NOT a success. Without
-      // this the row went green and the chips counted it, while the saved
-      // total — which tests the result value — did not: one run showed
-      // "1,185 RTO" in the chips against 567 rows actually written.
-      if (!data || typeof data.result !== "string") {
-        throw new Error("malformed-response");
+      // Green means WRITTEN. The server says what it did; anything else is a
+      // failure, including a reply it refused outright. This used to fall
+      // through to "ok" for any unrecognised value — a missing result field
+      // turned a dropped write into a green row, and one run showed "1,185
+      // RTO" in the chips against 567 rows actually in the table.
+      //
+      // Only these four mean the server dealt with the scan. "ok" and
+      // "not-found" were written; "duplicate" and "blocked" were refused on
+      // purpose and are already on record.
+      const WROTE = ["ok", "not-found", "duplicate", "blocked"];
+      if (!data || data.error || !WROTE.includes(data.result)) {
+        throw new Error(String(data?.error || data?.result || "no-result"));
       }
 
       const cls = data.result === "ok" ? (data.confident === false ? "check" : "ok") : data.result;
       const status: RowStatus =
-        data.result === "not-found" ? "notfound" : data.confident === false ? "check" : "ok";
+        data.result === "not-found"
+          ? "notfound"
+          : data.result === "ok"
+            ? data.confident === false
+              ? "check"
+              : "ok"
+            : // duplicate / blocked keep their own colour, never green.
+              (data.result as RowStatus);
       const label = listLabel(data);
 
       setRows((rs) =>
