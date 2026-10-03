@@ -444,11 +444,6 @@ export default function InboundMobile() {
             >
               Sign out
             </a>
-            <div className="help">
-              <b>RTO</b>: courier sent it back undelivered. <b>Return</b>: customer sent it with a
-              ReturnHQ request. <b>Check</b>: the data can't tell, so nothing is filed until you
-              decide.
-            </div>
           </div>
         </header>
 
