@@ -269,6 +269,37 @@ export async function recordScanBulk(
 }
 
 /**
+ * Ask the courier what this AWB is.
+ *
+ * The last resort, and the only lookup that leaves our network. Used when
+ * neither OrderFinancials nor ReturnHQ has heard of the waybill — the courier
+ * printed the label, so they always know it.
+ *
+ * Failure is not an error here: an unknown AWB, a missing credential or a slow
+ * courier all mean "no answer", and the caller falls back to its own default.
+ * A scan must never wait on a third party that is having a bad day, so this is
+ * capped well below the time an operator would notice.
+ */
+async function trackCourier(awb: string) {
+  try {
+    const app = await getPnlApp();
+    if (!app.shiprocketEmail && !app.delhiveryApiKey) return null;
+    const { trackParcel } = await import("./tracking.server");
+    return await Promise.race([
+      trackParcel({
+        awb,
+        shiprocketEmail: app.shiprocketEmail,
+        shiprocketPassword: app.shiprocketPassword,
+        delhiveryApiKey: app.delhiveryApiKey,
+      }),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000)),
+    ]);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Work out whether an inbound parcel is an RTO or a customer return.
  *
  * Returns the reason as well as the verdict: an operator who can see WHY will
@@ -330,13 +361,48 @@ export async function detectInbound(
       };
     }
 
+    // Neither of our own systems knows this AWB. Ask the courier, who is the
+    // one party that definitely does: they printed the label. This is the only
+    // step that leaves our network, so it runs last and only when nothing else
+    // has answered — a few hundred milliseconds on a parcel we would otherwise
+    // have filed under a guess is worth it.
+    const carrier = await trackCourier(awb);
+    if (carrier) {
+      const text = `${carrier.status} ${carrier.lastActivity}`.toLowerCase();
+      // The courier's own words decide it. "RTO", "return to origin" and
+      // "returned to seller" all mean the parcel is coming back to us because
+      // the customer never took it — which is an RTO, whatever we call it.
+      const saysRto = /\brto\b|\brts\b|return(ed)?\s*to\s*(origin|seller|shipper|client)/.test(text);
+      if (saysRto) {
+        return {
+          kind: "rto",
+          confident: true,
+          reason: `Courier says "${carrier.status}". Not in our orders yet.`,
+          orderName: "",
+          deliveryStatus: "",
+          returnType: "",
+        };
+      }
+      // The courier knows the AWB but is not calling it a return. Worth saying
+      // exactly what they DID say, so the operator can judge rather than
+      // trusting a guess dressed up as an answer.
+      return {
+        kind: "rto",
+        confident: false,
+        reason: `Courier says "${carrier.status}", not a return. Check the packet.`,
+        orderName: "",
+        deliveryStatus: "",
+        returnType: "",
+      };
+    }
+
     // Nothing to go on. RTO is the safer default: it is the commoner inbound
     // parcel, and miscalling a return as an RTO loses less than the reverse
     // (which would imply a customer request that does not exist).
     return {
       kind: "rto",
       confident: false,
-      reason: "Not in our orders yet, assumed RTO.",
+      reason: "Not in our orders, and the courier does not know this AWB either.",
       orderName: "",
       deliveryStatus: "",
       returnType: "",
