@@ -293,18 +293,27 @@ async function orderFromCarrierRef(shop: string, ref: string): Promise<string> {
   return hit?.orderName || "";
 }
 
-/** The ReturnHQ request type for an order, or "" when there is none. */
-async function returnTypeForOrder(orderName: string): Promise<string> {
+/**
+ * The ReturnHQ request type for an order.
+ *
+ * `ok` says whether ReturnHQ actually answered. Without it an outage looks
+ * exactly like "no request on this order", and the caller files a customer
+ * return as a courier RTO — against the wrong counterparty, and permanently,
+ * because the unique constraint refuses the corrected re-scan as a duplicate.
+ */
+async function returnTypeForOrder(
+  orderName: string,
+): Promise<{ ok: boolean; type: string }> {
   try {
-    const { returnHqByOrder } = await import("./returnhq.server");
-    const map = await returnHqByOrder([orderName]);
+    const { returnHqByOrderChecked } = await import("./returnhq.server");
+    const { ok, map } = await returnHqByOrderChecked([orderName]);
     const hit = map.get(orderName);
     // A cancelled request still means the customer sent it back: the parcel is
     // physically here, so filing it as a courier RTO would put it against the
     // wrong counterparty.
-    return hit ? hit.type : "";
+    return { ok, type: hit ? hit.type : "" };
   } catch {
-    return "";
+    return { ok: false, type: "" };
   }
 }
 
@@ -442,15 +451,28 @@ export async function detectInbound(
       // carrier's waybill, so the two can only meet through the order number.
       const named = await orderFromCarrierRef(shop, carrier.orderRef || "");
       if (named) {
-        const returnType = await returnTypeForOrder(named);
-        if (returnType) {
+        const rhq = await returnTypeForOrder(named);
+        if (rhq.type) {
           return {
             kind: "customer-return",
             confident: true,
-            reason: `${named}: customer raised a ${returnType} request.`,
+            reason: `${named}: customer raised a ${rhq.type} request.`,
             orderName: named,
             deliveryStatus: "",
-            returnType,
+            returnType: rhq.type,
+          };
+        }
+        if (!rhq.ok) {
+          // ReturnHQ did not answer, so "no request" is not something we know.
+          // Filing this as an RTO would be a guess stored permanently.
+          return {
+            kind: "rto",
+            confident: false,
+            reason: `${named} found, but ReturnHQ did not answer — not recorded. Scan it again.`,
+            orderName: named,
+            deliveryStatus: "",
+            returnType: "",
+            lookupFailed: true,
           };
         }
         return {
@@ -505,14 +527,19 @@ export async function detectInbound(
   }
 
   let returnType = "";
+  // Whether ReturnHQ answered at all. An empty result from an outage looks
+  // identical to "no request on this order", and the difference decides
+  // whether this parcel is the customer's return or the courier's RTO.
+  let rhqOk = true;
   try {
-    const { returnHqByOrder } = await import("./returnhq.server");
-    const map = await returnHqByOrder([order.orderName]);
+    const { returnHqByOrderChecked } = await import("./returnhq.server");
+    const { ok, map } = await returnHqByOrderChecked([order.orderName]);
+    rhqOk = ok;
     const hit = map.get(order.orderName);
     // A cancelled request is not a parcel coming back.
     if (hit && hit.status !== "cancelled") returnType = hit.type;
   } catch {
-    // ReturnHQ being down must not stop a packet being booked in.
+    rhqOk = false;
     returnType = "";
   }
 
@@ -532,6 +559,20 @@ export async function detectInbound(
   }
 
   if (isRto) {
+    // The courier says RTO, but a customer return can ride an order the
+    // courier also RTO'd. Without ReturnHQ we cannot tell which, and the
+    // unique constraint means a wrong answer here cannot be re-scanned away.
+    if (!rhqOk) {
+      return {
+        kind: "rto",
+        confident: false,
+        reason: `ReturnHQ did not answer, so a customer return cannot be ruled out — not recorded. Scan ${order.orderName} again.`,
+        orderName: order.orderName,
+        deliveryStatus: order.deliveryStatus,
+        returnType: "",
+        lookupFailed: true,
+      };
+    }
     return {
       kind: "rto",
       confident: true,

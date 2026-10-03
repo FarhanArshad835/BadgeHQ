@@ -178,14 +178,29 @@ export async function refreshReturnHqCache(): Promise<{
 export async function returnHqByOrder(
   orderNames: string[],
 ): Promise<Map<string, { type: string; status: string }>> {
+  return (await returnHqByOrderChecked(orderNames)).map;
+}
+
+/**
+ * The same lookup, saying whether it actually ran.
+ *
+ * An empty map means "no request on these orders" ONLY when `ok` is true.
+ * Unreachable, no shop id, or a failed query all produce an empty map too, and
+ * a caller that reads those as "no return request" turns an outage into a
+ * confident wrong answer — which is exactly how customer returns were being
+ * filed as courier RTOs.
+ */
+export async function returnHqByOrderChecked(
+  orderNames: string[],
+): Promise<{ ok: boolean; map: Map<string, { type: string; status: string }> }> {
   const out = new Map<string, { type: string; status: string }>();
-  if (!orderNames.length) return out;
+  if (!orderNames.length) return { ok: true, map: out };
 
   const db = await returnHqReady();
-  if (!db) return out;
+  if (!db) return { ok: false, map: out };
   try {
     const shopId = await jmShopId(db);
-    if (shopId == null) return out;
+    if (shopId == null) return { ok: false, map: out };
 
     // Chunked: a single IN list of a month's order names is large enough to
     // upset the planner.
@@ -211,10 +226,10 @@ export async function returnHqByOrder(
         }
       }
     }
-    return out;
+    return { ok: true, map: out };
   } catch (e: any) {
     console.error("[returnhq] byOrder", String(e?.message || e).slice(0, 200));
-    return out;
+    return { ok: false, map: out };
   } finally {
     await db.$disconnect().catch(() => {});
   }
