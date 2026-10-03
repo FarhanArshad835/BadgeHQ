@@ -10,7 +10,13 @@ import { json, redirect } from "@remix-run/node";
 import { useLoaderData, useSearchParams } from "@remix-run/react";
 import prisma from "../db.server";
 import { getPnlApp, isAuthed } from "../utils/pnl-app.server";
-import { recentScans, scanCountsToday, type ScanKind, type ScanResult } from "../utils/scan.server";
+import {
+  recentScans,
+  scanCountsToday,
+  scanSearchWhere,
+  type ScanKind,
+  type ScanResult,
+} from "../utils/scan.server";
 import { ClaimsStyles } from "../components/ClaimsStyles";
 import { ScanNav } from "../components/ScanNav";
 
@@ -24,7 +30,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (!isAuthed(request, "scan")) return redirect("/pnl-app/scan/login");
   const app = await getPnlApp();
   const shop = app.shopDomain;
-  if (!shop) return json({ rows: [], counts: {}, total: 0, kind: "", result: "" });
+  if (!shop) return json({ rows: [], counts: {}, total: 0, kind: "", result: "", search: "" });
 
   const url = new URL(request.url);
   const raw = url.searchParams.get("kind") || "";
@@ -34,11 +40,18 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     ? rawResult
     : null) as ScanResult | null;
 
-  const rows = await recentScans(shop, kind, 500, result);
+  const search = (url.searchParams.get("q") || "").trim();
+
+  const rows = await recentScans(shop, kind, 500, result, search);
   // Counted separately: the list is capped at 500, so rows.length would
   // silently understate a filter that matches more than that.
   const total = await prisma.scanEvent.count({
-    where: { shop, ...(kind ? { kind } : {}), ...(result ? { result } : {}) },
+    where: {
+      shop,
+      ...(kind ? { kind } : {}),
+      ...(result ? { result } : {}),
+      ...scanSearchWhere(search),
+    },
   });
 
   if (url.searchParams.get("format") === "csv") {
@@ -70,6 +83,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   return json({
     counts,
     total,
+    search,
     kind: kind || "",
     result: result || "",
     rows: rows.map((r) => ({
@@ -104,9 +118,22 @@ export default function ScanHistory() {
     total: number;
     kind: string;
     result: string;
+    search: string;
   };
   const [params, setParams] = useSearchParams();
   const kind = params.get("kind") || "";
+
+  /** Change one filter, keep the rest. Blank values drop out of the URL. */
+  const setFilters = (next: Record<string, string>) => {
+    const merged: Record<string, string> = {
+      ...(d.kind ? { kind: d.kind } : {}),
+      ...(d.result ? { result: d.result } : {}),
+      ...(d.search ? { q: d.search } : {}),
+      ...next,
+    };
+    for (const k of Object.keys(merged)) if (!merged[k].trim()) delete merged[k];
+    setParams(merged);
+  };
 
   return (
     <div className="claims-app">
@@ -126,16 +153,27 @@ export default function ScanHistory() {
             </span>
           </div>
           <div className="filters">
+            {/* Submitted on Enter or blur rather than per keystroke: each
+                search is a database query over every scan, and firing one per
+                letter would hammer it for results nobody reads. */}
+            <input
+              type="search"
+              placeholder="Search AWB or order"
+              aria-label="Search AWB or order"
+              defaultValue={d.search}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter") return;
+                e.preventDefault();
+                setFilters({ q: (e.target as HTMLInputElement).value });
+              }}
+              onBlur={(e) => {
+                if (e.target.value.trim() !== d.search) setFilters({ q: e.target.value });
+              }}
+            />
             <select
               aria-label="Type"
               value={kind}
-              onChange={(e) => {
-                const v = e.target.value;
-                const next: Record<string, string> = {};
-                if (v) next.kind = v;
-                if (d.result) next.result = d.result;
-                setParams(next);
-              }}
+              onChange={(e) => setFilters({ kind: e.target.value })}
             >
               <option value="">All scans</option>
               <option value="dispatch">Dispatch</option>
@@ -147,13 +185,7 @@ export default function ScanHistory() {
             <select
               aria-label="Result"
               value={d.result}
-              onChange={(e) => {
-                const v = e.target.value;
-                const next: Record<string, string> = {};
-                if (d.kind) next.kind = d.kind;
-                if (v) next.result = v;
-                setParams(next);
-              }}
+              onChange={(e) => setFilters({ result: e.target.value })}
             >
               <option value="">Any result</option>
               <option value="ok">Matched an order</option>
@@ -163,7 +195,7 @@ export default function ScanHistory() {
             </select>
             <a
               className="btn-primary"
-              href={`/pnl-app/scan/history?format=csv${d.kind ? `&kind=${d.kind}` : ""}${d.result ? `&result=${d.result}` : ""}`}
+              href={`/pnl-app/scan/history?format=csv${d.kind ? `&kind=${d.kind}` : ""}${d.result ? `&result=${d.result}` : ""}${d.search ? `&q=${encodeURIComponent(d.search)}` : ""}`}
             >
               Export CSV
             </a>
@@ -185,7 +217,9 @@ export default function ScanHistory() {
               {!d.rows.length ? (
                 <tr>
                   <td colSpan={5} className="empty">
-                    Nothing matches these filters. Pick another type or result.
+                    {d.search
+                      ? `No scan matches "${d.search}". Check the AWB, or clear the type and result filters.`
+                      : "Nothing matches these filters. Pick another type or result."}
                   </td>
                 </tr>
               ) : (

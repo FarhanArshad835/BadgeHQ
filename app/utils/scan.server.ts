@@ -833,12 +833,31 @@ export async function recentScans(
   /** Result is a separate axis from kind: "which RTOs did not match an order"
    *  is a real question, and folding it into the kind list could not ask it. */
   result: ScanResult | null = null,
+  /** AWB or order name. Matched in the DATABASE, not the page: the list is
+   *  capped, so filtering the loaded rows would search a slice and call it a
+   *  search — the row you want is usually the one not loaded. */
+  search = "",
 ) {
   return prisma.scanEvent.findMany({
-    where: { shop, ...(kind ? { kind } : {}), ...(result ? { result } : {}) },
+    where: { shop, ...(kind ? { kind } : {}), ...(result ? { result } : {}), ...scanSearchWhere(search) },
     orderBy: { scannedAt: "desc" },
     take: limit,
   });
+}
+
+/** Shared by the list and its count, so the two can never disagree. */
+export function scanSearchWhere(search: string) {
+  const q = String(search || "").trim();
+  if (!q) return {};
+  // A gun reads an AWB verbatim and a person types an order with or without
+  // the "#", so both fields are matched and the hash is optional.
+  const bare = q.replace(/^#/, "");
+  return {
+    OR: [
+      { awb: { contains: q, mode: "insensitive" as const } },
+      { orderName: { contains: bare, mode: "insensitive" as const } },
+    ],
+  };
 }
 
 /** Today's counts per kind, for the dashboard tiles. */

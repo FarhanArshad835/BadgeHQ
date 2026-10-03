@@ -450,4 +450,10 @@ const CSS = String.raw`
   }
   .claims-app .login-card .btn-primary { height: 44px; }
   .claims-app .login-err { color: #b42318; font-size: 13px; }
+  /* History's filter row carries a search box as well as the two selects, so
+     the search spans the full width on a phone rather than being squeezed. */
+  @media (max-width: 640px) {
+    .claims-app .filters { grid-template-columns: 1fr 1fr auto; }
+    .claims-app .filters input[type="search"] { grid-column: 1 / -1; width: 100%; }
+  }
 `;
