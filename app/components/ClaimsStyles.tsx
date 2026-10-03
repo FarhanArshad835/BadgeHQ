@@ -512,4 +512,28 @@ const CSS = String.raw`
     padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px;
     white-space: nowrap;
   }
+  /* ---------- Session list header ---------- */
+  /* Paste list sits on the header row with the list, as the mobile layout has
+     it. It used to be a panel BELOW the list, which on a bench with a few
+     hundred rows put it off the bottom of the screen. */
+  .claims-app .sp-list-head {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; margin: 14px 0 6px;
+  }
+  .claims-app .sp-list-head h2 {
+    margin: 0; font-size: 14px; font-weight: 600; color: var(--muted);
+  }
+  .claims-app .sp-paste-link {
+    display: inline-flex; align-items: center; gap: 6px;
+    min-height: 36px; padding: 0 10px; border: 0; border-radius: 8px;
+    background: transparent; font: inherit; font-size: 14px; font-weight: 600;
+    color: #3b4bc8; cursor: pointer;
+  }
+  .claims-app .sp-paste-link:hover { background: #f3f3f3; }
+  .claims-app .sp-paste-link[aria-expanded="true"] { background: #eef0fb; }
+
+  /* The panel no longer carries its own toggle, so it needs the border the
+     toggle used to sit inside. */
+  .claims-app .sp-bulk[hidden] { display: none; }
+  .claims-app .sp-bulk .sp-bulk-body { padding: 14px; }
 `;

@@ -600,38 +600,26 @@ export function ScanPad({
             : "Scanner paused. Click anywhere on the page to resume."}
       </div>
 
-      <div className="sp-list">
-        {!rows.length ? (
-          <div className="sp-empty">Scans from this session appear here, newest first.</div>
-        ) : (
-          <>
-            <div className="sp-row head">
-              <div>AWB</div>
-              <div>Order</div>
-              <div>Time</div>
-              <div>Result</div>
-            </div>
-            {rows.slice(0, 200).map((r) => (
-              <RowView key={r.awb} r={r} withTime onRetry={() => commit(r, false)} />
-            ))}
-            {rows.length > 200 && (
-              <div className="sp-empty">
-                Showing the latest 200 of {rows.length.toLocaleString("en-IN")}.
-              </div>
-            )}
-          </>
-        )}
-      </div>
-
-      <div className="sp-bulk">
+      {/* The list's own header, with Paste list on it — the mobile layout. The
+          toggle used to sit in a panel BELOW the list, so on a bench with a
+          few hundred rows it was off the bottom of the screen. */}
+      <div className="sp-list-head">
+        <h2>This session</h2>
         <button
-          className="sp-bulk-toggle"
+          className="sp-paste-link"
           aria-expanded={bulkOpen}
           onClick={() => setBulkOpen((v) => !v)}
         >
-          <span className="car">▶</span>Paste a list of AWBs instead
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+            <rect x="8" y="3" width="8" height="4" rx="1" />
+            <path d="M16 5h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2" />
+          </svg>
+          Paste list
         </button>
-        <div className="sp-bulk-body" hidden={!bulkOpen}>
+      </div>
+
+      <div className="sp-bulk" hidden={!bulkOpen}>
+        <div className="sp-bulk-body">
           <textarea
             ref={textRef}
             rows={8}
@@ -706,6 +694,30 @@ export function ScanPad({
           )}
         </div>
       </div>
+
+      <div className="sp-list">
+        {!rows.length ? (
+          <div className="sp-empty">Scans from this session appear here, newest first.</div>
+        ) : (
+          <>
+            <div className="sp-row head">
+              <div>AWB</div>
+              <div>Order</div>
+              <div>Time</div>
+              <div>Result</div>
+            </div>
+            {rows.slice(0, 200).map((r) => (
+              <RowView key={r.awb} r={r} withTime onRetry={() => commit(r, false)} />
+            ))}
+            {rows.length > 200 && (
+              <div className="sp-empty">
+                Showing the latest 200 of {rows.length.toLocaleString("en-IN")}.
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
 
       {/* A refusal stops the bench until it is dismissed. The packet has to come
           off the pile, and a warning that clears itself would be buried by the
