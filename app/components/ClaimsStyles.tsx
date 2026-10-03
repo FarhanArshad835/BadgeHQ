@@ -686,4 +686,63 @@ const CSS = String.raw`
     /* The card layout is already dense; the type filter covers this. */
     .claims-app .c-type { display: none; }
   }
+
+  /* Column headers do their own sorting and filtering.
+     The controls used to sit in a row above the table, naming the same columns
+     a second time — so the header is where they live now. */
+  .claims-app .th-in { display: inline-flex; align-items: center; gap: 2px; max-width: 100%; }
+  .claims-app th.num .th-in { flex-direction: row-reverse; }
+  /* Inherits the th's type so sorting never looks bolted on. */
+  .claims-app th .sort {
+    border: 0; background: none; padding: 0; margin: 0; cursor: pointer;
+    font: inherit; color: inherit; letter-spacing: inherit;
+    display: inline-flex; align-items: center; gap: 3px; border-radius: 4px;
+    min-width: 0;
+  }
+  .claims-app th .sort:hover { color: var(--ink); }
+  .claims-app th .sort:active { transform: translateY(1px); }
+  /* The arrow only shows the direction of the column actually sorting. */
+  .claims-app th .arrow { font-size: 8px; opacity: 0; transition: opacity .12s; }
+  .claims-app th .sort:hover .arrow { opacity: .45; }
+  .claims-app th[aria-sort="ascending"] .arrow,
+  .claims-app th[aria-sort="descending"] .arrow { opacity: 1; }
+  .claims-app th[aria-sort="ascending"] .sort,
+  .claims-app th[aria-sort="descending"] .sort { color: var(--ink); font-weight: 500; }
+  .claims-app .th-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+  /* A native select laid invisibly over the mark: the keyboard, the touch
+     target and the long carrier list all behave without rebuilding them. */
+  .claims-app .th-filter {
+    position: relative; display: inline-flex; align-items: center; justify-content: center;
+    width: 18px; height: 18px; border-radius: 4px; cursor: pointer;
+    font-size: 10px; color: var(--muted); opacity: 0; transition: opacity .12s, background .12s;
+  }
+  .claims-app th:hover .th-filter, .claims-app .th-filter.on { opacity: 1; }
+  .claims-app .th-filter:hover { background: #eee; color: var(--ink); }
+  .claims-app .th-filter.on { color: var(--ink); background: #e8e8e8; }
+  .claims-app .th-filter select {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    opacity: 0; cursor: pointer; border: 0; padding: 0; margin: 0;
+  }
+  /* A filtered column stays legible as filtered once the pointer leaves. */
+  .claims-app th.filtered { color: var(--ink); }
+  .claims-app th.filtered .th-label { font-weight: 500; }
+  @media (max-width: 640px) {
+    /* No hover on touch, so every filter mark is permanently visible. */
+    .claims-app .th-filter { opacity: 1; }
+    /* The card layout hides every header cell, which would take the filters
+       with them. The filterable columns come back as a compact strip above
+       the cards — the only place to filter on a phone. */
+    .claims-app thead tr { flex-wrap: wrap; gap: 6px; align-items: center; }
+    .claims-app thead th:first-child { width: auto; flex: 1 0 100%; }
+    .claims-app thead th.has-filter {
+      display: inline-flex; padding: 0 0 7px; border-bottom: 0;
+    }
+    .claims-app thead th.has-filter .th-in {
+      border: 1px solid var(--line); border-radius: 6px; padding: 4px 7px; gap: 4px;
+      background: var(--surface);
+    }
+    .claims-app thead th.has-filter.filtered .th-in { border-color: var(--ink); }
+    .claims-app thead th.has-filter .th-filter { width: 14px; height: 14px; }
+  }
 `;

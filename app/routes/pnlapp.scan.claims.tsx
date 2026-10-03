@@ -243,32 +243,70 @@ export default function Claims() {
     col,
     label,
     num,
+    filter,
   }: {
     col: typeof sortCol;
     label: string;
     num?: boolean;
+    /** The column's own filter: its options, and where the chosen value lives. */
+    filter?: {
+      value: string;
+      set: (v: string) => void;
+      any: string;
+      options: Array<{ value: string; label: string }>;
+    };
   }) => {
     const active = sortCol === col;
+    const on = !!filter?.value;
     return (
-      <th className={num ? "num" : undefined}>
-        <button
-          type="button"
-          className="sort"
-          aria-sort={active ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
-          onClick={() => {
-            if (active) setSortDir(sortDir === "desc" ? "asc" : "desc");
-            else {
-              setSortCol(col);
-              setSortDir("desc");
-            }
-            setPage(0);
-          }}
-        >
-          {label}
-          <span className="arrow" aria-hidden>
-            {active && sortDir === "asc" ? "▲" : "▼"}
-          </span>
-        </button>
+      <th
+        className={(num ? "num" : "") + (filter ? " has-filter" : "") + (on ? " filtered" : "")}
+        aria-sort={active ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
+      >
+        <span className="th-in">
+          <button
+            type="button"
+            className="sort"
+            onClick={() => {
+              if (active) setSortDir(sortDir === "desc" ? "asc" : "desc");
+              else {
+                setSortCol(col);
+                setSortDir("desc");
+              }
+              setPage(0);
+            }}
+          >
+            {/* A filtered column says what it is filtered to, so a narrowed
+                list never looks like a short one. */}
+            {on ? filter!.options.find((o) => o.value === filter!.value)?.label || label : label}
+            <span className="arrow" aria-hidden>
+              {active && sortDir === "asc" ? "▲" : "▼"}
+            </span>
+          </button>
+          {filter && (
+            // The filter sits on the column it filters. A native select keeps
+            // the keyboard and touch behaviour a custom menu would have to
+            // rebuild, and it is invisible over the funnel mark.
+            <span className={"th-filter" + (on ? " on" : "")}>
+              <span aria-hidden>{on ? "✕" : "≡"}</span>
+              <select
+                aria-label={`Filter ${label}`}
+                value={filter.value}
+                onChange={(e) => {
+                  filter.set(e.target.value);
+                  setPage(0);
+                }}
+              >
+                <option value="">{filter.any}</option>
+                {filter.options.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </span>
+          )}
+        </span>
       </th>
     );
   };
@@ -597,64 +635,6 @@ export default function Claims() {
                 setPage(0);
               }}
             />
-            <select
-              aria-label="Sort"
-              value={sortCol === "days" && sortDir === "desc" ? "old" : sortCol === "days" ? "new" : "cost"}
-              onChange={(e) => {
-                const v = e.target.value;
-                setSortCol(v === "cost" ? "cost" : "days");
-                setSortDir(v === "new" ? "asc" : "desc");
-                setPage(0);
-              }}
-            >
-              <option value="old">Oldest first</option>
-              <option value="new">Newest first</option>
-              <option value="cost">Highest cost</option>
-            </select>
-            <select
-              aria-label="Type"
-              value={typeFilter}
-              onChange={(e) => {
-                setTypeFilter(e.target.value);
-                setPage(0);
-              }}
-            >
-              <option value="">Both kinds</option>
-              <option value="rto">RTO only</option>
-              <option value="return">Customer returns only</option>
-            </select>
-            <select
-              aria-label="Carrier"
-              value={carrier}
-              onChange={(e) => {
-                setCarrier(e.target.value);
-                setPage(0);
-              }}
-            >
-              <option value="">Any carrier</option>
-              {carriers.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-            <select
-              aria-label="Next step"
-              value={step}
-              onChange={(e) => {
-                setStep(e.target.value);
-                setPage(0);
-              }}
-            >
-              <option value="">Any step</option>
-              <option>File claim</option>
-              <option>Closing soon</option>
-              <option>Fix carrier</option>
-              <option>Past window</option>
-              <option>Found</option>
-              <option>Received</option>
-              <option>Claim raised</option>
-            </select>
             <button className="btn-primary" onClick={exportCsv}>
               {selected.size ? `Export ${selected.size}` : "Export"}
             </button>
@@ -678,12 +658,59 @@ export default function Claims() {
                   />
                 </th>
                 <SortTh col="order" label="Order" />
-                <SortTh col="type" label="Type" />
-                <SortTh col="carrier" label="Carrier" />
+                <SortTh
+                  col="type"
+                  label="Type"
+                  filter={{
+                    value: typeFilter,
+                    set: setTypeFilter,
+                    any: "Both kinds",
+                    options: [
+                      { value: "rto", label: "RTO" },
+                      { value: "return", label: "Customer return" },
+                    ],
+                  }}
+                />
+                <SortTh
+                  col="carrier"
+                  label="Carrier"
+                  filter={{
+                    value: carrier,
+                    set: setCarrier,
+                    any: "Any carrier",
+                    options: carriers.map((c) => ({ value: c, label: c })),
+                  }}
+                />
                 <SortTh col="delivered" label="Marked delivered" />
                 <SortTh col="days" label="Days" num />
                 <SortTh col="cost" label="Stock cost" num />
-                <th>Next step</th>
+                {/* Next step is computed from the claim window rather than
+                    stored, so it filters but does not sort. */}
+                <th className={"has-filter" + (step ? " filtered" : "")}>
+                  <span className="th-in">
+                    <span className="th-label">{step || "Next step"}</span>
+                    <span className={"th-filter" + (step ? " on" : "")}>
+                      <span aria-hidden>{step ? "✕" : "≡"}</span>
+                      <select
+                        aria-label="Filter Next step"
+                        value={step}
+                        onChange={(e) => {
+                          setStep(e.target.value);
+                          setPage(0);
+                        }}
+                      >
+                        <option value="">Any step</option>
+                        <option>File claim</option>
+                        <option>Closing soon</option>
+                        <option>Fix carrier</option>
+                        <option>Past window</option>
+                        <option>Found</option>
+                        <option>Received</option>
+                        <option>Claim raised</option>
+                      </select>
+                    </span>
+                  </span>
+                </th>
                 <th />
               </tr>
             </thead>
