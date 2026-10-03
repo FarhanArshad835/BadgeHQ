@@ -165,9 +165,8 @@ async function trackShadowfax(token: string, awb: string): Promise<TrackingResul
   const status = String(row.status_display || row.status || "").trim();
   const lastActivity = String(latest.status || "").trim();
 
-  // The parcel is back with us, whatever Shadowfax calls it.
-  const terminal = new Set(["delivered", "rto_d", "rts_d"]);
   const id = String(latest.status_id || "").toLowerCase().trim();
+  const shipmentStatus = String(row.status || "").toLowerCase().trim();
 
   return {
     awb,
@@ -182,6 +181,17 @@ async function trackShadowfax(token: string, awb: string): Promise<TrackingResul
     delivered: id === "delivered",
     failedAttempt: FAILED_ATTEMPT_RE.test(`${status} ${lastActivity}`),
     orderRef: String(row.client_order_id || "").trim(),
+    // A parcel Shadowfax still calls "delivered" reached the customer. If it
+    // is now on our bench, the customer sent it back — which is a customer
+    // return whether or not ReturnHQ ever heard about it.
+    //
+    // Measured on every Shadowfax parcel we hold: of 60 filed as RTO, all 60
+    // read "rts_d" and not one read "delivered". Of 13 filed as customer
+    // returns, 7 read "delivered". The two never overlap.
+    //
+    // "cancelled_by_customer" is deliberately NOT a return: the parcel was
+    // stopped before it ever reached them.
+    pickedUpFromCustomer: shipmentStatus === "delivered",
   };
 }
 
