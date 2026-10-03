@@ -536,4 +536,52 @@ const CSS = String.raw`
      toggle used to sit inside. */
   .claims-app .sp-bulk[hidden] { display: none; }
   .claims-app .sp-bulk .sp-bulk-body { padding: 14px; }
+  /* ---------- Title row ---------- */
+  /* The tally gained a session name and a permanent New session button, which
+     pushed a row that already wrapped onto three lines. Rebuilt as a two-column
+     grid so the title holds the left and everything else stacks on the right in
+     a fixed order, instead of wrapping wherever it runs out of room. */
+  .claims-app .sp-title {
+    display: grid; grid-template-columns: 1fr auto; align-items: center;
+    gap: 4px 14px; flex-wrap: nowrap;
+  }
+  /* The count and New session are anchored; the pills between them wrap when
+     all three appear at once, which at 420px would otherwise overflow the row
+     by ~190px. Anchoring everything would have pushed the button off-screen —
+     worse than a second line of pills. */
+  .claims-app .sp-tally {
+    grid-column: 2; justify-content: flex-end; align-items: center;
+    flex-wrap: wrap; gap: 6px 10px; row-gap: 6px;
+  }
+  .claims-app .sp-tally .sp-count,
+  .claims-app .sp-tally > .btn-ghost { flex-shrink: 0; }
+  .claims-app .sp-pill { flex-shrink: 1; min-width: 0; }
+  /* The count and its session name read as one unit and never split. */
+  .claims-app .sp-count { display: inline-flex; align-items: baseline; gap: 5px; }
+
+  /* Anchored at every width: title hard left, tally hard right, one line. The
+     row shrinks rather than stacking, so a control never moves to a different
+     place on a narrower screen — an operator reaches for New session in the
+     same spot on a phone as on the bench terminal. */
+  .claims-app .sp-title h1 {
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+
+
+  @media (max-width: 720px) {
+    /* Sizes come down, positions do not. */
+    .claims-app .sp-title { gap: 4px 8px; }
+    .claims-app .sp-tally { gap: 6px; }
+    .claims-app .sp-count b { font-size: 20px; }
+    .claims-app .sp-count { font-size: 12px; }
+    .claims-app .sp-session { font-size: 11px; padding: 2px 6px; }
+  }
+  @media (max-width: 420px) {
+    .claims-app .sp-title h1 { font-size: 15px; }
+    .claims-app .sp-count b { font-size: 18px; }
+    /* "scanned this session" is the first thing to go: the big number and the
+       button it sits beside carry the meaning on their own. */
+    .claims-app .sp-count .sp-count-label { display: none; }
+    .claims-app .sp-session { display: none; }
+  }
 `;

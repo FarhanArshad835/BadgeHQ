@@ -516,7 +516,8 @@ export function ScanPad({
         <h1>{title}</h1>
         <div className="sp-tally">
           <span className="sp-count">
-            <b>{scanned.toLocaleString("en-IN")}</b>scanned this session
+            <b>{scanned.toLocaleString("en-IN")}</b>
+            <span className="sp-count-label">scanned this session</span>
           </span>
           {/* Named, so "this session" is a thing the operator can point at and
               a later report can group by, rather than invisible state. */}
