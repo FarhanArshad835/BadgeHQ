@@ -249,6 +249,14 @@ export function ScanPad({
       if (!res.ok) throw new Error(String(res.status));
       const data = decodeTurboStream(await res.text());
 
+      // A reply that decoded but carries no result is NOT a success. Without
+      // this the row went green and the chips counted it, while the saved
+      // total — which tests the result value — did not: one run showed
+      // "1,185 RTO" in the chips against 567 rows actually written.
+      if (!data || typeof data.result !== "string") {
+        throw new Error("malformed-response");
+      }
+
       const cls = data.result === "ok" ? (data.confident === false ? "check" : "ok") : data.result;
       const status: RowStatus =
         data.result === "not-found" ? "notfound" : data.confident === false ? "check" : "ok";
@@ -542,10 +550,15 @@ export function ScanPad({
             <>
               <div className="sp-counts">
                 {Object.entries(
-                  bulk.results.reduce<Record<string, number>>((acc, r) => {
-                    acc[r.label] = (acc[r.label] || 0) + 1;
-                    return acc;
-                  }, {}),
+                  // Only outcomes the SERVER returned. An attempt that never
+                  // got a reply is counted under "not saved", never under the
+                  // verdict we hoped for.
+                  bulk.results
+                    .filter((r) => ["ok", "not-found", "duplicate", "blocked"].includes(r.result))
+                    .reduce<Record<string, number>>((acc, r) => {
+                      acc[r.label] = (acc[r.label] || 0) + 1;
+                      return acc;
+                    }, {}),
                 ).map(([k, n]) => (
                   <span key={k}>
                     {k} · {n}
