@@ -120,6 +120,55 @@ function isFailedAttempt(text: string): boolean {
   return FAILED_ATTEMPT_RE.test(t);
 }
 
+const SHADOWFAX_BULK_URL = "https://dale.shadowfax.in/api/v4/clients/bulk_track/";
+
+/**
+ * Shadowfax: POST the waybill to the bulk endpoint, read the one result back.
+ *
+ * Bulk is the only tracking endpoint Shadowfax exposes, so a single AWB goes in
+ * a list of one. Mirrors the tracking script's trackWithShadowfaxBulk, including
+ * the detail that its terminal RTO scan reads "Returned To Client" under
+ * status_id rto_d or rts_d — words no other carrier uses, which is why matching
+ * on prose alone misses it.
+ */
+async function trackShadowfax(token: string, awb: string): Promise<TrackingResult | null> {
+  const res = await fetch(SHADOWFAX_BULK_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Token ${token}` },
+    body: JSON.stringify({ awb_numbers: [awb] }),
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!res.ok) return null;
+  const body = await res.json().catch(() => null);
+  const row = (Array.isArray(body?.data) ? body.data : []).find(
+    (o: any) => String(o?.awb_number || "").trim() === awb,
+  );
+  if (!row) return null;
+
+  const scans: any[] = Array.isArray(row.tracking_details) ? row.tracking_details : [];
+  const latest = scans[scans.length - 1] || {};
+  const status = String(row.status_display || row.status || "").trim();
+  const lastActivity = String(latest.status || "").trim();
+
+  // The parcel is back with us, whatever Shadowfax calls it.
+  const terminal = new Set(["delivered", "rto_d", "rts_d"]);
+  const id = String(latest.status_id || "").toLowerCase().trim();
+
+  return {
+    awb,
+    // Shadowfax is its own carrier, but the type names the two the app knew
+    // first. Reported as delhivery so existing callers keep working; the
+    // status text is what any caller actually reads.
+    carrier: "delhivery",
+    status: status || "Unknown",
+    lastActivity,
+    location: String(latest.location || "").trim(),
+    lastUpdate: String(latest.created || "").trim(),
+    delivered: id === "delivered",
+    failedAttempt: FAILED_ATTEMPT_RE.test(`${status} ${lastActivity}`),
+  };
+}
+
 /** Shiprocket: authenticate, then GET /courier/track/awb/{awb}. Mirrors
  *  ReturnHQ's getShiprocketTrackingStatus but returns a compact summary. */
 async function trackShiprocket(
@@ -209,14 +258,36 @@ async function trackDelhivery(apiKey: string, awb: string): Promise<TrackingResu
 /** Delhivery books its own waybills under this prefix; everything else routes
  *  to Shiprocket, which is the aggregator. Matches the tracking script. */
 const DELHIVERY_PREFIX = "2606";
+/** Shadowfax waybills start "SF", case-insensitively. */
+const SHADOWFAX_PREFIX = "SF";
+
+/**
+ * Which carrier booked this waybill.
+ *
+ * The same rule, in the same order, as detectCourier in the tracking script:
+ * Shadowfax FIRST so an SF-prefixed AWB never falls through to the Shiprocket
+ * default, then Delhivery's own prefix, then Shiprocket as the aggregator that
+ * books everything else.
+ *
+ * Keeping the two in step matters: a mismatch means the sheet and the app
+ * disagree about who to ask, and the wrong carrier answers "no shipment present
+ * against this tracking id" — a denial confident enough to look like a fact.
+ */
+function detectCourier(awb: string): "shadowfax" | "delhivery" | "shiprocket" {
+  const a = String(awb).trim();
+  if (a.toUpperCase().startsWith(SHADOWFAX_PREFIX)) return "shadowfax";
+  if (a.startsWith(DELHIVERY_PREFIX)) return "delhivery";
+  return "shiprocket";
+}
 
 export async function trackParcel(opts: {
   awb: string;
   shiprocketEmail?: string;
   shiprocketPassword?: string;
   delhiveryApiKey?: string;
+  shadowfaxApiToken?: string;
 }): Promise<TrackingResult | null> {
-  const { awb, shiprocketEmail, shiprocketPassword, delhiveryApiKey } = opts;
+  const { awb, shiprocketEmail, shiprocketPassword, delhiveryApiKey, shadowfaxApiToken } = opts;
   if (!awb) return null;
 
   // Routed by AWB prefix, the way the tracking script does it, then the others
@@ -227,19 +298,23 @@ export async function trackParcel(opts: {
   // Shiprocket disowned were all known to Delhivery.
   const sr = () => trackShiprocket(shiprocketEmail!, shiprocketPassword!, awb);
   const dl = () => trackDelhivery(delhiveryApiKey!, awb);
+  const sf = () => trackShadowfax(shadowfaxApiToken!, awb);
 
-  const hasSr = Boolean(shiprocketEmail && shiprocketPassword);
-  const hasDl = Boolean(delhiveryApiKey);
-  const prefersDelhivery = awb.startsWith(DELHIVERY_PREFIX);
+  const avail: Record<string, (() => Promise<TrackingResult | null>) | null> = {
+    shiprocket: shiprocketEmail && shiprocketPassword ? sr : null,
+    delhivery: delhiveryApiKey ? dl : null,
+    shadowfax: shadowfaxApiToken ? sf : null,
+  };
 
-  const attempts: Array<() => Promise<TrackingResult | null>> = [];
-  if (prefersDelhivery) {
-    if (hasDl) attempts.push(dl);
-    if (hasSr) attempts.push(sr);
-  } else {
-    if (hasSr) attempts.push(sr);
-    if (hasDl) attempts.push(dl);
-  }
+  // The routed carrier first, the others after. Unlike the script, which stops
+  // at its verdict, a miss here falls through: a mis-prefixed AWB is then still
+  // found rather than written off on one carrier's denial.
+  const first = detectCourier(awb);
+  const order = [first, ...(["shiprocket", "delhivery", "shadowfax"] as const).filter((k) => k !== first)];
+
+  const attempts = order.map((k) => avail[k]).filter(Boolean) as Array<
+    () => Promise<TrackingResult | null>
+  >;
 
   for (const attempt of attempts) {
     try {

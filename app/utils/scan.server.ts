@@ -283,7 +283,7 @@ export async function recordScanBulk(
 async function trackCourier(awb: string) {
   try {
     const app = await getPnlApp();
-    if (!app.shiprocketEmail && !app.delhiveryApiKey) return null;
+    if (!app.shiprocketEmail && !app.delhiveryApiKey && !app.shadowfaxApiToken) return null;
     const { trackParcel } = await import("./tracking.server");
     return await Promise.race([
       trackParcel({
@@ -291,6 +291,7 @@ async function trackCourier(awb: string) {
         shiprocketEmail: app.shiprocketEmail,
         shiprocketPassword: app.shiprocketPassword,
         delhiveryApiKey: app.delhiveryApiKey,
+        shadowfaxApiToken: app.shadowfaxApiToken,
       }),
       new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000)),
     ]);

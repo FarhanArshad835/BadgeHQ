@@ -6,7 +6,13 @@ import { getPnlApp, isAuthed, validateShopifyToken } from "../utils/pnl-app.serv
 import { PnlStyles } from "../utils/pnl-styles";
 
 /** The stored secrets a reveal can ask for. The list is ours, not the caller's. */
-const SECRET_FIELDS = ["adminToken", "shiprocketPassword", "delhiveryApiKey", "metaAccessToken"] as const;
+const SECRET_FIELDS = [
+  "adminToken",
+  "shiprocketPassword",
+  "delhiveryApiKey",
+  "shadowfaxApiToken",
+  "metaAccessToken",
+] as const;
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (!isAuthed(request)) return redirect("/pnl-app/login");
@@ -17,6 +23,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     shiprocketEmail: app.shiprocketEmail,
     hasShiprocketPassword: Boolean(app.shiprocketPassword),
     hasDelhiveryKey: Boolean(app.delhiveryApiKey),
+    hasShadowfaxToken: Boolean(app.shadowfaxApiToken),
     metaAdAccountId: app.metaAdAccountId,
     hasMetaToken: Boolean(app.metaAccessToken),
     deliverySheetUrl: app.deliverySheetUrl,
@@ -47,6 +54,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       adminToken: app.adminToken,
       shiprocketPassword: app.shiprocketPassword,
       delhiveryApiKey: app.delhiveryApiKey,
+      shadowfaxApiToken: app.shadowfaxApiToken,
       metaAccessToken: app.metaAccessToken,
     };
     // An unknown name reveals nothing rather than throwing: the field list is
@@ -62,6 +70,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const shiprocketEmail = String(form.get("shiprocketEmail") || "").trim();
   const shiprocketPassword = String(form.get("shiprocketPassword") || "").trim();
   const delhiveryApiKey = String(form.get("delhiveryApiKey") || "").trim();
+  const shadowfaxApiToken = String(form.get("shadowfaxApiToken") || "").trim();
   const metaAdAccountId = String(form.get("metaAdAccountId") || "").trim();
   const metaAccessToken = String(form.get("metaAccessToken") || "").trim();
   const deliverySheetUrl = String(form.get("deliverySheetUrl") || "").trim();
@@ -110,6 +119,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       ...(adminToken ? { adminToken } : {}),
       ...(shiprocketPassword ? { shiprocketPassword } : {}),
       ...(delhiveryApiKey ? { delhiveryApiKey } : {}),
+      ...(shadowfaxApiToken ? { shadowfaxApiToken } : {}),
       ...(metaAccessToken ? { metaAccessToken } : {}),
     },
   });
@@ -187,6 +197,13 @@ export default function PnlSettings() {
             saved={d.hasDelhiveryKey}
             placeholder="Delhivery token"
             revealed={revealed?.which === "delhiveryApiKey" ? revealed.value : null}
+          />
+          <SecretField
+            label="Shadowfax API token"
+            name="shadowfaxApiToken"
+            saved={d.hasShadowfaxToken}
+            placeholder="Shadowfax token (Script Properties: SHADOWFAX_API_TOKEN)"
+            revealed={revealed?.which === "shadowfaxApiToken" ? revealed.value : null}
           />
           <hr className="pnl-rule" />
           <div className="pnl-section-label">Meta ad spend (for the ad-spend line)</div>

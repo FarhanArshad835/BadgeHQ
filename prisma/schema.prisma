@@ -725,6 +725,9 @@ model PnlApp {
   shiprocketEmail    String    @default("")
   shiprocketPassword String    @default("")
   delhiveryApiKey    String    @default("")
+  /// Shadowfax books ~a third of our parcels and is the one carrier the app
+  /// could not ask about, so its AWBs came back "not in orders" by default.
+  shadowfaxApiToken  String    @default("")
   // Meta Ads — direct Meta Marketing API (ads_read token), not Supermetrics.
   metaAccessToken    String    @default("")
   metaAdAccountId    String    @default("") // e.g. "act_908549380106884"
