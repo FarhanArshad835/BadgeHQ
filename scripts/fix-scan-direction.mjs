@@ -34,6 +34,12 @@ import fs from "node:fs";
 import path from "node:path";
 
 const WRITE = process.argv.includes("--write");
+/**
+ * Also delete a row the courier contradicts when the correct row ALREADY
+ * exists. Separate from --write because this destroys a scan record rather
+ * than moving one, and the two deserve different levels of deliberateness.
+ */
+const PRUNE = process.argv.includes("--prune");
 const argN = process.argv.indexOf("--n");
 const LIMIT = argN > -1 ? Number(process.argv[argN + 1]) || 2000 : 2000;
 
@@ -172,6 +178,7 @@ if (!WRITE) {
 
 let moved = 0;
 let blocked = 0;
+let pruned = 0;
 for (const m of moves) {
   // The kind is part of the unique key, so the row has to move rather than be
   // updated. If the destination already holds this AWB the parcel was scanned
@@ -181,8 +188,21 @@ for (const m of moves) {
     select: { id: true },
   });
   if (existing) {
-    blocked++;
-    console.log("   SKIP (already exists as " + m.to + "):", m.ev.awb);
+    // The parcel was scanned under both kinds, and the courier agrees with
+    // the row that already exists — so THIS row is the stale duplicate. A
+    // delete cannot be undone, so it needs its own flag rather than riding
+    // along with --write.
+    if (!PRUNE) {
+      blocked++;
+      console.log(
+        "   SKIP " + m.ev.awb + " — already filed as " + m.to +
+          "; this " + m.ev.kind + " row is the stale one (--prune removes it)",
+      );
+      continue;
+    }
+    await prisma.scanEvent.delete({ where: { id: m.ev.id } });
+    pruned++;
+    console.log("   PRUNED stale " + m.ev.kind + " row:", m.ev.awb);
     continue;
   }
   await prisma.$transaction([
@@ -204,6 +224,13 @@ for (const m of moves) {
   ]);
   moved++;
 }
-console.log("\nmoved:", moved, "| skipped (already both kinds):", blocked);
+console.log(
+  "\nmoved:",
+  moved,
+  "| pruned stale duplicates:",
+  pruned,
+  "| skipped (already both kinds):",
+  blocked,
+);
 
 await prisma.$disconnect();
