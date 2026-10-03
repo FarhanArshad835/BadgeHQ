@@ -695,15 +695,19 @@ const CSS = String.raw`
   /* Inherits the th's type so sorting never looks bolted on. */
   .claims-app th .sort {
     border: 0; background: none; padding: 0; margin: 0; cursor: pointer;
-    font: inherit; color: inherit; letter-spacing: inherit;
+    font: inherit; letter-spacing: inherit; font-weight: 500;
+    /* Darker than the th's muted grey: these are buttons, not captions. */
+    color: #4a4a4a;
     display: inline-flex; align-items: center; gap: 3px; border-radius: 4px;
     min-width: 0;
   }
   .claims-app th .sort:hover { color: var(--ink); }
   .claims-app th .sort:active { transform: translateY(1px); }
-  /* The arrow only shows the direction of the column actually sorting. */
-  .claims-app th .arrow { font-size: 8px; opacity: 0; transition: opacity .12s; }
-  .claims-app th .sort:hover .arrow { opacity: .45; }
+  /* Always visible: a control that only appears on hover cannot be found on
+     a touch screen, and reads as decoration on a desktop. The sorting column
+     is darker than the rest rather than the only one shown. */
+  .claims-app th .arrow { font-size: 9px; opacity: .5; transition: opacity .12s; }
+  .claims-app th .sort:hover .arrow { opacity: .8; }
   .claims-app th[aria-sort="ascending"] .arrow,
   .claims-app th[aria-sort="descending"] .arrow { opacity: 1; }
   .claims-app th[aria-sort="ascending"] .sort,
@@ -714,12 +718,18 @@ const CSS = String.raw`
      target and the long carrier list all behave without rebuilding them. */
   .claims-app .th-filter {
     position: relative; display: inline-flex; align-items: center; justify-content: center;
-    width: 18px; height: 18px; border-radius: 4px; cursor: pointer;
-    font-size: 10px; color: var(--muted); opacity: 0; transition: opacity .12s, background .12s;
+    width: 19px; height: 19px; border-radius: 4px; cursor: pointer;
+    font-size: 12px; line-height: 1; color: #5a5a5a;
+    background: #f1f1f1; border: 1px solid var(--line);
+    transition: background .12s, color .12s, border-color .12s;
   }
-  .claims-app th:hover .th-filter, .claims-app .th-filter.on { opacity: 1; }
-  .claims-app .th-filter:hover { background: #eee; color: var(--ink); }
-  .claims-app .th-filter.on { color: var(--ink); background: #e8e8e8; }
+  .claims-app .th-filter:hover { background: #e4e4e4; color: var(--ink); border-color: #c8c8c8; }
+  .claims-app .th-filter:active { transform: translateY(1px); }
+  /* A column holding a filter is filled in, so it is obvious at a glance
+     which of them are narrowing the list. */
+  .claims-app .th-filter.on {
+    color: #fff; background: var(--ink); border-color: var(--ink);
+  }
   .claims-app .th-filter select {
     position: absolute; inset: 0; width: 100%; height: 100%;
     opacity: 0; cursor: pointer; border: 0; padding: 0; margin: 0;
@@ -728,8 +738,6 @@ const CSS = String.raw`
   .claims-app th.filtered { color: var(--ink); }
   .claims-app th.filtered .th-label { font-weight: 500; }
   @media (max-width: 640px) {
-    /* No hover on touch, so every filter mark is permanently visible. */
-    .claims-app .th-filter { opacity: 1; }
     /* The card layout hides every header cell, which would take the filters
        with them. The filterable columns come back as a compact strip above
        the cards — the only place to filter on a phone. */
