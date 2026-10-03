@@ -629,4 +629,21 @@ const CSS = String.raw`
        The session is in the CSV and the filter for anyone who needs it. */
     .claims-app .c-session { display: none; }
   }
+  /* The session pill becomes a picker when there are earlier batches to go
+     back to. It keeps the pill's quiet look rather than becoming another
+     control competing with the count beside it. */
+  .claims-app select.sp-session-pick {
+    appearance: none; cursor: pointer; font: inherit; font-size: 12px;
+    color: var(--muted); background: var(--surface);
+    border: 1px solid var(--line); border-radius: 999px;
+    padding: 2px 22px 2px 8px; max-width: 190px;
+    background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+                      linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+    background-position: calc(100% - 12px) 52%, calc(100% - 8px) 52%;
+    background-size: 4px 4px, 4px 4px; background-repeat: no-repeat;
+  }
+  .claims-app select.sp-session-pick:hover { border-color: var(--line-strong); }
+  @media (max-width: 420px) {
+    .claims-app select.sp-session-pick { max-width: 120px; border-color: transparent; }
+  }
 `;

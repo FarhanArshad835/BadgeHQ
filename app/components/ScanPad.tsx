@@ -24,6 +24,10 @@ type Row = {
   order: string | null;
   label: string;
   fresh: boolean;
+  /** A reopened row's own scan time. Without it the list would stamp every
+   *  older scan with this page load, which reads as a re-scan that never
+   *  happened. */
+  at?: string;
 };
 
 type Verdict = { cls: string; label: string; awb: string; msg: string };
@@ -107,6 +111,8 @@ export function ScanPad({
   hint,
   dispatched,
   alreadyScanned,
+  sessions,
+  reopened,
   toolbar,
 }: {
   kind: ScanKind;
@@ -118,6 +124,13 @@ export function ScanPad({
    *  without spending a round trip each to be told what we already know. The
    *  server still has the final say. */
   alreadyScanned?: string[];
+  /** Earlier batches on this scanner, newest first, for the picker. */
+  sessions?: Array<{ name: string; count: number; lastAt: string }>;
+  /** A batch being reopened, with the scans already in it. */
+  reopened?: {
+    name: string;
+    rows: Array<{ awb: string; orderName: string; kind: string; result: string; at: string }>;
+  } | null;
   /** The dispatch page's sync strip, rendered above the title. */
   toolbar?: React.ReactNode;
 }) {
@@ -125,7 +138,17 @@ export function ScanPad({
   const textRef = useRef<HTMLTextAreaElement>(null);
   const dismissRef = useRef<HTMLButtonElement>(null);
 
-  const [rows, setRows] = useState<Row[]>([]);
+  const [rows, setRows] = useState<Row[]>(() =>
+    (reopened?.rows || []).map((r) => ({
+      awb: r.awb,
+      time: new Date(),
+      status: (r.result === "not-found" ? "notfound" : r.result) as RowStatus,
+      order: r.orderName || null,
+      label: r.kind === "customer-return" ? "Customer return" : r.kind === "rto" ? "RTO" : "Dispatched",
+      fresh: false,
+      at: r.at,
+    })),
+  );
   const [refused, setRefused] = useState(0);
   const [verdict, setVerdict] = useState<Verdict>({ cls: "idle", label: "Ready", awb: "", msg: hint });
   const [modal, setModal] = useState<{ type: string; label: string; awb: string; msg: string } | null>(null);
@@ -150,7 +173,7 @@ export function ScanPad({
    * on, and the operator has nothing to start over FROM. Named by the time it
    * opened, which is how a bench refers to one anyway ("the 2pm trolley").
    */
-  const [session, setSession] = useState(() => newSessionName());
+  const [session, setSession] = useState(() => reopened?.name || newSessionName());
   // What the last paste skipped without asking the server.
   const [dropped, setDropped] = useState({ repeated: 0, known: 0 });
 
@@ -519,11 +542,43 @@ export function ScanPad({
             <b>{scanned.toLocaleString("en-IN")}</b>
             <span className="sp-count-label">scanned this session</span>
           </span>
-          {/* Named, so "this session" is a thing the operator can point at and
-              a later report can group by, rather than invisible state. */}
-          <span className="sp-session" title="This batch's name">
-            {session}
-          </span>
+          {/* The batch, and a way back into an earlier one. A trolley that
+              spans a break or a shift change is the same batch, so continuing
+              it has to be possible without starting a parallel list. */}
+          {sessions && sessions.length > 0 ? (
+            <select
+              className="sp-session sp-session-pick"
+              value={session}
+              title="This batch — pick an earlier one to carry on adding to it"
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v === session) return;
+                // A full load, not local state: the batch's existing scans have
+                // to come from the server, and the URL makes the choice
+                // survive a refresh.
+                const url = new URL(window.location.href);
+                if (v === "__new") url.searchParams.delete("session");
+                else url.searchParams.set("session", v);
+                window.location.assign(url.toString());
+              }}
+            >
+              {/* The current one first, even when it is brand new and has
+                  nothing in it yet. */}
+              {!sessions.some((x) => x.name === session) && (
+                <option value={session}>{session} · new</option>
+              )}
+              {sessions.map((x) => (
+                <option key={x.name} value={x.name}>
+                  {x.name} · {x.count.toLocaleString("en-IN")}
+                </option>
+              ))}
+              <option value="__new">Start a new batch…</option>
+            </select>
+          ) : (
+            <span className="sp-session" title="This batch's name">
+              {session}
+            </span>
+          )}
           {refused > 0 && <span className="sp-pill refused">{refused} refused</span>}
           {saving > 0 && <span className="sp-pill saving">{saving} saving…</span>}
           {bad > 0 && <span className="sp-pill notsaved">{bad} NOT SAVED</span>}
@@ -803,7 +858,7 @@ function RowView({ r, withTime, onRetry }: { r: Row; withTime?: boolean; onRetry
     <div className={`sp-row ${r.status}${r.fresh ? " fresh" : ""}`}>
       <div className="awb-cell">{r.awb}</div>
       <div className="order-cell">{order}</div>
-      {withTime && <div className="time">{fmtT(r.time)}</div>}
+      {withTime && <div className="time">{r.at ?? fmtT(r.time)}</div>}
       <div className="res-cell">
         <span className={"res " + r.status}>
           <span className="dot" />

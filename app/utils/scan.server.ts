@@ -958,6 +958,27 @@ export async function resolveScan(
   ]);
 }
 
+/**
+ * Every named batch, newest first, regardless of kind.
+ *
+ * listSessions groups one kind at a time because the scanners are separate;
+ * History shows them together, so an inbound batch holding both RTOs and
+ * customer returns reads as the one trolley it was.
+ */
+export async function allSessions(
+  shop: string,
+): Promise<Array<{ name: string; count: number }>> {
+  const rows = await prisma.scanEvent.groupBy({
+    by: ["session"],
+    where: { shop, session: { not: "" } },
+    _count: true,
+    _max: { scannedAt: true },
+    orderBy: { _max: { scannedAt: "desc" } },
+    take: 60,
+  });
+  return rows.map((r) => ({ name: r.session, count: r._count }));
+}
+
 /** Recent scans for the history page and the session list. */
 export async function recentScans(
   shop: string,
@@ -973,6 +994,8 @@ export async function recentScans(
   /** Inclusive IST day range, "YYYY-MM-DD". Either end may be blank. */
   from = "",
   to = "",
+  /** One batch, so a trolley can be read back as the thing it was. */
+  session = "",
 ) {
   return prisma.scanEvent.findMany({
     where: {
@@ -981,6 +1004,7 @@ export async function recentScans(
       ...(result ? { result } : {}),
       ...scanSearchWhere(search),
       ...scanDateWhere(from, to),
+      ...(session ? { session } : {}),
     },
     orderBy: { scannedAt: "desc" },
     take: limit,

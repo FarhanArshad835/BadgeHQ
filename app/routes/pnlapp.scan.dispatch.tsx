@@ -14,8 +14,11 @@ import { json, redirect } from "@remix-run/node";
 import { useLoaderData, useNavigation, useSubmit } from "@remix-run/react";
 import { getPnlApp, isAuthed } from "../utils/pnl-app.server";
 import {
+  listSessions,
   loadDispatchedSet,
+  loadScannedSet,
   recordScan,
+  sessionScans,
   syncDispatchedAwbs,
   scanCountsToday,
 } from "../utils/scan.server";
@@ -30,13 +33,30 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const shop = app.shopDomain;
   // This first query also wakes the database while the operator is still
   // reaching for the first packet, so the cold connection is never felt.
-  const [dispatched, counts] = await Promise.all([
+  const wanted = new URL(request.url).searchParams.get("session") || "";
+
+  const [dispatched, counts, scanned, sessions, reopenedRows] = await Promise.all([
     shop ? loadDispatchedSet(shop) : Promise.resolve([]),
     shop ? scanCountsToday(shop) : Promise.resolve({}),
+    shop ? loadScannedSet(shop, "dispatch") : Promise.resolve([]),
+    shop ? listSessions(shop, "dispatch") : Promise.resolve([]),
+    shop && wanted ? sessionScans(shop, "dispatch", wanted) : Promise.resolve([]),
   ]);
+
+  const reopened = reopenedRows.map((r) => ({
+    awb: r.awb,
+    orderName: r.orderName,
+    kind: r.kind,
+    result: r.result,
+    at: new Date(r.scannedAt.getTime() + 5.5 * 60 * 60 * 1000).toISOString().slice(11, 16),
+  }));
+
   return json({
     dispatched,
     counts,
+    alreadyScanned: scanned,
+    sessions,
+    reopened: wanted ? { name: wanted, rows: reopened } : null,
     hasSheet: Boolean(app.dispatchSheetUrl),
     syncedCount: dispatched.length,
   });
@@ -81,6 +101,9 @@ export default function DispatchScanner() {
           title="Dispatch"
           hint="Scan each packet as it goes out."
           dispatched={d.dispatched}
+          alreadyScanned={d.alreadyScanned}
+          sessions={d.sessions}
+          reopened={d.reopened}
           toolbar={
             <div className="sp-toolbar">
               <span>

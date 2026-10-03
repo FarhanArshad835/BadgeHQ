@@ -15,6 +15,7 @@ import {
   scanCountsToday,
   scanSearchWhere,
   scanDateWhere,
+  allSessions,
   type ScanKind,
   type ScanResult,
 } from "../utils/scan.server";
@@ -33,7 +34,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const app = await getPnlApp();
   const shop = app.shopDomain;
   if (!shop)
-    return json({ rows: [], counts: {}, total: 0, kind: "", result: "", search: "", from: "", to: "" });
+    return json({ rows: [], counts: {}, total: 0, kind: "", result: "", search: "", from: "", to: "", session: "", sessions: [] });
 
   const url = new URL(request.url);
   const raw = url.searchParams.get("kind") || "";
@@ -46,8 +47,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const search = (url.searchParams.get("q") || "").trim();
   const from = (url.searchParams.get("from") || "").trim();
   const to = (url.searchParams.get("to") || "").trim();
+  const session = (url.searchParams.get("session") || "").trim();
 
-  const rows = await recentScans(shop, kind, 500, result, search, from, to);
+  const rows = await recentScans(shop, kind, 500, result, search, from, to, session);
+  const sessions = await allSessions(shop);
   // Counted separately: the list is capped at 500, so rows.length would
   // silently understate a filter that matches more than that.
   const total = await prisma.scanEvent.count({
@@ -57,6 +60,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       ...(result ? { result } : {}),
       ...scanSearchWhere(search),
       ...scanDateWhere(from, to),
+      ...(session ? { session } : {}),
     },
   });
 
@@ -93,6 +97,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     search,
     from,
     to,
+    session,
+    sessions,
     kind: kind || "",
     result: result || "",
     rows: rows.map((r) => ({
@@ -135,6 +141,8 @@ export default function ScanHistory() {
     search: string;
     from: string;
     to: string;
+    session: string;
+    sessions: Array<{ name: string; count: number }>;
   };
   const [params, setParams] = useSearchParams();
   const kind = params.get("kind") || "";
@@ -168,6 +176,7 @@ export default function ScanHistory() {
       ...(d.search ? { q: d.search } : {}),
       ...(d.from ? { from: d.from } : {}),
       ...(d.to ? { to: d.to } : {}),
+      ...(d.session ? { session: d.session } : {}),
       ...next,
     };
     for (const k of Object.keys(merged)) if (!merged[k].trim()) delete merged[k];
@@ -245,6 +254,21 @@ export default function ScanHistory() {
               max={istDay(0)}
               onChange={(e) => setFilters({ to: e.target.value })}
             />
+            {d.sessions.length > 0 && (
+              <select
+                aria-label="Session"
+                disabled={busy}
+                value={d.session}
+                onChange={(e) => setFilters({ session: e.target.value })}
+              >
+                <option value="">All sessions</option>
+                {d.sessions.map((x) => (
+                  <option key={x.name} value={x.name}>
+                    {x.name} · {x.count.toLocaleString("en-IN")}
+                  </option>
+                ))}
+              </select>
+            )}
             <select
               aria-label="Type"
               disabled={busy}
@@ -272,7 +296,7 @@ export default function ScanHistory() {
             </select>
             <a
               className="btn-primary"
-              href={`/pnl-app/scan/history?format=csv${d.kind ? `&kind=${d.kind}` : ""}${d.result ? `&result=${d.result}` : ""}${d.search ? `&q=${encodeURIComponent(d.search)}` : ""}${d.from ? `&from=${d.from}` : ""}${d.to ? `&to=${d.to}` : ""}`}
+              href={`/pnl-app/scan/history?format=csv${d.kind ? `&kind=${d.kind}` : ""}${d.result ? `&result=${d.result}` : ""}${d.search ? `&q=${encodeURIComponent(d.search)}` : ""}${d.from ? `&from=${d.from}` : ""}${d.to ? `&to=${d.to}` : ""}${d.session ? `&session=${encodeURIComponent(d.session)}` : ""}`}
             >
               Export CSV
             </a>

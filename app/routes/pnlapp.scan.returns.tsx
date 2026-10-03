@@ -17,7 +17,13 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
 import { getPnlApp, isAuthed } from "../utils/pnl-app.server";
-import { loadScannedSet, recordScan, scanCountsToday } from "../utils/scan.server";
+import {
+  listSessions,
+  loadScannedSet,
+  recordScan,
+  scanCountsToday,
+  sessionScans,
+} from "../utils/scan.server";
 import { ClaimsStyles } from "../components/ClaimsStyles";
 import { BusyBar } from "../components/BusyBar";
 import { ScanPad } from "../components/ScanPad";
@@ -29,12 +35,39 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const shop = app.shopDomain;
   // Both kinds: an inbound scan can be filed either way, so a parcel already
   // booked in as an RTO must not be re-sent as a customer return.
-  const [counts, rto, cr] = await Promise.all([
+  // ?session= reopens a batch: its scans come back so the operator can carry
+  // on adding to the same one rather than starting a parallel list.
+  const wanted = new URL(request.url).searchParams.get("session") || "";
+
+  const [counts, rto, cr, sessions, reopenedRto, reopenedCr] = await Promise.all([
     shop ? scanCountsToday(shop) : Promise.resolve({}),
     shop ? loadScannedSet(shop, "rto") : Promise.resolve([]),
     shop ? loadScannedSet(shop, "customer-return") : Promise.resolve([]),
+    shop ? listSessions(shop, "rto") : Promise.resolve([]),
+    shop && wanted ? sessionScans(shop, "rto", wanted) : Promise.resolve([]),
+    shop && wanted ? sessionScans(shop, "customer-return", wanted) : Promise.resolve([]),
   ]);
-  return json({ counts, alreadyScanned: [...rto, ...cr] });
+
+  // Both kinds, newest first: an inbound session holds RTOs and customer
+  // returns together, and listSessions only groups one kind at a time.
+  const reopened = [...reopenedRto, ...reopenedCr]
+    .sort((a, b) => b.scannedAt.getTime() - a.scannedAt.getTime())
+    .map((r) => ({
+      awb: r.awb,
+      orderName: r.orderName,
+      kind: r.kind,
+      result: r.result,
+      at: new Date(r.scannedAt.getTime() + 5.5 * 60 * 60 * 1000)
+        .toISOString()
+        .slice(11, 16),
+    }));
+
+  return json({
+    counts,
+    alreadyScanned: [...rto, ...cr],
+    sessions,
+    reopened: wanted ? { name: wanted, rows: reopened } : null,
+  });
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -65,6 +98,8 @@ export default function ReturnsScanner() {
           title="Inbound parcels"
           hint="Scan any parcel coming back. RTO or customer return is worked out for you."
           alreadyScanned={d.alreadyScanned}
+          sessions={d.sessions}
+          reopened={d.reopened}
         />
       </div>
     </div>
