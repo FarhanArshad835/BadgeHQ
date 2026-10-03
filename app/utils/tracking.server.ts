@@ -43,6 +43,11 @@ export type TrackingResult = {
   /** True when the latest scan looks like a failed/undelivered attempt (NDR),
    *  so the AI can flag it instead of saying "on its way". */
   failedAttempt: boolean;
+  /** The reference WE gave the carrier at booking — Delhivery's ReferenceNo,
+   *  Shadowfax's client_order_id. A reverse pickup joins the carrier's own id
+   *  to ours ("R1790086147-232696"), so the order is the tail after the dash.
+   *  The only bridge to an order when no table of ours knows the waybill. */
+  orderRef?: string;
 };
 
 /**
@@ -166,6 +171,7 @@ async function trackShadowfax(token: string, awb: string): Promise<TrackingResul
     lastUpdate: String(latest.created || "").trim(),
     delivered: id === "delivered",
     failedAttempt: FAILED_ATTEMPT_RE.test(`${status} ${lastActivity}`),
+    orderRef: String(row.client_order_id || "").trim(),
   };
 }
 
@@ -216,6 +222,7 @@ async function trackShiprocket(
     delivered: isDelivered(shipmentStatus) || isDelivered(lastActivity),
     // The latest activity is the freshest truth — the rolled-up status lags.
     failedAttempt: isFailedAttempt(lastActivity) || isFailedAttempt(shipmentStatus),
+    orderRef: String(td.shipment_track?.[0]?.order_id ?? "").trim(),
   };
 }
 
@@ -245,6 +252,7 @@ async function trackDelhivery(apiKey: string, awb: string): Promise<TrackingResu
     lastUpdate: phraseIstTimestamp(String(shipment.Status?.StatusDateTime || "")),
     delivered: isDelivered(status),
     failedAttempt: isFailedAttempt(status) || isFailedAttempt(instructions),
+    orderRef: String(shipment.ReferenceNo || "").trim(),
   };
 }
 

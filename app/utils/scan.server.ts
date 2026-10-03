@@ -269,6 +269,41 @@ export async function recordScanBulk(
 }
 
 /**
+ * Turn a carrier's booking reference into one of our order names.
+ *
+ * Confirmed against our own orders before it is believed: a reference that
+ * names no order of ours is a number, not an answer.
+ */
+async function orderFromCarrierRef(shop: string, ref: string): Promise<string> {
+  const clean = String(ref || "").trim();
+  if (!clean) return "";
+  // "R1790086147-232696" — the order is the tail; a forward shipment carries
+  // the bare order number, so both are tried.
+  const tail = clean.includes("-") ? clean.split("-").pop()! : "";
+  const tries = [clean, `#${clean}`, ...(tail ? [tail, `#${tail}`] : [])];
+  const hit = await prisma.orderFinancials.findFirst({
+    where: { shop, orderName: { in: tries } },
+    select: { orderName: true },
+  });
+  return hit?.orderName || "";
+}
+
+/** The ReturnHQ request type for an order, or "" when there is none. */
+async function returnTypeForOrder(orderName: string): Promise<string> {
+  try {
+    const { returnHqByOrder } = await import("./returnhq.server");
+    const map = await returnHqByOrder([orderName]);
+    const hit = map.get(orderName);
+    // A cancelled request still means the customer sent it back: the parcel is
+    // physically here, so filing it as a courier RTO would put it against the
+    // wrong counterparty.
+    return hit ? hit.type : "";
+  } catch {
+    return "";
+  }
+}
+
+/**
  * Ask the courier what this AWB is.
  *
  * The last resort, and the only lookup that leaves our network. Used when
@@ -369,6 +404,35 @@ export async function detectInbound(
     // have filed under a guess is worth it.
     const carrier = await trackCourier(awb);
     if (carrier) {
+      // The carrier hands back the reference we gave it at booking. A reverse
+      // pickup joins the carrier's own id to ours — "R1790086147-232696" —
+      // so the order is the tail after the dash. This is the ONLY bridge from
+      // a waybill to an order when neither of our tables knows the AWB:
+      // ReturnHQ stores its own pickup token (R23706474924), never the
+      // carrier's waybill, so the two can only meet through the order number.
+      const named = await orderFromCarrierRef(shop, carrier.orderRef || "");
+      if (named) {
+        const returnType = await returnTypeForOrder(named);
+        if (returnType) {
+          return {
+            kind: "customer-return",
+            confident: true,
+            reason: `${named}: customer raised a ${returnType} request.`,
+            orderName: named,
+            deliveryStatus: "",
+            returnType,
+          };
+        }
+        return {
+          kind: "rto",
+          confident: true,
+          reason: `${named}, per the courier. No return request on it.`,
+          orderName: named,
+          deliveryStatus: "",
+          returnType: "",
+        };
+      }
+
       const text = `${carrier.status} ${carrier.lastActivity}`.toLowerCase();
       // The courier's own words decide it. "RTO", "return to origin" and
       // "returned to seller" all mean the parcel is coming back to us because
