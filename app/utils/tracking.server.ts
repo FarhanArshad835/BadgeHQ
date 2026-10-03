@@ -206,6 +206,10 @@ async function trackDelhivery(apiKey: string, awb: string): Promise<TrackingResu
  * returns null and we fall through. On total failure returns null and the caller
  * degrades to the normal handoff — never a hard error to the shopper.
  */
+/** Delhivery books its own waybills under this prefix; everything else routes
+ *  to Shiprocket, which is the aggregator. Matches the tracking script. */
+const DELHIVERY_PREFIX = "2606";
+
 export async function trackParcel(opts: {
   awb: string;
   shiprocketEmail?: string;
@@ -215,12 +219,26 @@ export async function trackParcel(opts: {
   const { awb, shiprocketEmail, shiprocketPassword, delhiveryApiKey } = opts;
   if (!awb) return null;
 
+  // Routed by AWB prefix, the way the tracking script does it, then the others
+  // tried as a fallback. Order matters: asking Shiprocket about a Delhivery
+  // waybill gets "no shipment present against this tracking id", which looks
+  // like a definite answer and stops the search before the carrier that
+  // actually holds the parcel is ever asked. Verified: five 2606… waybills
+  // Shiprocket disowned were all known to Delhivery.
+  const sr = () => trackShiprocket(shiprocketEmail!, shiprocketPassword!, awb);
+  const dl = () => trackDelhivery(delhiveryApiKey!, awb);
+
+  const hasSr = Boolean(shiprocketEmail && shiprocketPassword);
+  const hasDl = Boolean(delhiveryApiKey);
+  const prefersDelhivery = awb.startsWith(DELHIVERY_PREFIX);
+
   const attempts: Array<() => Promise<TrackingResult | null>> = [];
-  if (shiprocketEmail && shiprocketPassword) {
-    attempts.push(() => trackShiprocket(shiprocketEmail, shiprocketPassword, awb));
-  }
-  if (delhiveryApiKey) {
-    attempts.push(() => trackDelhivery(delhiveryApiKey, awb));
+  if (prefersDelhivery) {
+    if (hasDl) attempts.push(dl);
+    if (hasSr) attempts.push(sr);
+  } else {
+    if (hasSr) attempts.push(sr);
+    if (hasDl) attempts.push(dl);
   }
 
   for (const attempt of attempts) {
