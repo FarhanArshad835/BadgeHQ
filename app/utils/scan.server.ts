@@ -309,6 +309,17 @@ async function returnTypeForOrder(orderName: string): Promise<string> {
 }
 
 /**
+ * Does the carrier's own wording mean the parcel is coming back to us?
+ *
+ * One regex, used everywhere, because the carriers do not share vocabulary:
+ * Delhivery says RTO and DTO, Shadowfax "Returned to Seller" or "Returned To
+ * Client", Shiprocket "RTO Delivered". Word boundaries matter — without them
+ * "introduction" contains "rto".
+ */
+const CARRIER_SAYS_RETURN =
+  /\brto\b|\brts\b|\bdto\b|return(ed)?\s*to\s*(origin|seller|shipper|client)/;
+
+/**
  * Ask the courier what this AWB is.
  *
  * The last resort, and the only lookup that leaves our network. Used when
@@ -456,7 +467,7 @@ export async function detectInbound(
       // The courier's own words decide it. "RTO", "return to origin" and
       // "returned to seller" all mean the parcel is coming back to us because
       // the customer never took it — which is an RTO, whatever we call it.
-      const saysRto = /\brto\b|\brts\b|return(ed)?\s*to\s*(origin|seller|shipper|client)/.test(text);
+      const saysRto = CARRIER_SAYS_RETURN.test(text);
       if (saysRto) {
         return {
           kind: "rto",
@@ -531,15 +542,47 @@ export async function detectInbound(
     };
   }
 
-  // Delivered with no request: someone has sent a parcel back without raising
-  // one. Worth flagging at the bench, not silently filing as an RTO.
+  // No return request, and our own status does not say RTO. Before guessing,
+  // ask the courier: our deliveryStatus comes from a twice-daily sheet sync and
+  // lags reality by hours, so a parcel on the bench can still read "in_transit"
+  // here while the courier has already marked it RTO. Quoting our stale value
+  // as if the courier said it is how an RTO got filed as a customer return.
+  const live = await trackCourier(awb);
+  if (live) {
+    const saysRto = CARRIER_SAYS_RETURN.test(
+      `${live.status} ${live.lastActivity}`.toLowerCase(),
+    );
+    if (saysRto) {
+      return {
+        kind: "rto",
+        confident: true,
+        reason: `Courier says "${live.status}". No return request on ${order.orderName}.`,
+        orderName: order.orderName,
+        deliveryStatus: order.deliveryStatus,
+        returnType: "",
+      };
+    }
+    // The courier does not call it a return either, yet it is on the bench.
+    // Say exactly what they DID say so the operator can judge.
+    return {
+      kind: "customer-return",
+      confident: false,
+      reason: `Courier says "${live.status}", not a return, and there is no return request on ${order.orderName}.`,
+      orderName: order.orderName,
+      deliveryStatus: order.deliveryStatus,
+      returnType: "",
+    };
+  }
+
+  // The courier could not be reached. Fall back to what we hold, and say that
+  // the status is ours rather than implying the courier just said it.
   return {
     kind: "customer-return",
     confident: false,
     reason:
       order.deliveryStatus === "delivered"
         ? "Was delivered, but there is NO return request. Check with the customer."
-        : `Courier says "${order.deliveryStatus}" and there is no return request.`,
+        : `We last had ${order.orderName} as "${order.deliveryStatus}" and there is no return request.`,
     orderName: order.orderName,
     deliveryStatus: order.deliveryStatus,
     returnType: "",
