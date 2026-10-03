@@ -582,6 +582,12 @@ const CSS = String.raw`
     /* "scanned this session" is the first thing to go: the big number and the
        button it sits beside carry the meaning on their own. */
     .claims-app .sp-count .sp-count-label { display: none; }
-    .claims-app .sp-session { display: none; }
+    /* The session name STAYS. It is the one piece of state an operator cannot
+       work out from anything else on screen — which batch they are scanning
+       into — so it survives every width. It loses its border rather than its
+       presence. */
+    .claims-app .sp-session {
+      border-color: transparent; padding: 2px 0; font-size: 11px;
+    }
   }
 `;
