@@ -668,6 +668,8 @@ model OrderFinancials {
   @@index([shop, orderCreatedAt])
   @@index([shop, shippingStatus])
   @@index([shop, deliveryStatus])
+  /// History looks an order up by name to date it against the scan.
+  @@index([shop, orderName])
   @@index([awb])
 }
 

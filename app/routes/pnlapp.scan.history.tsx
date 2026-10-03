@@ -16,6 +16,7 @@ import {
   scanSearchWhere,
   scanDateWhere,
   allSessions,
+  courierDates,
   type ScanKind,
   type ScanResult,
 } from "../utils/scan.server";
@@ -23,6 +24,14 @@ import { ClaimsStyles } from "../components/ClaimsStyles";
 import { ColumnFilter } from "../components/ColumnFilter";
 import { BusyBar, useBusy } from "../components/BusyBar";
 import { ScanNav } from "../components/ScanNav";
+
+/** The courier's date, in the format Claims uses for the same field. */
+const fmtDay = (iso: string) =>
+  new Date(iso + "T00:00:00").toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
 
 const KINDS: Record<string, string> = {
   dispatch: "Dispatch",
@@ -51,6 +60,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const session = (url.searchParams.get("session") || "").trim();
 
   const rows = await recentScans(shop, kind, 500, result, search, from, to, session);
+  // One lookup for the page, not one per row.
+  const courier = await courierDates(shop, rows.map((r) => r.orderName));
   const sessions = await allSessions(shop);
   // Counted separately: the list is capped at 500, so rows.length would
   // silently understate a filter that matches more than that.
@@ -69,13 +80,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
     const IST = 5.5 * 60 * 60 * 1000;
     const csv = [
-      "scanned_ist,kind,awb,order_name,session,result,note",
+      "scanned_ist,kind,awb,order_name,courier_date,session,result,note",
       ...rows.map((r) =>
         [
           esc(new Date(r.scannedAt.getTime() + IST).toISOString().slice(0, 19).replace("T", " ")),
           esc(r.kind),
           esc(r.awb),
           esc(r.orderName),
+          esc(courier.get(r.orderName) || ""),
           esc(r.session),
           esc(r.result),
           esc(r.note),
@@ -107,6 +119,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       kind: r.kind,
       awb: r.awb,
       orderName: r.orderName,
+      courierAt: courier.get(r.orderName) || "",
       result: r.result,
       note: r.note,
       session: r.session,
@@ -123,6 +136,7 @@ type Row = {
   kind: string;
   awb: string;
   orderName: string;
+  courierAt: string;
   result: string;
   note: string;
   session: string;
@@ -317,6 +331,9 @@ export default function ScanHistory() {
                 />
                 <th>AWB</th>
                 <th>Order</th>
+                {/* What the courier claimed, beside when the bench actually
+                    saw it. The gap between the two columns is the claim. */}
+                <th>Marked delivered</th>
                 {d.sessions.length > 0 ? (
                   <FilterTh
                     label="Session"
@@ -350,7 +367,7 @@ export default function ScanHistory() {
             <tbody>
               {!d.rows.length ? (
                 <tr>
-                  <td colSpan={6} className="empty">
+                  <td colSpan={7} className="empty">
                     {d.search
                       ? `No scan matches "${d.search}". Check the AWB, or clear the type and result filters.`
                       : "Nothing matches these filters. Pick another type or result."}
@@ -364,6 +381,13 @@ export default function ScanHistory() {
                     <td className="c-awb">{r.awb}</td>
                     <td className="c-order">
                       {r.orderName || <span className="unknown">not in orders</span>}
+                    </td>
+                    <td className="c-delivered">
+                      {r.courierAt ? (
+                        fmtDay(r.courierAt)
+                      ) : (
+                        <span className="unknown">—</span>
+                      )}
                     </td>
                     <td className="c-session">
                       {r.session ? (

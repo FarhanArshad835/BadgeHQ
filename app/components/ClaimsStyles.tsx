@@ -393,7 +393,8 @@ const CSS = String.raw`
   .claims-app .hist-count { align-self: center; color: #555; white-space: nowrap; }
   .claims-app .hist-count b { font-size: 18px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; margin-right: 3px; }
   .claims-app .hist-count .sub { color: var(--muted); }
-  .claims-app .c-when, .claims-app .c-awb { font-variant-numeric: tabular-nums; }
+  .claims-app .c-when, .claims-app .c-awb, .claims-app .c-delivered { font-variant-numeric: tabular-nums; }
+  .claims-app .c-delivered { color: #555; }
   .claims-app .c-awb { font-weight: 500; }
   .claims-app .c-when { color: #555; }
   .claims-app .top-right a.btn-primary, .claims-app .filters a.btn-primary {
@@ -407,7 +408,9 @@ const CSS = String.raw`
     .claims-app .filters { grid-template-columns: 1fr 1fr auto; }
     .claims-app .table-card tbody tr {
       grid-template-columns: 1fr auto;
-      grid-template-areas: "awb res" "order when";
+      /* The courier's own date sits under the order it belongs to, which is
+         what the scan time beside it is being compared against. */
+      grid-template-areas: "awb res" "order when" "delivered .";
       row-gap: 2px;
     }
     .claims-app .c-awb { grid-area: awb; }
@@ -415,6 +418,8 @@ const CSS = String.raw`
     .claims-app .c-when { grid-area: when; font-size: 12px; text-align: right; }
     .claims-app .c-res { grid-area: res; text-align: right; }
     .claims-app .c-kind { display: none; }
+    .claims-app .c-delivered { grid-area: delivered; font-size: 11px; }
+    .claims-app .c-delivered::before { content: "courier: "; color: var(--muted); }
   }
   /* ---------- Scanner login ---------- */
   .claims-app.login-app { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }

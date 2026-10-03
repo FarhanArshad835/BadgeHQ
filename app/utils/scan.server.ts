@@ -1012,6 +1012,32 @@ export async function recentScans(
 }
 
 /**
+ * What the courier said about each of these orders, by order name.
+ *
+ * The scan says when the bench saw a parcel; this says when the courier
+ * claimed it moved. Comparing the two is the whole point of the history, and
+ * a gap between them is exactly what a claim is made of.
+ *
+ * Which date applies depends on where the parcel went: deliveredAt is null for
+ * an RTO and rtoReceivedAt is null for a delivery, so one row can only ever
+ * offer one of them.
+ */
+export async function courierDates(shop: string, orderNames: string[]) {
+  const names = Array.from(new Set(orderNames.filter(Boolean)));
+  if (!names.length) return new Map<string, string>();
+  const rows = await prisma.orderFinancials.findMany({
+    where: { shop, orderName: { in: names } },
+    select: { orderName: true, deliveredAt: true, rtoReceivedAt: true },
+  });
+  const out = new Map<string, string>();
+  for (const r of rows) {
+    const at = r.rtoReceivedAt || r.deliveredAt;
+    if (at) out.set(r.orderName, at.toISOString().slice(0, 10));
+  }
+  return out;
+}
+
+/**
  * An inclusive day range in IST, as a scannedAt filter.
  *
  * The dates a person picks are IST days, but scannedAt is stored UTC — so the
