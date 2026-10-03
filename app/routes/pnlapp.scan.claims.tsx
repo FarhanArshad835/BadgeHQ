@@ -14,7 +14,7 @@
  */
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { useLoaderData, useNavigate, useSearchParams } from "@remix-run/react";
+import { useLoaderData, useSearchParams } from "@remix-run/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getPnlApp, isAuthed } from "../utils/pnl-app.server";
 import {
@@ -26,6 +26,7 @@ import {
   type ClaimStatus,
 } from "../utils/scan.server";
 import { ClaimsStyles } from "../components/ClaimsStyles";
+import { ScanNav } from "../components/ScanNav";
 import { BusyBar } from "../components/BusyBar";
 
 const TABS = ["rto", "returns"] as const;
@@ -141,7 +142,6 @@ export default function Claims() {
     inFlight: number;
     available: boolean;
   };
-  const navigate = useNavigate();
   const [, setParams] = useSearchParams();
 
   // Local copy so a status click repaints immediately; the POST follows.
@@ -406,34 +406,16 @@ export default function Claims() {
     a.click();
   }
 
-  const today = (d.counts.dispatch || 0) + (d.counts.rto || 0) + (d.counts["customer-return"] || 0);
 
   return (
     <div className="claims-app">
       <ClaimsStyles />
       <BusyBar />
       <div className="wrap">
-        <div className="topbar">
-          <nav className="nav" aria-label="Main">
-            <button onClick={() => navigate("/pnl-app/scan/dispatch")}>Dispatch</button>
-            <button onClick={() => navigate("/pnl-app/scan/returns")}>Inbound</button>
-            <button className="active" aria-current="page">
-              Claims
-            </button>
-            <button onClick={() => navigate("/pnl-app/scan/history")}>History</button>
-          </nav>
-          <div className="top-right">
-            {today > 0 && (
-              <span className="today">
-                Today: {d.counts.dispatch || 0} dispatched, {d.counts.rto || 0} RTO,{" "}
-                {d.counts["customer-return"] || 0} returns
-              </span>
-            )}
-            <a className="btn-ghost" href="/pnl-app/scan/logout">
-              Sign out
-            </a>
-          </div>
-        </div>
+        {/* The shared bar, not a second copy: this page had its own, so a fix
+            to one left the other behind — which is how Sign out kept pushing
+            History off the edge here after it had been moved everywhere else. */}
+        <ScanNav active="claims" counts={d.counts} />
 
         <div className="subtabs" role="tablist">
           <button

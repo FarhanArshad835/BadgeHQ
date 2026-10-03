@@ -590,4 +590,23 @@ const CSS = String.raw`
       border-color: transparent; padding: 2px 0; font-size: 11px;
     }
   }
+  /* ---------- Sign out ---------- */
+  /* On the bar at desk width; at the foot of the page on a phone, where the
+     bar carries the four links alone. */
+  .claims-app .sign-out-foot { display: none; }
+
+  @media (max-width: 640px) {
+    .claims-app .top-right .sign-out { display: none; }
+    /* The whole right-hand group is empty on a phone now, so it takes no space
+       away from the four links. */
+    .claims-app .top-right { display: none; }
+    .claims-app .nav { width: 100%; }
+    .claims-app .sign-out-foot {
+      display: block; margin: 22px auto 4px; width: fit-content;
+      padding: 8px 16px; font-size: 13px; color: var(--muted);
+      border: 1px solid var(--line); border-radius: 8px;
+      background: var(--surface); text-decoration: none;
+    }
+    .claims-app .sign-out-foot:active { filter: brightness(.95); }
+  }
 `;

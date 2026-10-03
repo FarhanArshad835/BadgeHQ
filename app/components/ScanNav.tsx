@@ -24,6 +24,7 @@ export function ScanNav({
   const today = (c.dispatch || 0) + (c.rto || 0) + (c["customer-return"] || 0);
 
   return (
+    <>
     <div className="topbar">
       <nav className="nav" aria-label="Main">
         {TABS.map((t) => (
@@ -45,10 +46,19 @@ export function ScanNav({
             {(c["customer-return"] || 0).toLocaleString("en-IN")} returns
           </span>
         )}
-        <a className="btn-ghost" href="/pnl-app/scan/logout">
+        {/* Hidden on a phone, where the bar is the four links and nothing
+            else — a narrow bar is for getting somewhere, and Sign out beside
+            the tab you are reaching for is a mis-tap that ends the shift.
+            It moves to the foot of the page there instead. */}
+        <a className="btn-ghost sign-out" href="/pnl-app/scan/logout">
           Sign out
         </a>
       </div>
     </div>
+    {/* Only on a phone: out of the way of everything pressed during a shift. */}
+    <a className="sign-out-foot" href="/pnl-app/scan/logout">
+      Sign out
+    </a>
+    </>
   );
 }
