@@ -326,17 +326,50 @@ export function ScanPad({
               (data.result as RowStatus);
       const label = listLabel(data);
 
-      setRows((rs) =>
-        rs.map((r) => (r.awb === row.awb ? { ...r, status, order: data.orderName || null, label } : r)),
-      );
+      if (data.result === "duplicate" || data.result === "blocked") {
+        // Nothing was written, so nothing belongs in the list — the same rule
+        // the local path already follows.
+        setRows((rs) => rs.filter((r) => r.awb !== row.awb));
+      } else {
+        setRows((rs) =>
+          rs.map((r) => (r.awb === row.awb ? { ...r, status, order: data.orderName || null, label } : r)),
+        );
+      }
       if (!isBulk && mySeq === seq.current) {
         setV(
-          status === "notfound" ? "notfound" : "ok",
+          // The panel's colour IS the instruction: green means put it with the
+          // stock, amber and red mean take it off the pile. A refusal that
+          // paints green tells the bench the opposite of what it means.
+          data.result === "duplicate" || data.result === "blocked"
+            ? data.result
+            : status === "notfound"
+              ? "notfound"
+              : "ok",
           verdictLabel(data),
           row.awb,
           data.message || "",
         );
-        play(status === "notfound" ? "notfound" : status === "check" ? "check" : "ok");
+        play(
+          data.result === "duplicate" || data.result === "blocked"
+            ? data.result
+            : status === "notfound"
+              ? "notfound"
+              : status === "check"
+                ? "check"
+                : "ok",
+        );
+        // Stop the bench, exactly as a locally-seen duplicate does. Only the
+        // server knows a packet scanned in an earlier session, and that is no
+        // less a reason to take it off the pile.
+        if (data.result === "duplicate" || data.result === "blocked") {
+          setRefused((n) => n + 1);
+          openModal(
+            data.result,
+            data.result === "blocked" ? "STOP" : "DUPLICATE",
+            row.awb,
+            data.message || "",
+          );
+        }
       }
       return { result: data.result as string, label, order: (data.orderName || null) as string | null };
     } catch {
@@ -370,6 +403,19 @@ export function ScanPad({
         isBulk,
       );
     }
+    // A parcel booked in on an earlier session, answered from the preloaded
+    // set. This was only ever consulted by the paste box, so a gun scan paid a
+    // round trip to be told what the page already knew — and the verdict
+    // arrived a second later instead of on the trigger pull.
+    if (scannedSet.current.has(code)) {
+      return refuse(
+        "duplicate",
+        code,
+        "Already scanned in an earlier session. Take this packet off the pile.",
+        isBulk,
+      );
+    }
+
     // Answered locally, so the commonest rejection costs no network at all.
     if (kind === "dispatch" && dispatchedSet.current.has(code)) {
       return refuse(
@@ -875,6 +921,10 @@ function RowView({ r, withTime, onRetry }: { r: Row; withTime?: boolean; onRetry
 
 /** The big word on the verdict panel. */
 function verdictLabel(d: any): string {
+  // A refusal is named as one. Reading the kind underneath it put "RTO" in
+  // green on a packet that must come off the pile — the opposite instruction.
+  if (d.result === "duplicate") return "DUPLICATE";
+  if (d.result === "blocked") return "STOP";
   if (d.result === "not-found") return "RECORDED";
   const kind = d.kind === "customer-return" ? "CUSTOMER RETURN" : d.kind === "rto" ? "RTO" : "OK";
   return d.confident === false ? `${kind} — CHECK` : kind;
