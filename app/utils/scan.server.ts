@@ -277,10 +277,15 @@ export async function recordScanBulk(
 async function orderFromCarrierRef(shop: string, ref: string): Promise<string> {
   const clean = String(ref || "").trim();
   if (!clean) return "";
-  // "R1790086147-232696" — the order is the tail; a forward shipment carries
-  // the bare order number, so both are tried.
-  const tail = clean.includes("-") ? clean.split("-").pop()! : "";
-  const tries = [clean, `#${clean}`, ...(tail ? [tail, `#${tail}`] : [])];
+  // The order number can be on either side of a separator, because the two
+  // ways a pickup gets booked write it differently:
+  //   "R1790086147-232696"  automated, carrier's id first
+  //   "228597-R"            booked by hand, order first
+  // So every digit run of order length is a candidate, longest first — an
+  // order number is 5-7 digits and a carrier id is far longer.
+  const parts = clean.match(/\d{5,7}/g) || [];
+  const tries = [clean, `#${clean}`];
+  for (const n of parts) tries.push(n, `#${n}`);
   const hit = await prisma.orderFinancials.findFirst({
     where: { shop, orderName: { in: tries } },
     select: { orderName: true },

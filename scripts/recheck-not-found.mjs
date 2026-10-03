@@ -227,9 +227,12 @@ for (const ev of rows) {
       // "R1790086147-232696", where 232696 is the order. Comparing the whole
       // string never matches, so try the tail after the last dash as well as
       // the reference itself.
+      // The order can be on either side of a separator: "R1790086147-232696"
+      // when the carrier booked it, "228597-R" when someone booked it by hand.
+      // Every digit run of order length is a candidate.
       const ref = carrier.orderRef;
-      const tail = ref.includes("-") ? ref.split("-").pop() : "";
-      const tries = [ref, `#${ref}`, ...(tail ? [tail, `#${tail}`] : [])];
+      const tries = [ref, `#${ref}`];
+      for (const n of ref.match(/\d{5,7}/g) || []) tries.push(n, `#${n}`);
       const hit = await prisma.orderFinancials.findFirst({
         where: { shop: SHOP, orderName: { in: tries } },
         select: { orderName: true },
