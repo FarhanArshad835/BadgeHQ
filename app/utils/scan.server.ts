@@ -71,7 +71,7 @@ export async function recordScan(
   shop: string,
   requested: ScanKind | "inbound",
   rawAwb: string,
-  opts: { note?: string; force?: boolean; session?: string } = {},
+  opts: { note?: string; force?: boolean; session?: string; bulk?: boolean } = {},
 ): Promise<ScanOutcome> {
   const awb = normaliseAwb(rawAwb);
   // "inbound" means the operator scanned a returning parcel without saying
@@ -80,7 +80,7 @@ export async function recordScan(
   let kind: ScanKind = requested === "inbound" ? "rto" : requested;
   let detected: Awaited<ReturnType<typeof detectInbound>> | null = null;
   if (requested === "inbound" && awb.length >= 6) {
-    detected = await detectInbound(shop, awb);
+    detected = await detectInbound(shop, awb, !opts.bulk);
     kind = detected.kind;
     // Detection could not reach ReturnHQ, so we do not know what this parcel
     // is. Writing it now would store a guess that the unique constraint then
@@ -261,7 +261,7 @@ export async function recordScanBulk(
   const results: ScanOutcome[] = [];
   const counts: Record<string, number> = {};
   for (const awb of work) {
-    const outcome = await recordScan(shop, requested, awb, { session });
+    const outcome = await recordScan(shop, requested, awb, { session, bulk: true });
     results.push(outcome);
     counts[outcome.result] = (counts[outcome.result] || 0) + 1;
   }
@@ -315,7 +315,7 @@ async function returnTypeForOrder(orderName: string): Promise<string> {
  * A scan must never wait on a third party that is having a bad day, so this is
  * capped well below the time an operator would notice.
  */
-async function trackCourier(awb: string) {
+async function trackCourier(awb: string, budgetMs = 4000) {
   try {
     const app = await getPnlApp();
     if (!app.shiprocketEmail && !app.delhiveryApiKey && !app.shadowfaxApiToken) return null;
@@ -328,7 +328,7 @@ async function trackCourier(awb: string) {
         delhiveryApiKey: app.delhiveryApiKey,
         shadowfaxApiToken: app.shadowfaxApiToken,
       }),
-      new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000)),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), budgetMs)),
     ]);
   } catch {
     return null;
@@ -345,6 +345,10 @@ async function trackCourier(awb: string) {
 export async function detectInbound(
   shop: string,
   awb: string,
+  /** False for a pasted list: five scans share one request, and three carrier
+   *  lookups each would blow the function's time budget. The list still
+   *  records; the recheck script resolves what the carriers would have. */
+  askCarrier = true,
 ): Promise<{
   kind: InboundKind;
   confident: boolean;
@@ -402,7 +406,7 @@ export async function detectInbound(
     // step that leaves our network, so it runs last and only when nothing else
     // has answered — a few hundred milliseconds on a parcel we would otherwise
     // have filed under a guess is worth it.
-    const carrier = await trackCourier(awb);
+    const carrier = askCarrier ? await trackCourier(awb) : null;
     if (carrier) {
       // The carrier hands back the reference we gave it at booking. A reverse
       // pickup joins the carrier's own id to ours — "R1790086147-232696" —

@@ -225,12 +225,26 @@ export function ScanPad({
       // plain POST to the path is a DOCUMENT request, and Remix answers it with
       // a full HTML page that res.json() then chokes on — reporting NOT SAVED
       // for a scan that had in fact been recorded.
-      const res = await fetch(window.location.pathname + ".data", {
+      // Retried once on a server-side failure. A scan can wait on up to three
+      // carrier APIs, so a single slow one is a blip rather than a real fault
+      // — and making the operator re-scan a packet for a blip is how a bench
+      // loses trust in the panel. A 401 is not retried: the session is gone
+      // and a second attempt fails the same way.
+      let res = await fetch(window.location.pathname + ".data", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ awb: row.awb, kind }),
         credentials: "same-origin",
       });
+      if (res.status >= 500) {
+        await new Promise((r) => setTimeout(r, 600));
+        res = await fetch(window.location.pathname + ".data", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ awb: row.awb, kind }),
+          credentials: "same-origin",
+        });
+      }
       if (res.status === 401) throw new Error("unauthorized");
       if (!res.ok) throw new Error(String(res.status));
       const data = decodeTurboStream(await res.text());
@@ -307,6 +321,9 @@ export function ScanPad({
     seq.current++;
     let done = 0;
     const results: Array<{ awb: string; result: string; label: string; order: string | null }> = [];
+    // Failures are collected, not fatal: the list finishes and these are
+    // offered as a retry.
+    const retryLater: string[] = [];
     setBulk({ total: codes.length, done: 0, running: true, stopped: false, retry: [], results: [] });
     setV("checking", "Recording list", "", `${codes.length} AWBs from the paste box, in chunks of 5.`);
 
@@ -317,32 +334,33 @@ export function ScanPad({
       done += chunk.length;
       setBulk({ total: codes.length, done, running: true, stopped: false, retry: [], results: [...results] });
 
-      // Stop on a failure rather than firing the rest at a dead connection.
-      if (outs.some((o) => o && o.result === "error")) {
-        const retry = chunk.filter((c, j) => outs[j] && outs[j]!.result === "error").concat(codes.slice(i + 5));
-        setBulk({ total: codes.length, done, running: false, stopped: true, retry, results: [...results] });
-        const saved = results.filter((r) => ["ok", "not-found"].includes(r.result)).length;
-        setV(
-          "error",
-          "NOT SAVED",
-          `${saved} of ${codes.length} saved`,
-          `Connection dropped. ${retry.length} AWBs still to record — use Retry in the paste box.`,
-        );
-        play("error");
-        return;
-      }
+      // Carry on past a failed chunk: its AWBs are collected for the retry
+      // button, but the rest of the list still records. Stopping on the first
+      // error made one slow carrier call abandon a hundred good scans.
+      const failed = chunk.filter((c, j) => outs[j] && outs[j]!.result === "error");
+      if (failed.length) retryLater.push(...failed);
+
     }
 
     const saved = results.filter((r) => ["ok", "not-found"].includes(r.result)).length;
-    setBulk({ total: codes.length, done, running: false, stopped: false, retry: [], results });
+    setBulk({
+      total: codes.length,
+      done,
+      running: false,
+      stopped: retryLater.length > 0,
+      retry: retryLater,
+      results,
+    });
     setV(
-      "ok",
-      "LIST RECORDED",
+      retryLater.length ? "error" : "ok",
+      retryLater.length ? "SOME NOT SAVED" : "LIST RECORDED",
       `${saved} of ${codes.length} saved`,
-      "Refused and unmatched AWBs are listed in the paste box results.",
+      retryLater.length
+        ? `${retryLater.length} did not save. Use Retry in the paste box — the rest are recorded.`
+        : "Refused and unmatched AWBs are listed in the paste box results.",
     );
-    play("ok");
-    setText("");
+    play(retryLater.length ? "error" : "ok");
+    if (!retryLater.length) setText("");
   }
 
   function newSession() {
