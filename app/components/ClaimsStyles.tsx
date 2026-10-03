@@ -468,4 +468,41 @@ const CSS = String.raw`
     .claims-app .filters input[type="search"] { grid-column: 1 / -1; }
     .claims-app .filters a.btn-primary { grid-column: 1 / -1; justify-content: center; }
   }
+  /* ---------- Press feedback ---------- */
+  /* Every control answered a tap with nothing: no press state, no cursor
+     change, no busy state. On a bench that reads as a broken button, and the
+     operator presses again. */
+  .claims-app button, .claims-app .btn-primary, .claims-app .btn-ghost,
+  .claims-app .chip, .claims-app .act, .claims-app .sp-bulk-toggle {
+    transition: transform 60ms ease, filter 60ms ease, opacity 60ms ease;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+  .claims-app button:not(:disabled):active,
+  .claims-app .btn-primary:not(:disabled):active,
+  .claims-app .btn-ghost:not(:disabled):active,
+  .claims-app .chip:active, .claims-app .act:active {
+    transform: translateY(1px) scale(0.985);
+    filter: brightness(0.93);
+  }
+  .claims-app button:disabled { cursor: default; opacity: .5; }
+  .claims-app a.btn-primary:active, .claims-app a.btn-ghost:active {
+    transform: translateY(1px) scale(0.985); filter: brightness(0.93);
+  }
+
+  /* A control doing work says so, rather than looking merely disabled. */
+  .claims-app .btn-primary[data-busy="true"] {
+    position: relative; color: transparent;
+  }
+  .claims-app .btn-primary[data-busy="true"]::after {
+    content: ""; position: absolute; inset: 0; margin: auto;
+    width: 15px; height: 15px; border-radius: 50%;
+    border: 2px solid rgba(255,255,255,.35); border-top-color: #fff;
+    animation: sp-spin .6s linear infinite;
+  }
+  @keyframes sp-spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) {
+    .claims-app .btn-primary[data-busy="true"]::after { animation: none; }
+    .claims-app button:active { transform: none; }
+  }
 `;

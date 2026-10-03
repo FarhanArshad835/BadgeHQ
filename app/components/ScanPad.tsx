@@ -359,23 +359,45 @@ export function ScanPad({
    * be told what we already know — on a 1,200-row paste that is most of the
    * work, and the time is paid by an operator watching a progress bar.
    */
-  function dedupe(codes: string[]): string[] {
+  function dedupe(codes: string[]): { list: string[]; repeated: number; known: number } {
     const seen = new Set<string>();
-    const out: string[] = [];
+    const list: string[] = [];
     let repeated = 0;
     let known = 0;
     for (const a of codes) {
       if (seen.has(a)) { repeated++; continue; }
       seen.add(a);
       if (scannedSet.current.has(a)) { known++; continue; }
-      out.push(a);
+      list.push(a);
     }
     setDropped({ repeated, known });
-    return out;
+    // Returned as well as stored: setState does not apply until the next
+    // render, so runBulk reading `dropped` in this same tick would see the
+    // PREVIOUS paste's counts — zero on the first press, which is exactly the
+    // case that needs reporting.
+    return { list, repeated, known };
   }
 
-  async function runBulk(codes: string[]) {
-    if (!codes.length || bulk?.running) return;
+  async function runBulk(codes: string[], skippedCounts = { repeated: 0, known: 0 }) {
+    if (bulk?.running) return;
+
+    // Everything in the list was dropped as already-recorded. That is an
+    // answer, not a no-op: a button that does nothing when pressed reads as
+    // broken, and the operator has no way to tell the difference.
+    if (!codes.length) {
+      const skipped = skippedCounts.repeated + skippedCounts.known;
+      setBulk({ total: 0, done: 0, running: false, stopped: false, retry: [], results: [] });
+      setV(
+        "ok",
+        "ALREADY RECORDED",
+        "",
+        skipped
+          ? `All ${skipped.toLocaleString("en-IN")} were already on record — ${skippedCounts.known.toLocaleString("en-IN")} scanned before, ${skippedCounts.repeated.toLocaleString("en-IN")} repeated in the list. Nothing to send.`
+          : "Nothing in the box to record.",
+      );
+      play("ok");
+      return;
+    }
     seq.current++;
     let done = 0;
     const results: Array<{ awb: string; result: string; label: string; order: string | null }> = [];
@@ -456,6 +478,18 @@ export function ScanPad({
   const saving = rows.filter((r) => r.status === "saving").length;
   const bad = rows.filter((r) => r.status === "error").length;
   const listCount = parseList(text).length;
+  // What a press would actually send, so the button never promises work it
+  // will then skip.
+  const newCount = (() => {
+    const seen = new Set<string>();
+    let n = 0;
+    for (const a of parseList(text)) {
+      if (seen.has(a) || scannedSet.current.has(a)) continue;
+      seen.add(a);
+      n++;
+    }
+    return n;
+  })();
 
   return (
     <div className="sp-view">
@@ -586,10 +620,16 @@ export function ScanPad({
           <div className="sp-bulk-actions">
             <button
               className="btn-primary"
+              data-busy={bulk?.running ? "true" : undefined}
               disabled={!listCount || Boolean(bulk?.running)}
-              onClick={() => void runBulk(dedupe(parseList(text)))}
+              onClick={() => {
+                const { list, repeated, known } = dedupe(parseList(text));
+                void runBulk(list, { repeated, known });
+              }}
             >
-              Record {listCount.toLocaleString("en-IN")} AWB{listCount === 1 ? "" : "s"}
+              {newCount === 0 && listCount > 0
+                ? "All already recorded"
+                : `Record ${newCount.toLocaleString("en-IN")} AWB${newCount === 1 ? "" : "s"}`}
             </button>
             {bulk && (
               <div className="sp-progress">

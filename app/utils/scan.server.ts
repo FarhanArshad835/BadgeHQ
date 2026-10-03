@@ -907,6 +907,57 @@ export async function claimStatuses(
   return out;
 }
 
+/**
+ * File a parcel the data could not classify, by hand.
+ *
+ * A CHECK verdict means neither our tables nor the carrier could say what the
+ * parcel is, so the operator decides at the bench. That decision has to move
+ * the row: kind is part of the unique key, so it cannot be updated in place.
+ *
+ * "hold" keeps the parcel out of both buckets rather than forcing a guess into
+ * one — an unfiled parcel is recoverable, a wrongly filed one is protected by
+ * the same unique key that would refuse to correct it.
+ */
+export async function resolveScan(
+  shop: string,
+  awb: string,
+  from: ScanKind,
+  to: ScanKind | "hold",
+  orderName = "",
+): Promise<void> {
+  const clean = normaliseAwb(awb);
+  if (!clean) return;
+  const existing = await prisma.scanEvent.findUnique({
+    where: { shop_kind_awb: { shop, kind: from, awb: clean } },
+  });
+  if (!existing) return;
+
+  const note = to === "hold" ? "held for review" : `filed by hand from ${from}`;
+  if (to === "hold" || to === from) {
+    await prisma.scanEvent.update({ where: { id: existing.id }, data: { note } });
+    return;
+  }
+
+  // scannedAt is carried over: it records when a physical parcel was handled
+  // at the bench, and rewriting it would falsify that log.
+  await prisma.$transaction([
+    prisma.scanEvent.delete({ where: { id: existing.id } }),
+    prisma.scanEvent.upsert({
+      where: { shop_kind_awb: { shop, kind: to, awb: clean } },
+      create: {
+        shop,
+        kind: to,
+        awb: clean,
+        orderName: orderName || existing.orderName,
+        result: existing.result,
+        note,
+        scannedAt: existing.scannedAt,
+      },
+      update: { orderName: orderName || existing.orderName, note },
+    }),
+  ]);
+}
+
 /** Recent scans for the history page and the session list. */
 export async function recentScans(
   shop: string,
