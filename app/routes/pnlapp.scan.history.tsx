@@ -14,6 +14,7 @@ import {
   recentScans,
   scanCountsToday,
   scanSearchWhere,
+  scanDateWhere,
   type ScanKind,
   type ScanResult,
 } from "../utils/scan.server";
@@ -30,7 +31,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (!isAuthed(request, "scan")) return redirect("/pnl-app/scan/login");
   const app = await getPnlApp();
   const shop = app.shopDomain;
-  if (!shop) return json({ rows: [], counts: {}, total: 0, kind: "", result: "", search: "" });
+  if (!shop)
+    return json({ rows: [], counts: {}, total: 0, kind: "", result: "", search: "", from: "", to: "" });
 
   const url = new URL(request.url);
   const raw = url.searchParams.get("kind") || "";
@@ -41,8 +43,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     : null) as ScanResult | null;
 
   const search = (url.searchParams.get("q") || "").trim();
+  const from = (url.searchParams.get("from") || "").trim();
+  const to = (url.searchParams.get("to") || "").trim();
 
-  const rows = await recentScans(shop, kind, 500, result, search);
+  const rows = await recentScans(shop, kind, 500, result, search, from, to);
   // Counted separately: the list is capped at 500, so rows.length would
   // silently understate a filter that matches more than that.
   const total = await prisma.scanEvent.count({
@@ -51,6 +55,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       ...(kind ? { kind } : {}),
       ...(result ? { result } : {}),
       ...scanSearchWhere(search),
+      ...scanDateWhere(from, to),
     },
   });
 
@@ -84,6 +89,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     counts,
     total,
     search,
+    from,
+    to,
     kind: kind || "",
     result: result || "",
     rows: rows.map((r) => ({
@@ -119,9 +126,32 @@ export default function ScanHistory() {
     kind: string;
     result: string;
     search: string;
+    from: string;
+    to: string;
   };
   const [params, setParams] = useSearchParams();
   const kind = params.get("kind") || "";
+
+  /**
+   * The IST day, as YYYY-MM-DD.
+   *
+   * Computed in IST, not the browser's zone: a phone set to another timezone
+   * would otherwise ask for a different day than the one the operator means.
+   */
+  const istDay = (daysAgo = 0) => {
+    const ist = new Date(Date.now() + 5.5 * 60 * 60 * 1000 - daysAgo * 86400000);
+    return ist.toISOString().slice(0, 10);
+  };
+
+  const RANGES: Array<{ label: string; from: string; to: string }> = [
+    { label: "All dates", from: "", to: "" },
+    { label: "Today", from: istDay(0), to: istDay(0) },
+    { label: "Yesterday", from: istDay(1), to: istDay(1) },
+    { label: "Last 7 days", from: istDay(6), to: istDay(0) },
+    { label: "Last 30 days", from: istDay(29), to: istDay(0) },
+  ];
+  const activeRange =
+    RANGES.find((r) => r.from === d.from && r.to === d.to)?.label ?? "Custom";
 
   /** Change one filter, keep the rest. Blank values drop out of the URL. */
   const setFilters = (next: Record<string, string>) => {
@@ -129,6 +159,8 @@ export default function ScanHistory() {
       ...(d.kind ? { kind: d.kind } : {}),
       ...(d.result ? { result: d.result } : {}),
       ...(d.search ? { q: d.search } : {}),
+      ...(d.from ? { from: d.from } : {}),
+      ...(d.to ? { to: d.to } : {}),
       ...next,
     };
     for (const k of Object.keys(merged)) if (!merged[k].trim()) delete merged[k];
@@ -171,6 +203,38 @@ export default function ScanHistory() {
               }}
             />
             <select
+              aria-label="Date range"
+              value={activeRange}
+              onChange={(e) => {
+                const r = RANGES.find((x) => x.label === e.target.value);
+                // "Custom" is not selectable: it only appears when the date
+                // inputs hold a range none of the presets covers.
+                if (r) setFilters({ from: r.from, to: r.to });
+              }}
+            >
+              {RANGES.map((r) => (
+                <option key={r.label} value={r.label}>
+                  {r.label}
+                </option>
+              ))}
+              {activeRange === "Custom" && <option value="Custom">Custom</option>}
+            </select>
+            <input
+              type="date"
+              aria-label="From date"
+              value={d.from}
+              max={d.to || istDay(0)}
+              onChange={(e) => setFilters({ from: e.target.value })}
+            />
+            <input
+              type="date"
+              aria-label="To date"
+              value={d.to}
+              min={d.from}
+              max={istDay(0)}
+              onChange={(e) => setFilters({ to: e.target.value })}
+            />
+            <select
               aria-label="Type"
               value={kind}
               onChange={(e) => setFilters({ kind: e.target.value })}
@@ -195,7 +259,7 @@ export default function ScanHistory() {
             </select>
             <a
               className="btn-primary"
-              href={`/pnl-app/scan/history?format=csv${d.kind ? `&kind=${d.kind}` : ""}${d.result ? `&result=${d.result}` : ""}${d.search ? `&q=${encodeURIComponent(d.search)}` : ""}`}
+              href={`/pnl-app/scan/history?format=csv${d.kind ? `&kind=${d.kind}` : ""}${d.result ? `&result=${d.result}` : ""}${d.search ? `&q=${encodeURIComponent(d.search)}` : ""}${d.from ? `&from=${d.from}` : ""}${d.to ? `&to=${d.to}` : ""}`}
             >
               Export CSV
             </a>

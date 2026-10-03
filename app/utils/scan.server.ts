@@ -899,12 +899,47 @@ export async function recentScans(
    *  capped, so filtering the loaded rows would search a slice and call it a
    *  search — the row you want is usually the one not loaded. */
   search = "",
+  /** Inclusive IST day range, "YYYY-MM-DD". Either end may be blank. */
+  from = "",
+  to = "",
 ) {
   return prisma.scanEvent.findMany({
-    where: { shop, ...(kind ? { kind } : {}), ...(result ? { result } : {}), ...scanSearchWhere(search) },
+    where: {
+      shop,
+      ...(kind ? { kind } : {}),
+      ...(result ? { result } : {}),
+      ...scanSearchWhere(search),
+      ...scanDateWhere(from, to),
+    },
     orderBy: { scannedAt: "desc" },
     take: limit,
   });
+}
+
+/**
+ * An inclusive day range in IST, as a scannedAt filter.
+ *
+ * The dates a person picks are IST days, but scannedAt is stored UTC — so the
+ * bounds are shifted rather than compared directly. Without that, "1 Oct" would
+ * silently miss everything scanned before 5:30am and include the small hours of
+ * the 2nd. The "to" day is taken to the END of that day, since someone choosing
+ * a single date means the whole of it.
+ */
+export function scanDateWhere(from: string, to: string) {
+  const IST = 5.5 * 60 * 60 * 1000;
+  const day = (v: string) => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(v || "").trim());
+    return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : null;
+  };
+  const a = day(from);
+  const b = day(to);
+  if (a == null && b == null) return {};
+  return {
+    scannedAt: {
+      ...(a != null ? { gte: new Date(a - IST) } : {}),
+      ...(b != null ? { lt: new Date(b + 86400000 - IST) } : {}),
+    },
+  };
 }
 
 /** Shared by the list and its count, so the two can never disagree. */

@@ -456,4 +456,16 @@ const CSS = String.raw`
     .claims-app .filters { grid-template-columns: 1fr 1fr auto; }
     .claims-app .filters input[type="search"] { grid-column: 1 / -1; width: 100%; }
   }
+  /* History carries more filters than claims: a search box, a date range, two
+     date inputs and two selects. They wrap rather than squeeze. */
+  .claims-app .filters { flex-wrap: wrap; }
+  .claims-app .filters input[type="date"] {
+    height: 32px; padding: 0 9px; background: var(--surface);
+    border: 1px solid var(--line); border-radius: 7px; color-scheme: light;
+  }
+  @media (max-width: 640px) {
+    .claims-app .filters { grid-template-columns: 1fr 1fr; }
+    .claims-app .filters input[type="search"] { grid-column: 1 / -1; }
+    .claims-app .filters a.btn-primary { grid-column: 1 / -1; justify-content: center; }
+  }
 `;
