@@ -78,6 +78,13 @@ function play(name: string) {
 }
 
 const pad2 = (n: number) => String(n).padStart(2, "0");
+
+/** "3 Oct 14:32" — the way a bench refers to a batch, not an opaque id. */
+function newSessionName(): string {
+  const d = new Date();
+  const month = d.toLocaleDateString("en-GB", { month: "short" });
+  return `${d.getDate()} ${month} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
 const fmtT = (d: Date) => `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 const fmtD = (d: Date) =>
   d.toLocaleDateString("en-GB", { day: "numeric", month: "short" }) + " " + fmtT(d);
@@ -98,7 +105,6 @@ export function ScanPad({
   kind,
   title,
   hint,
-  help,
   dispatched,
   alreadyScanned,
   toolbar,
@@ -106,8 +112,6 @@ export function ScanPad({
   kind: ScanKind;
   title: string;
   hint: string;
-  /** The explainer under the page. Markup, matching the prototype. */
-  help: React.ReactNode;
   /** Preloaded already-dispatched AWBs. Empty for non-dispatch scanners. */
   dispatched?: string[];
   /** AWBs an earlier session already booked in, so a pasted list can drop them
@@ -137,6 +141,16 @@ export function ScanPad({
     results: Array<{ awb: string; result: string; label: string; order: string | null }>;
   } | null>(null);
   const [kbOn, setKbOn] = useState(false);
+
+  /**
+   * The batch every scan is filed under.
+   *
+   * Created when the page loads rather than on the first scan: a session that
+   * only exists once something is in it cannot be named, reopened or reported
+   * on, and the operator has nothing to start over FROM. Named by the time it
+   * opened, which is how a bench refers to one anyway ("the 2pm trolley").
+   */
+  const [session, setSession] = useState(() => newSessionName());
   // What the last paste skipped without asking the server.
   const [dropped, setDropped] = useState({ repeated: 0, known: 0 });
 
@@ -247,7 +261,7 @@ export function ScanPad({
       let res = await fetch(window.location.pathname + ".data", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ awb: row.awb, kind }),
+        body: JSON.stringify({ awb: row.awb, kind, session }),
         credentials: "same-origin",
       });
       if (res.status >= 500) {
@@ -255,7 +269,7 @@ export function ScanPad({
         res = await fetch(window.location.pathname + ".data", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ awb: row.awb, kind }),
+          body: JSON.stringify({ awb: row.awb, kind, session }),
           credentials: "same-origin",
         });
       }
@@ -470,6 +484,9 @@ export function ScanPad({
     setRefused(0);
     setBulk(null);
     seq.current++;
+    // A fresh name, so the scans that follow are a separate batch on the
+    // server as well as on screen.
+    setSession(newSessionName());
     setV("idle", "Ready", "", hint);
     setTimeout(refocus, 0);
   }
@@ -501,14 +518,20 @@ export function ScanPad({
           <span className="sp-count">
             <b>{scanned.toLocaleString("en-IN")}</b>scanned this session
           </span>
+          {/* Named, so "this session" is a thing the operator can point at and
+              a later report can group by, rather than invisible state. */}
+          <span className="sp-session" title="This batch's name">
+            {session}
+          </span>
           {refused > 0 && <span className="sp-pill refused">{refused} refused</span>}
           {saving > 0 && <span className="sp-pill saving">{saving} saving…</span>}
           {bad > 0 && <span className="sp-pill notsaved">{bad} NOT SAVED</span>}
-          {rows.length > 0 && (
-            <button className="btn-ghost" onClick={newSession}>
-              New session
-            </button>
-          )}
+          {/* Always offered, not only once there are rows: an operator who has
+              just walked up to a bench someone else used needs to start clean
+              BEFORE scanning, which is exactly when the list is empty. */}
+          <button className="btn-ghost" onClick={newSession}>
+            New session
+          </button>
         </div>
       </div>
 
@@ -683,8 +706,6 @@ export function ScanPad({
           )}
         </div>
       </div>
-
-      <div className="sp-help">{help}</div>
 
       {/* A refusal stops the bench until it is dismissed. The packet has to come
           off the pile, and a warning that clears itself would be buried by the

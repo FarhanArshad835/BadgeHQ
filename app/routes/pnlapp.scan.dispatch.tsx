@@ -101,12 +101,6 @@ export default function DispatchScanner() {
               </button>
             </div>
           }
-          help={
-            <>
-              Every scan marks the packet dispatched. A packet on the already-dispatched list shows{" "}
-              <b>STOP</b> at once, without waiting for the network, so nothing goes out twice.
-            </>
-          }
         />
       </div>
     </div>

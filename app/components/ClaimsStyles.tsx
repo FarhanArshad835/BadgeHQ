@@ -505,4 +505,11 @@ const CSS = String.raw`
     .claims-app .btn-primary[data-busy="true"]::after { animation: none; }
     .claims-app button:active { transform: none; }
   }
+  /* The session's name, beside the tally it belongs to. Quiet: it identifies
+     the batch rather than competing with the count. */
+  .claims-app .sp-session {
+    font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums;
+    padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px;
+    white-space: nowrap;
+  }
 `;

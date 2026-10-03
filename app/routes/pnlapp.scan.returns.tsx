@@ -65,13 +65,6 @@ export default function ReturnsScanner() {
           title="Inbound parcels"
           hint="Scan any parcel coming back. RTO or customer return is worked out for you."
           alreadyScanned={d.alreadyScanned}
-          help={
-            <>
-              A parcel the courier returned undelivered is an <b>RTO</b>. One the customer sent back
-              with a ReturnHQ request is a <b>customer return</b>. When the data can't tell, the panel
-              says <b>CHECK</b> and gives the reason, so nothing is filed under a guess.
-            </>
-          }
         />
       </div>
     </div>
