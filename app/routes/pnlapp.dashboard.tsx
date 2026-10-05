@@ -133,13 +133,34 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   // falls back to the default rather than rendering a panel with no columns,
   // which would hide the picker and leave no way to choose again.
   const picked = months.filter((m) => chosenMonths.includes(m)).slice(0, MAX_COMPARE);
-  const compareMonths = !compareOn ? [] : picked.length ? picked : months.slice(0, 6);
+  // The default is the six most recent months whose profit is actually
+  // settled. A pending month has a cost nobody knows yet, so its P&L row reads
+  // "Pending" and every per-pair figure beside it is blank — a column that
+  // takes up width and answers nothing, while pushing the months that CAN be
+  // compared off the side.
+  //
+  // Which months those are is only known after computing them, so the
+  // candidates are widened and then filtered. They compute in parallel and
+  // most are warm, so the cost is latency, not six extra round trips.
+  //
+  // An explicit ?months= is never filtered: asking for a month by name is
+  // asking to see it, pending or not.
+  const candidateMonths = !compareOn ? [] : picked.length ? picked : months.slice(0, MAX_COMPARE);
 
-  const [report, prevReport, compareReports] = await Promise.all([
+  const [report, prevReport, candidateReports] = await Promise.all([
     shop ? computeMonth(shop, month) : null,
     shop && prevMonth ? computeMonth(shop, prevMonth) : null,
-    shop && compareMonths.length ? Promise.all(compareMonths.map((m) => computeMonth(shop, m))) : [],
+    shop && candidateMonths.length ? Promise.all(candidateMonths.map((m) => computeMonth(shop, m))) : [],
   ]);
+
+  // Settled months only, unless they were named. Falls back to the plain six
+  // when nothing has settled yet — an empty panel would hide the picker and
+  // leave no way to choose a month by hand.
+  const settled = candidateReports.filter((c) => c.publishStatus !== "pending");
+  const compareReports = picked.length
+    ? candidateReports
+    : (settled.length ? settled : candidateReports).slice(0, 6);
+  const compareMonths = compareReports.map((c) => c.month);
   // Delivered items missing cost-per-item (what keeps COGS incomplete). Cap the
   // list so the loader stays light; show a total count alongside.
   const unmatchedAll = shop ? await unmatchedCostItems(shop, month) : [];
