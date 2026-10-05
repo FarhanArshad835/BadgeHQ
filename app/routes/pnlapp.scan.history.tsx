@@ -7,6 +7,7 @@
  */
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
+import { useState } from "react";
 import { useLoaderData, useSearchParams } from "@remix-run/react";
 import prisma from "../db.server";
 import { getPnlApp, isAuthed } from "../utils/pnl-app.server";
@@ -162,6 +163,7 @@ export default function ScanHistory() {
   // Only the setter: every filter's current value comes from the loader, so
   // the page and the URL cannot disagree about what is being shown.
   const [, setParams] = useSearchParams();
+  const [exporting, setExporting] = useState(false);
 
   /**
    * The IST day, as YYYY-MM-DD.
@@ -302,11 +304,22 @@ export default function ScanHistory() {
               max={istDay(0)}
               onChange={(e) => setFilters({ to: e.target.value })}
             />
+            {/* The browser shows nothing at all between the click and the
+                file arriving, and this one is a real server round trip over
+                every scan, not just the 500 on screen. The spinner is cleared
+                on a timer rather than on completion: a download never fires a
+                load event on the page that started it, so there is no signal
+                to wait for — and leaving it spinning for ever would be worse
+                than clearing it a moment early. */}
             <a
-              className="btn-primary"
+              className={"btn-primary" + (exporting ? " working" : "")}
               href={`/pnl-app/scan/history?format=csv${d.kind ? `&kind=${d.kind}` : ""}${d.result ? `&result=${d.result}` : ""}${d.search ? `&q=${encodeURIComponent(d.search)}` : ""}${d.from ? `&from=${d.from}` : ""}${d.to ? `&to=${d.to}` : ""}${d.session ? `&session=${encodeURIComponent(d.session)}` : ""}`}
+              onClick={() => {
+                setExporting(true);
+                window.setTimeout(() => setExporting(false), 2500);
+              }}
             >
-              Export CSV
+              {exporting ? "Exporting" : "Export CSV"}
             </a>
           </div>
         </div>

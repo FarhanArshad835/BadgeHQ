@@ -753,4 +753,40 @@ const CSS = String.raw`
     .claims-app thead th.has-filter.filtered .th-in { border-color: var(--ink); }
     .claims-app thead th.has-filter .th-filter { width: 14px; height: 14px; }
   }
+
+  /* Press feedback.
+     Every button here responded only to hover, which a touch screen does not
+     have and which says nothing about whether a click registered. The press
+     has to be visible on the way DOWN, before any work starts — a button that
+     only changes once the work finishes reads as broken for however long the
+     work takes. */
+  .claims-app button:not(:disabled):active,
+  .claims-app .btn-primary:not(:disabled):active,
+  .claims-app .btn-ghost:not(:disabled):active,
+  .claims-app .chip:active,
+  .claims-app a.btn-primary:active {
+    transform: translateY(1px);
+  }
+  .claims-app .btn-primary:not(:disabled):active { background: #000; }
+  .claims-app .btn-ghost:not(:disabled):active { background: #ececec; }
+  .claims-app .chip:active { background: #ececec; }
+  .claims-app tbody tr:active { background: #f3f3f3; }
+
+  /* A button doing work says so, and stops taking clicks. The label is
+     swapped rather than hidden so the button keeps its width and the row
+     does not reflow mid-press. */
+  .claims-app .btn-primary.working,
+  .claims-app .btn-ghost.working {
+    opacity: .72; cursor: progress; transform: none;
+  }
+  .claims-app .working::after {
+    content: ""; display: inline-block; vertical-align: -1px;
+    width: 9px; height: 9px; margin-left: 7px;
+    border: 2px solid currentColor; border-right-color: transparent;
+    border-radius: 50%; animation: claims-spin .6s linear infinite;
+  }
+  @keyframes claims-spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) {
+    .claims-app .working::after { animation: none; opacity: .5; }
+  }
 `;

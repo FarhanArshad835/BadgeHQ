@@ -432,7 +432,35 @@ export default function Claims() {
     };
   }, [popOpen]);
 
+  /**
+   * Build the CSV and hand it to the browser.
+   *
+   * Nothing here touches the network — the rows are already loaded — but
+   * joining 13,000 of them into one string blocks the main thread for a second
+   * or so, and a blocked thread cannot repaint. So the button appeared dead
+   * for exactly as long as the work took, which is the worst possible moment
+   * for it to look dead.
+   *
+   * The state is set, then the work waits two frames. One is not enough:
+   * React commits on the first and the browser paints on the second, so
+   * starting the work after a single frame still blocks before anything
+   * reaches the screen.
+   */
+  const [exporting, setExporting] = useState(false);
+
   function exportCsv() {
+    if (exporting) return;
+    setExporting(true);
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      try {
+        buildCsv();
+      } finally {
+        setExporting(false);
+      }
+    }));
+  }
+
+  function buildCsv() {
     const list = selected.size ? rows.filter((r) => selected.has(r.awb)) : filtered;
     const head = ["Order", "AWB", "Type", "Carrier", "Marked delivered", "Days", "Stock cost", "Order value", "Next step"];
     const csv = [head]
@@ -614,8 +642,12 @@ export default function Claims() {
                 setPage(0);
               }}
             />
-            <button className="btn-primary" onClick={exportCsv}>
-              {selected.size ? `Export ${selected.size}` : "Export"}
+            <button
+              className={"btn-primary" + (exporting ? " working" : "")}
+              onClick={exportCsv}
+              disabled={exporting}
+            >
+              {exporting ? "Exporting" : selected.size ? `Export ${selected.size}` : "Export"}
             </button>
           </div>
         </div>
