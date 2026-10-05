@@ -221,6 +221,16 @@ export type DeliveredCogs = {
   deliveredPairs: number; // Σ qty on delivered orders
   matchRate: number; // lines with cost / delivered lines
   weightedAvgCostPerPairMinor: bigint | null; // Σ(cost×qty)/Σqty — the correct weighted figure
+  /**
+   * The stocking's share of the figures above — a SPLIT of COGS, never an
+   * addition to it. The giveaway carries its own cost-per-item in Shopify, so
+   * it is already inside cogsMinor; these say how much of it is stocking so
+   * the statement can show the two parts without charging either twice.
+   */
+  stockingCogsMinor: bigint; // ⊂ cogsMinor
+  stockingPairs: number; // ⊂ deliveredPairs
+  productCogsMinor: bigint | null; // cogsMinor − stockingCogsMinor
+  productPairs: number; // deliveredPairs − stockingPairs
 };
 
 /**
@@ -230,7 +240,12 @@ export type DeliveredCogs = {
  * rows. If any delivered line lacks a cost, cogsComplete=false; if the match
  * rate falls below 98% (spec Gate 3), cogsMinor is null (do not impute a guess).
  */
-export async function deliveredCogs(shop: string, month: string): Promise<DeliveredCogs> {
+export async function deliveredCogs(
+  shop: string,
+  month: string,
+  /** Product-title match for the free stocking, from Settings. Blank = no split. */
+  stockingMatch = "",
+): Promise<DeliveredCogs> {
   const { start, end } = monthWindowIst(month);
 
   // The delivered orders in the window.
@@ -240,22 +255,40 @@ export async function deliveredCogs(shop: string, month: string): Promise<Delive
   });
   const deliveredIds = delivered.map((d) => d.orderId);
   if (!deliveredIds.length) {
-    return { cogsMinor: 0n, cogsComplete: true, deliveredPairs: 0, matchRate: 1, weightedAvgCostPerPairMinor: null };
+    return {
+      cogsMinor: 0n,
+      cogsComplete: true,
+      deliveredPairs: 0,
+      matchRate: 1,
+      weightedAvgCostPerPairMinor: null,
+      stockingCogsMinor: 0n,
+      stockingPairs: 0,
+      productCogsMinor: 0n,
+      productPairs: 0,
+    };
   }
 
   const lines = await prisma.orderLineFinancials.findMany({
     where: { shop, orderId: { in: deliveredIds } },
-    select: { quantity: true, lineCogsMinor: true, lineCogsComplete: true },
+    select: { quantity: true, lineCogsMinor: true, lineCogsComplete: true, productTitle: true },
   });
 
+  const term = stockingMatch.trim().toLowerCase();
   let cogsMinor = 0n;
   let deliveredPairs = 0;
   let linesWithCost = 0;
   let costedQty = 0n;
+  let stockingCogsMinor = 0n;
+  let stockingPairs = 0;
   for (const l of lines) {
     deliveredPairs += l.quantity;
+    // Same match the stocking cost used, so the split and the old separate
+    // line can never disagree about which lines are stockings.
+    const isStocking = term !== "" && String(l.productTitle || "").toLowerCase().includes(term);
+    if (isStocking) stockingPairs += l.quantity;
     if (l.lineCogsComplete && l.lineCogsMinor != null) {
       cogsMinor += l.lineCogsMinor;
+      if (isStocking) stockingCogsMinor += l.lineCogsMinor;
       linesWithCost++;
       costedQty += BigInt(l.quantity);
     }
@@ -273,12 +306,19 @@ export async function deliveredCogs(shop: string, month: string): Promise<Delive
   // catalogue is. At 97% the shown COGS omits <=3% of lines, so profit reads a
   // touch high — acceptable for a dashboard, and flagged by the match rate.
   const MATCH_THRESHOLD = 0.97;
+  const known = matchRate >= MATCH_THRESHOLD;
   return {
-    cogsMinor: matchRate >= MATCH_THRESHOLD ? cogsMinor : null,
+    cogsMinor: known ? cogsMinor : null,
     cogsComplete,
     deliveredPairs,
     matchRate,
     weightedAvgCostPerPairMinor,
+    stockingCogsMinor,
+    stockingPairs,
+    // Tracks cogsMinor: unknown COGS makes the product share unknown too,
+    // rather than reporting a total that quietly omits the missing lines.
+    productCogsMinor: known ? cogsMinor - stockingCogsMinor : null,
+    productPairs: deliveredPairs - stockingPairs,
   };
 }
 
@@ -489,9 +529,13 @@ export type MonthlyPnl = {
   shopifyBillingMinor: bigint; // combined Shopify subscription + billing
   doubleclickFeeMinor: bigint;
   doubleclickSubMinor: bigint;
-  stockingMinor: bigint;
+  stockingMinor: bigint; // manual override only; the real spend is inside COGS
   stockingUnits: number; // free stocking units on delivered orders
   stockingSource: string; // "auto" (units × unit cost) | "manual" (entered)
+  /** The COGS line, split. These SUM to cogsMinor — neither adds to it. */
+  stockingCogsMinor: bigint;
+  productCogsMinor: bigint | null;
+  productPairs: number;
   // GST.
   gstOutputMinor: bigint;
   /** Taxable revenue and tax per GST slab, for the statement's breakdown. */
@@ -555,7 +599,7 @@ export async function computeMonth(shop: string, month: string): Promise<Monthly
   const app = await getPnlApp();
   const [rev, cogs, input] = await Promise.all([
     revenueAndDelivered(shop, month),
-    deliveredCogs(shop, month),
+    deliveredCogs(shop, month, app.stockingMatch),
     prisma.pnlMonthlyInput.findUnique({ where: { shop_month: { shop, month } } }),
   ]);
 
@@ -601,12 +645,22 @@ export async function computeMonth(shop: string, month: string): Promise<Monthly
   const shopifyBillingMinor = input?.shopifyBillingMinor ?? 0n;
   const doubleclickFeeMinor = input?.doubleclickFeeMinor ?? 0n;
   const doubleclickSubMinor = input?.doubleclickSubMinor ?? 0n;
-  // Stocking is counted from the delivered lines × the configured unit cost.
-  // A typed figure still wins, so a month can be corrected by hand.
-  const stockingUnits = await deliveredStockingUnits(shop, month, app.stockingMatch);
-  const autoStockingMinor = BigInt(stockingUnits) * app.stockingUnitCostMinor;
+  // The stocking was charged TWICE. Its lines carry a Rs 60 cost-per-item in
+  // Shopify, so they are already inside COGS; this then counted the same units
+  // and subtracted Rs 60 again as a separate cost — about Rs 1.25 lakh a month
+  // while the giveaway runs, understating profit by that much.
+  //
+  // It was right when written: stockings used to carry no cost at all and were
+  // invisible in the P&L, which is what this line existed to fix. They have
+  // carried a cost since, and this kept running.
+  //
+  // So it is no longer added. The spend is still shown, as a SPLIT of the COGS
+  // line (cogs.stockingCogsMinor) rather than an addition to it. A manual
+  // figure still wins: a month where the lines genuinely carry no cost can be
+  // corrected by hand, and that is the one case the old behaviour was for.
+  const stockingUnits = cogs.stockingPairs;
   const manualStockingMinor = input?.stockingMinor ?? 0n;
-  const stockingMinor = manualStockingMinor > 0n ? manualStockingMinor : autoStockingMinor;
+  const stockingMinor = manualStockingMinor;
   const stockingSource = manualStockingMinor > 0n ? "manual" : "auto";
   const itemizedFixed =
     shopifyBillingMinor + doubleclickFeeMinor + doubleclickSubMinor;
@@ -742,6 +796,9 @@ export async function computeMonth(shop: string, month: string): Promise<Monthly
     stockingMinor,
     stockingUnits,
     stockingSource,
+    stockingCogsMinor: cogs.stockingCogsMinor,
+    productCogsMinor: cogs.productCogsMinor,
+    productPairs: cogs.productPairs,
     gstOutputMinor,
     gstBands: gstSplit.bands,
     gstUntypedMinor: gstSplit.untypedMinor,

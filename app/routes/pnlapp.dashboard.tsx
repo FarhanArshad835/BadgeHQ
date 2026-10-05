@@ -285,6 +285,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       stocking: s(r.stockingMinor),
       stockingUnits: r.stockingUnits,
       stockingSource: r.stockingSource,
+      stockingCogs: s(r.stockingCogsMinor),
+      productCogs: s(r.productCogsMinor),
+      productPairs: r.productPairs,
       gstOutput: s(r.gstOutputMinor),
       gstUntyped: s(r.gstUntypedMinor),
       gstBands: r.gstBands.map((b) => ({
@@ -809,17 +812,27 @@ of which ${fmt(r.deliveredRevenue)} delivered`} value={fmt(r.grossSale)} strong
                     delta={<Delta now={r.netSale} was={d.prev?.netSale} fmt={fmt} label={d.prevLabel} />} />
                   <Row label="Refund Amount" explain={EXPLAIN.refunds} value={sfmt(r.refunds)} neg
                     delta={<Delta now={r.refunds} was={d.prev?.refunds} fmt={fmt} label={d.prevLabel} goodWhenUp={false} />} />
+                  {/* Split, not summed: the free stocking carries its own
+                      cost-per-item, so it is already inside this line. Shown
+                      apart because a promotion running or stopping moves the
+                      total without any product cost changing. */}
                   <Row label="Cost of goods (delivered)" explain={EXPLAIN.cogs} value={sfmt(r.cogs)} neg pending={r.cogs == null}
+                    breakdown={r.cogs != null ? `${fmt(r.productCogs)} products (${r.productPairs.toLocaleString("en-IN")} pairs)
++ ${fmt(r.stockingCogs)} free stocking${r.stockingUnits > 0 ? ` (${r.stockingUnits.toLocaleString("en-IN")} units)` : ""}
+=  ${fmt(r.cogs)}` : undefined}
                     delta={<Delta now={r.cogs} was={d.prev?.cogs} fmt={fmt} label={d.prevLabel} goodWhenUp={false} />} />
-                  {/* Counted from the delivered lines × the unit cost in Settings.
-                      Still typeable, to correct a month by hand. */}
-                  <EditRow
-                    label={`Stocking${r.stockingUnits > 0 ? ` (${r.stockingUnits.toLocaleString("en-IN")} units)` : ""}`}
-                    name="stocking" explain={EXPLAIN.stocking}
-                    value={d.monthInput.stocking}
-                    auto={r.stockingSource === "auto" ? fmt(r.stocking) : undefined}
-                    hint={r.stockingSource === "manual" ? "entered" : undefined}
-                  />
+                  {/* Only when a figure was typed. The automatic version used to
+                      add the stocking a SECOND time, on top of the cost its own
+                      lines already carry. Kept for the one case it is still
+                      right for: a month whose lines genuinely carry no cost. */}
+                  {d.monthInput.stocking ? (
+                    <EditRow
+                      label="Stocking (entered)"
+                      name="stocking" explain={EXPLAIN.stocking}
+                      value={d.monthInput.stocking}
+                      hint="entered"
+                    />
+                  ) : null}
                   <EditRow
                     label="Shipping"
                     name="freightOverride"
