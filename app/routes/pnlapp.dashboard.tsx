@@ -697,6 +697,18 @@ of which ${fmt(c.deliveredRevenue)} delivered`;
     const m = marginPct(c.netPnl, c.netSale);
     return m == null ? undefined : `${fmt(c.netPnl)} / ${fmt(c.netSale)} net sale  =  ${m.toFixed(1)}%`;
   };
+  /**
+   * Profit against GROSS sale — everything ordered, including what came back.
+   *
+   * A different question from the net margin on the per-pair row: that one
+   * asks what the month kept of the revenue it actually collected, this one
+   * asks what it kept of everything it sold. The gap between the two IS the
+   * returns and cancellations, so showing both makes that cost visible.
+   */
+  const colGrossMargin = (c: any) => {
+    const m = marginPct(c.netPnl, c.grossSale);
+    return m == null ? undefined : `${fmt(c.netPnl)} / ${fmt(c.grossSale)} gross sale  =  ${m.toFixed(1)}%`;
+  };
   const monthLabel = (m: string) => d.monthLabels[m] ?? m;
   const r = d.report;
   const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
@@ -901,7 +913,15 @@ of which ${fmt(r.deliveredRevenue)} delivered`} value={fmt(r.grossSale)} strong
                   />
                   <Row label="Orders delivered" explain={EXPLAIN.delivered} value={String(r.deliveredOrders)}
                     delta={<Delta now={String(r.deliveredOrders)} was={d.prev ? String(d.prev.deliveredOrders) : null} fmt={(v: any) => String(v)} label={d.prevLabel} />} />
+                  {/* Against GROSS sale here, against NET on the per-pair row
+                      below. The gap between the two percentages is what the
+                      returns and cancellations cost. */}
                   <Row label="Profit" explain={EXPLAIN.profit} value={fmt(r.netPnl, "Pending")} strong hl big
+                    pct={(() => {
+                      const m = marginPct(r.netPnl, r.grossSale);
+                      return m == null ? undefined : `${m.toFixed(1)}%`;
+                    })()}
+                    pctTitle={r.netPnl != null && r.grossSale ? `${fmt(r.netPnl)} / ${fmt(r.grossSale)} gross sale  =  ${(marginPct(r.netPnl, r.grossSale) ?? 0).toFixed(1)}%` : undefined}
                     delta={<Delta now={r.netPnl} was={d.prev?.netPnl} fmt={fmt} label={d.prevLabel} />} />
                   {/* The margin rides along with the per-pair figure rather
                       than taking its own row: it is the same fact in another
@@ -1202,7 +1222,19 @@ of which ${fmt(r.deliveredRevenue)} delivered`} value={fmt(r.grossSale)} strong
                 <CmpRow label="GST charged" cols={d.compare} pick={(c) => sfmt(c.gstOutput)} breakdown={colGstOut} explain={EXPLAIN.gstOut} />
                 <CmpRow label="GST reclaimed" cols={d.compare} pick={(c) => fmt(c.gstInput, "Pending")} breakdown={colGstIn} explain={EXPLAIN.gstIn} />
                 <CmpRow label="Return/Exchange Fees" cols={d.compare} pick={(c) => fmt(c.returnExchangeFees)} />
-                <CmpRow label="P&L" cols={d.compare} pick={(c) => fmt(c.netPnl, "Pending")} explain={EXPLAIN.profit} strong hl />
+                <CmpRow
+                  label="P&L"
+                  cols={d.compare}
+                  pick={(c) => fmt(c.netPnl, "Pending")}
+                  explain={EXPLAIN.profit}
+                  strong
+                  hl
+                  sub={(c) => {
+                    const m = marginPct(c.netPnl, c.grossSale);
+                    return m == null ? undefined : `${m.toFixed(1)}%`;
+                  }}
+                  subTitle={colGrossMargin}
+                />
                 <CmpRow
                   label="Per Pair"
                   cols={d.compare}
