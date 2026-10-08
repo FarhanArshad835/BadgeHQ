@@ -230,6 +230,12 @@ export const CSS = `
 .pnl-row-click td:first-child a { display: block; margin: -6px -11px -6px 0; padding: 6px 11px 6px 0; }
 .pnl-num { text-align: right; }
 .pnl-strong { font-weight: 640; }
+/* A percentage beside a rupee figure. Quieter and never bold, even on a
+   strong row: the rupees are the answer, the margin is the context. */
+.pnl-pct {
+  margin-left: 8px; font-size: 11px; font-weight: 400;
+  color: var(--ink-faint); font-variant-numeric: tabular-nums;
+}
 .pnl-muted { color: var(--ink-faint); }
 .pnl-pos { color: var(--pos); font-weight: 600; }
 .pnl-negv { color: var(--neg); font-weight: 600; }

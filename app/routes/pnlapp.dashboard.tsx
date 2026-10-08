@@ -673,6 +673,30 @@ x ${d.gstInputNumer}/${d.gstInputDenom}  =  ${fmt(c.gstInput)}`;
 of which ${fmt(c.deliveredRevenue)} delivered`;
   const colPerPair = (c: any) =>
     c.netPnl == null ? undefined : `${fmt(c.netPnl)} / ${c.deliveredPairs.toLocaleString("en-IN")} items  =  ${fmt(c.netPnlPerDeliveredPair)}`;
+  /**
+   * Net margin: profit as a share of Net Sale.
+   *
+   * Against Net Sale rather than Gross, because Gross counts orders that were
+   * returned or never delivered — a margin on revenue you did not keep flatters
+   * every month and flatters the worst ones most.
+   *
+   * Reported beside the per-pair figure because the two answer different
+   * questions: rupees per pair says what a sale earns, the percentage says how
+   * hard the month had to work for it.
+   */
+  // Both arrive as strings of minor units (see `s()`), so they are parsed here
+  // rather than trusted as numbers — the ratio is unitless, so paise cancel.
+  const marginPct = (netPnl: string | null | undefined, netSale: string | null | undefined) => {
+    if (netPnl == null || netSale == null) return null;
+    const p = Number(netPnl);
+    const sale = Number(netSale);
+    if (!Number.isFinite(p) || !Number.isFinite(sale) || sale === 0) return null;
+    return (p / sale) * 100;
+  };
+  const colMargin = (c: any) => {
+    const m = marginPct(c.netPnl, c.netSale);
+    return m == null ? undefined : `${fmt(c.netPnl)} / ${fmt(c.netSale)} net sale  =  ${m.toFixed(1)}%`;
+  };
   const monthLabel = (m: string) => d.monthLabels[m] ?? m;
   const r = d.report;
   const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
@@ -879,7 +903,16 @@ of which ${fmt(r.deliveredRevenue)} delivered`} value={fmt(r.grossSale)} strong
                     delta={<Delta now={String(r.deliveredOrders)} was={d.prev ? String(d.prev.deliveredOrders) : null} fmt={(v: any) => String(v)} label={d.prevLabel} />} />
                   <Row label="Profit" explain={EXPLAIN.profit} value={fmt(r.netPnl, "Pending")} strong hl big
                     delta={<Delta now={r.netPnl} was={d.prev?.netPnl} fmt={fmt} label={d.prevLabel} />} />
+                  {/* The margin rides along with the per-pair figure rather
+                      than taking its own row: it is the same fact in another
+                      unit, and the delta column beside it is still the useful
+                      month-on-month comparison. */}
                   <Row label="Profit per pair" explain={EXPLAIN.profitPerPair} breakdown={r.netPnl != null ? `${fmt(r.netPnl)} / ${r.deliveredPairs.toLocaleString("en-IN")} items  =  ${fmt(r.netPnlPerDeliveredPair)}` : undefined} value={fmt(r.netPnlPerDeliveredPair, "Pending")} pending={r.netPnlPerDeliveredPair == null}
+                    pct={(() => {
+                      const m = marginPct(r.netPnl, r.netSale);
+                      return m == null ? undefined : `${m.toFixed(1)}%`;
+                    })()}
+                    pctTitle={r.netPnl != null && r.netSale ? `${fmt(r.netPnl)} / ${fmt(r.netSale)} net sale  =  ${(marginPct(r.netPnl, r.netSale) ?? 0).toFixed(1)}%` : undefined}
                     delta={<Delta now={r.netPnlPerDeliveredPair} was={d.prev?.netPnlPerDeliveredPair} fmt={fmt} label={d.prevLabel} />} />
                 </tbody>
               </table>
@@ -1170,7 +1203,18 @@ of which ${fmt(r.deliveredRevenue)} delivered`} value={fmt(r.grossSale)} strong
                 <CmpRow label="GST reclaimed" cols={d.compare} pick={(c) => fmt(c.gstInput, "Pending")} breakdown={colGstIn} explain={EXPLAIN.gstIn} />
                 <CmpRow label="Return/Exchange Fees" cols={d.compare} pick={(c) => fmt(c.returnExchangeFees)} />
                 <CmpRow label="P&L" cols={d.compare} pick={(c) => fmt(c.netPnl, "Pending")} explain={EXPLAIN.profit} strong hl />
-                <CmpRow label="Per Pair" cols={d.compare} pick={(c) => fmt(c.netPnlPerDeliveredPair, "Pending")} breakdown={colPerPair} explain={EXPLAIN.profitPerPair} />
+                <CmpRow
+                  label="Per Pair"
+                  cols={d.compare}
+                  pick={(c) => fmt(c.netPnlPerDeliveredPair, "Pending")}
+                  breakdown={colPerPair}
+                  explain={EXPLAIN.profitPerPair}
+                  sub={(c) => {
+                    const m = marginPct(c.netPnl, c.netSale);
+                    return m == null ? undefined : `${m.toFixed(1)}%`;
+                  }}
+                  subTitle={colMargin}
+                />
                 {/* Per-delivered efficiency. Totals move with volume, so a
                     bigger month can look worse and a smaller one better; these
                     rows are what actually explain a swing between months. */}
@@ -1391,10 +1435,13 @@ function CmpEditRow({ label, cols, name, pick, explain }: {
 }
 
 // One comparison row: a label plus one cell per month column.
-function CmpRow({ label, cols, pick, breakdown, explain, strong, hl }: {
+function CmpRow({ label, cols, pick, sub, subTitle, breakdown, explain, strong, hl }: {
   label: string;
   cols: any[];
   pick: (c: any) => string;
+  /** A second, quieter figure beside the first — a percentage of the same thing. */
+  sub?: (c: any) => string | undefined;
+  subTitle?: (c: any) => string | undefined;
   /** The arithmetic behind that column's figure, on hovering it. */
   breakdown?: (c: any) => string | undefined;
   explain?: string;
@@ -1408,9 +1455,16 @@ function CmpRow({ label, cols, pick, breakdown, explain, strong, hl }: {
       </td>
       {cols.map((c, i) => {
         const b = breakdown?.(c);
+        const s = sub?.(c);
+        const st = subTitle?.(c);
         return (
           <td key={i} className={`pnl-num ${strong ? "pnl-strong" : ""}`}>
             {b ? <span className="pnl-explain" title={b}>{pick(c)}</span> : pick(c)}
+            {s ? (
+              <span className={st ? "pnl-pct pnl-explain" : "pnl-pct"} title={st}>
+                {s}
+              </span>
+            ) : null}
           </td>
         );
       })}
@@ -1418,8 +1472,10 @@ function CmpRow({ label, cols, pick, breakdown, explain, strong, hl }: {
   );
 }
 
-function Row({ label, value, value2, delta, explain, breakdown, neg, strong, hl, big, pending, to, active }: {
+function Row({ label, value, value2, pct, pctTitle, delta, explain, breakdown, neg, strong, hl, big, pending, to, active }: {
   label: string; value: string; value2?: string;
+  /** The same figure as a percentage, beside it and quieter. */
+  pct?: string; pctTitle?: string;
   delta?: React.ReactNode; // change vs the previous month
   explain?: string; // plain-language definition, shown on hover
   breakdown?: string; // how the AMOUNT was worked out, shown on hovering it
@@ -1442,6 +1498,11 @@ function Row({ label, value, value2, delta, explain, breakdown, neg, strong, hl,
       <td className={`pnl-num ${strong ? "pnl-strong" : ""} ${neg ? "pnl-neg" : ""} ${pending ? "pnl-pending" : ""}`}
         style={big ? { fontSize: 18, fontWeight: 700 } : undefined}>
         {breakdown ? <span className="pnl-explain" title={breakdown}>{value}</span> : value}
+        {pct ? (
+          <span className={pctTitle ? "pnl-pct pnl-explain" : "pnl-pct"} title={pctTitle}>
+            {pct}
+          </span>
+        ) : null}
       </td>
       {/* Always rendered, even when empty: a row with fewer cells than its
           neighbours breaks the column alignment down the whole table. */}
