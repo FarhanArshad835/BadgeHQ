@@ -301,6 +301,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       returnExchangeFeesSource: r.returnExchangeFeesSource,
       feesAlreadyInNetSale: s(r.feesAlreadyInNetSaleMinor),
       netPnl: s(r.netPnlMinor),
+      partialPnl: s(r.partialPnlMinor),
+      unresolvedOrders: r.unresolvedOrders,
       // Counts + basis.
       placedOrders: r.placedOrders,
       deliveredOrders: r.deliveredOrders,
@@ -396,6 +398,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       gstInput: s(c.gstInputMinor),
       returnExchangeFees: s(c.returnExchangeFeesMinor),
       netPnl: s(c.netPnlMinor),
+      partialPnl: s(c.partialPnlMinor),
+      unresolvedOrders: c.unresolvedOrders,
       netPnlPerDeliveredPair: s(c.netPnlPerDeliveredPairMinor),
       // funnel
       placedOrders: c.placedOrders,
@@ -923,6 +927,26 @@ of which ${fmt(r.deliveredRevenue)} delivered`} value={fmt(r.grossSale)} strong
                     })()}
                     pctTitle={r.netPnl != null && r.grossSale ? `${fmt(r.netPnl)} / ${fmt(r.grossSale)} gross sale  =  ${(marginPct(r.netPnl, r.grossSale) ?? 0).toFixed(1)}%` : undefined}
                     delta={<Delta now={r.netPnl} was={d.prev?.netPnl} fmt={fmt} label={d.prevLabel} />} />
+                  {/* "Pending" answers nothing on a month whose costs are all
+                      in and which is only waiting for parcels to arrive. This
+                      is that month's figure SO FAR, on its own row and plainly
+                      labelled, so it is read as a running number rather than
+                      mistaken for the total. Absent when a COST is missing:
+                      there the orders are already in and the figure would be
+                      wrong by an unknown amount, not merely incomplete. */}
+                  {r.netPnl == null && r.partialPnl != null ? (
+                    <Row
+                      label={`So far (${r.unresolvedOrders.toLocaleString("en-IN")} orders still in transit)`}
+                      explain="Profit on the orders that have reached a final outcome, using this month's known costs. It will move as the rest arrive, which is why it is not the month's P&L."
+                      value={fmt(r.partialPnl)}
+                      breakdown={`${fmt(r.partialPnl)} on ${pct(r.resolutionRate)} of orders resolved — the remaining ${r.unresolvedOrders.toLocaleString("en-IN")} will move this figure`}
+                      pct={(() => {
+                        const m = marginPct(r.partialPnl, r.grossSale);
+                        return m == null ? undefined : `${m.toFixed(1)}%`;
+                      })()}
+                      pctTitle={r.grossSale ? `${fmt(r.partialPnl)} / ${fmt(r.grossSale)} gross sale  =  ${(marginPct(r.partialPnl, r.grossSale) ?? 0).toFixed(1)}%` : undefined}
+                    />
+                  ) : null}
                   {/* The margin rides along with the per-pair figure rather
                       than taking its own row: it is the same fact in another
                       unit, and the delta column beside it is still the useful
@@ -1235,6 +1259,26 @@ of which ${fmt(r.deliveredRevenue)} delivered`} value={fmt(r.grossSale)} strong
                   }}
                   subTitle={colGrossMargin}
                 />
+                {/* Only rendered when some column has one, so a table of
+                    settled months is not given an empty row. */}
+                {d.compare.some((c) => c.netPnl == null && c.partialPnl != null) ? (
+                  <CmpRow
+                    label="So far"
+                    cols={d.compare}
+                    explain="Profit on the orders that have reached a final outcome, for a month still settling. It moves as the rest arrive."
+                    pick={(c) => (c.netPnl == null && c.partialPnl != null ? fmt(c.partialPnl) : "")}
+                    breakdown={(c) =>
+                      c.netPnl == null && c.partialPnl != null
+                        ? `${fmt(c.partialPnl)} on ${pct(c.resolutionRate)} of orders resolved — ${c.unresolvedOrders.toLocaleString("en-IN")} still in transit`
+                        : undefined
+                    }
+                    sub={(c) => {
+                      if (c.netPnl != null || c.partialPnl == null) return undefined;
+                      const m = marginPct(c.partialPnl, c.grossSale);
+                      return m == null ? undefined : `${m.toFixed(1)}%`;
+                    }}
+                  />
+                ) : null}
                 <CmpRow
                   label="Per Pair"
                   cols={d.compare}

@@ -549,6 +549,12 @@ export type MonthlyPnl = {
   feesAlreadyInNetSaleMinor: bigint; // exchange share; shown but not added to profit // "auto" (summed fee orders) | "manual" (override)
   // Bottom line — null when any required cost is pending (suppressed).
   netPnlMinor: bigint | null;
+  /**
+   * Profit on the orders settled so far, when the ONLY thing pending is that
+   * orders are still in transit. Null whenever a cost is unknown, and never a
+   * substitute for netPnlMinor — it is a running figure that will move.
+   */
+  partialPnlMinor: bigint | null;
   // Counts + basis.
   placedOrders: number;
   deliveredOrders: number;
@@ -580,6 +586,11 @@ export type MonthlyPnl = {
   resolutionRate: number;
   /** Orders held out of the resolution rate for having no tracking number. */
   noTrackingOrders: number;
+  /** Placed and trackable, but not yet at a terminal outcome. What a pending
+   *  month waits on once every cost is already known — the same count the
+   *  blocker message quotes, which is NOT rev.unresolvedOrders: that tracks a
+   *  different classification and reads 0 on a month with 970 in transit. */
+  unresolvedOrders: number;
   noTrackingRevenueMinor: bigint;
   deliveredShareOfPlaced: number;
   cogsMatchRate: number;
@@ -747,22 +758,47 @@ export async function computeMonth(shop: string, month: string): Promise<Monthly
 
   // Net P&L is only computed when EVERY required cost is known. Any pending cost
   // suppresses it (null), per the spec — no partial total masquerading as a P&L.
+  const costsKnown =
+    cogs.cogsMinor != null && freightMinor != null && adSpendMinor != null && netGstMinor != null;
+
+  /** The statement's arithmetic, given a set of costs. */
+  const assemble = (cogsM: bigint, freightM: bigint, adM: bigint, gstM: bigint) =>
+    rev.netSaleMinor -
+    cogsM -
+    stockingMinor - // was shown on the statement but never deducted: profit read high
+    freightM -
+    adM -
+    overheadMinor +
+    gstM +
+    // Only the portion NOT already inside Net Sale (see above). GST is
+    // deliberately still computed on the full Net Sale: whether the fee is
+    // taxable is a GST question for the merchant's accountant, and
+    // overstating tax owed is the safer way to be wrong.
+    (returnExchangeFeesMinor - feesAlreadyInNetSaleMinor);
+
   let netPnlMinor: bigint | null = null;
-  if (resolved && cogs.cogsMinor != null && freightMinor != null && adSpendMinor != null && netGstMinor != null) {
-    netPnlMinor =
-      rev.netSaleMinor -
-      cogs.cogsMinor -
-      stockingMinor - // was shown on the statement but never deducted: profit read high
-      freightMinor -
-      adSpendMinor -
-      overheadMinor +
-      netGstMinor +
-      // Only the portion NOT already inside Net Sale (see above). GST is
-      // deliberately still computed on the full Net Sale: whether the fee is
-      // taxable is a GST question for the merchant's accountant, and
-      // overstating tax owed is the safer way to be wrong.
-      (returnExchangeFeesMinor - feesAlreadyInNetSaleMinor);
+  if (resolved && costsKnown) {
+    netPnlMinor = assemble(cogs.cogsMinor!, freightMinor!, adSpendMinor!, netGstMinor!);
   }
+
+  /**
+   * The same total, on the orders that HAVE settled.
+   *
+   * Deliberately a separate field from netPnlMinor, which stays null: this is
+   * not the month's profit and must never be mistaken for it. It answers the
+   * question a pending month actually prompts — "so what does it look like so
+   * far?" — without a figure that will change being published as one that
+   * will not.
+   *
+   * Only offered when every COST is known and the month is merely unresolved.
+   * With a missing cost there is nothing honest to show: the orders are all
+   * in, and the total would be wrong by an unknown amount rather than
+   * incomplete by a known one.
+   */
+  const partialPnlMinor: bigint | null =
+    !resolved && costsKnown
+      ? assemble(cogs.cogsMinor!, freightMinor!, adSpendMinor!, netGstMinor!)
+      : null;
 
   // An unresolved month is already a pendingReason above, so it lands in
   // "pending" here rather than needing its own clause.
@@ -808,6 +844,7 @@ export async function computeMonth(shop: string, month: string): Promise<Monthly
     returnExchangeFeesSource,
     feesAlreadyInNetSaleMinor,
     netPnlMinor,
+    partialPnlMinor,
     placedOrders: rev.placedOrders,
     deliveredOrders: rev.deliveredOrders,
     rtoOrders: rev.rtoOrders,
@@ -831,6 +868,7 @@ export async function computeMonth(shop: string, month: string): Promise<Monthly
     cogsPerPairMinor: perPair(cogs.cogsMinor),
     resolutionRate: rev.resolutionRate,
     noTrackingOrders: rev.noTrackingOrders,
+    unresolvedOrders: Math.max(0, rev.placedOrders - rev.noTrackingOrders - rev.resolvedOrders),
     noTrackingRevenueMinor: rev.noTrackingRevenueMinor,
     deliveredShareOfPlaced: rev.deliveredShareOfPlaced,
     cogsMatchRate: cogs.matchRate,
