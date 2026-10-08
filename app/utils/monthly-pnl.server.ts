@@ -582,6 +582,13 @@ export type MonthlyPnl = {
   adPerPairMinor: bigint | null;
   freightPerPairMinor: bigint | null;
   cogsPerPairMinor: bigint | null;
+  /** What a delivered pair actually earned, before costs. The figure every
+   *  per-pair cost above is spent against. */
+  netSalePerPairMinor: bigint | null;
+  /** Delivered pairs per delivered order — the basket size the note above
+   *  describes. Scaled by 100 so it survives integer division: 170 is 1.70.
+   *  Both sides count DELIVERED, so the ratio describes the same shipments. */
+  pairsPerOrderX100: number | null;
   // Health + publish gate.
   resolutionRate: number;
   /** Orders held out of the resolution rate for having no tracking number. */
@@ -866,6 +873,11 @@ export async function computeMonth(shop: string, month: string): Promise<Monthly
     adPerPairMinor: perPair(adSpendMinor),
     freightPerPairMinor: perPair(freightMinor),
     cogsPerPairMinor: perPair(cogs.cogsMinor),
+    netSalePerPairMinor: perPair(rev.netSaleMinor),
+    pairsPerOrderX100:
+      rev.deliveredOrders === 0
+        ? null
+        : Math.round((cogs.deliveredPairs / rev.deliveredOrders) * 100),
     resolutionRate: rev.resolutionRate,
     noTrackingOrders: rev.noTrackingOrders,
     unresolvedOrders: Math.max(0, rev.placedOrders - rev.noTrackingOrders - rev.resolvedOrders),

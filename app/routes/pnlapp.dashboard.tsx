@@ -50,6 +50,8 @@ const EXPLAIN = {
   freightPerPair: "Billed shipping divided by delivered pairs. Per PAIR, not per order: a two-pair order ships once, so this is lower than the per-order figure.",
   cogsPerPair: "Average cost of one delivered item.",
   cogsMatchRate: "How many delivered items had a cost-per-item set in Shopify. Below 97% the COGS figure is withheld rather than guessed.",
+  netSalePerPair: "What one delivered item earned, after refunds. Every per-pair cost below comes out of this, so the gap between it and their sum is the profit on a pair.",
+  pairsPerOrder: "Delivered items divided by delivered orders — the average basket. It is why per-pair and per-order costs differ: a two-item order ships once but carries two lots of COGS.",
 } as const;
 
 
@@ -328,6 +330,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       adPerPair: s(r.adPerPairMinor),
       freightPerPair: s(r.freightPerPairMinor),
       cogsPerPair: s(r.cogsPerPairMinor),
+      netSalePerPair: s(r.netSalePerPairMinor),
+      pairsPerOrderX100: r.pairsPerOrderX100,
       // Health.
       resolutionRate: r.resolutionRate,
       deliveredShareOfPlaced: r.deliveredShareOfPlaced,
@@ -426,6 +430,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       adPerPair: s(c.adPerPairMinor),
       freightPerPair: s(c.freightPerPairMinor),
       cogsPerPair: s(c.cogsPerPairMinor),
+      netSalePerPair: s(c.netSalePerPairMinor),
+      pairsPerOrderX100: c.pairsPerOrderX100,
       cogsMatchRate: c.cogsMatchRate,
     })),
   });
@@ -1015,9 +1021,17 @@ of which ${fmt(r.deliveredRevenue)} delivered`} value={fmt(r.grossSale)} strong
                 <div className="pnl-section-label">Per delivered order / pair</div>
                 <table className="pnl-table">
                   <tbody>
+                    {/* Income first, then what comes out of it. The three
+                        costs below are all spent against this one figure. */}
+                    <Row label="Net sale / pair" explain={EXPLAIN.netSalePerPair} value={fmt(r.netSalePerPair, "Pending")}
+                      breakdown={r.netSalePerPair != null ? `${fmt(r.netSale)} / ${r.deliveredPairs.toLocaleString("en-IN")} pairs  =  ${fmt(r.netSalePerPair)}` : undefined} />
                     <Row label="Ad / pair" explain={EXPLAIN.adPerPair} value={fmt(r.adPerPair, "Pending")} />
                     <Row label="Freight / pair" explain={EXPLAIN.freightPerPair} value={fmt(r.freightPerPair, "Pending")} />
                     <Row label="COGS / pair" explain={EXPLAIN.cogsPerPair} value={fmt(r.cogsPerPair, "Pending")} />
+                    {/* Why the per-pair and per-order figures differ at all. */}
+                    <Row label="Pairs / order" explain={EXPLAIN.pairsPerOrder}
+                      value={r.pairsPerOrderX100 == null ? "—" : (r.pairsPerOrderX100 / 100).toFixed(2)}
+                      breakdown={r.pairsPerOrderX100 == null ? undefined : `${r.deliveredPairs.toLocaleString("en-IN")} pairs / ${r.deliveredOrders.toLocaleString("en-IN")} delivered orders  =  ${(r.pairsPerOrderX100 / 100).toFixed(2)}`} />
                     <Row label="COGS cost-match rate" explain={EXPLAIN.cogsMatchRate} value={pct(r.cogsMatchRate)} />
                   </tbody>
                 </table>
@@ -1295,6 +1309,16 @@ of which ${fmt(r.deliveredRevenue)} delivered`} value={fmt(r.grossSale)} strong
                     bigger month can look worse and a smaller one better; these
                     rows are what actually explain a swing between months. */}
                 <CmpRow label="—" cols={d.compare} pick={() => ""} />
+                {/* Income first: the three costs below all come out of it. */}
+                <CmpRow
+                  label="Net sale / pair"
+                  cols={d.compare}
+                  pick={(c) => fmt(c.netSalePerPair, "Pending")}
+                  breakdown={(c) => (c.netSale != null && c.deliveredPairs
+                    ? `${fmt(c.netSale)} / ${c.deliveredPairs.toLocaleString("en-IN")} pairs  =  ${fmt(c.netSalePerPair)}`
+                    : undefined)}
+                  explain={EXPLAIN.netSalePerPair}
+                />
                 <CmpRow
                   label="Ad / pair"
                   cols={d.compare}
@@ -1321,6 +1345,15 @@ of which ${fmt(r.deliveredRevenue)} delivered`} value={fmt(r.grossSale)} strong
                     ? `${fmt(c.cogs)} / ${c.deliveredPairs.toLocaleString("en-IN")} pairs  =  ${fmt(c.cogsPerPair)}`
                     : undefined)}
                   explain={EXPLAIN.cogsPerPair}
+                />
+                <CmpRow
+                  label="Pairs / order"
+                  cols={d.compare}
+                  pick={(c) => (c.pairsPerOrderX100 == null ? "—" : (c.pairsPerOrderX100 / 100).toFixed(2))}
+                  breakdown={(c) => (c.pairsPerOrderX100 == null
+                    ? undefined
+                    : `${c.deliveredPairs.toLocaleString("en-IN")} pairs / ${c.deliveredOrders.toLocaleString("en-IN")} delivered orders  =  ${(c.pairsPerOrderX100 / 100).toFixed(2)}`)}
+                  explain={EXPLAIN.pairsPerOrder}
                 />
                 <CmpRow
                   label="COGS cost-match rate"
