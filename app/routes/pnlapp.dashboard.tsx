@@ -565,14 +565,38 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 /**
- * Brand tracking page, which resolves an AWB from any carrier.
+ * The carrier's own tracking page for an AWB.
  *
- * Deliberately not carrier-specific: the stored `carrier` column is blank on
- * most orders and mislabels the rest (13- and 14-digit AWBs are recorded as
- * Delhivery, but Delhivery only resolves its own 13-char alphanumeric format),
- * so branching on it would send half these links to the wrong carrier.
+ * Every link used to go to Shiprocket, on the grounds that the stored
+ * `carrier` column is unreliable. It is: of the AWBs booked since August,
+ * 2,138 are recorded as Delhivery but do not carry Delhivery's prefix, and
+ * 16,631 Shadowfax waybills have the column blank — so branching on it really
+ * would send half these links to the wrong carrier.
+ *
+ * The AWB itself is reliable, though. The same prefix rule the scanner and the
+ * tracking script both route on (detectCourier) picks the carrier from the
+ * waybill, and those 16,631 Shadowfax parcels stop being handed to Shiprocket,
+ * which has never heard of them.
  */
-const TRACKING_BASE = "https://jmlooks.shiprocket.co/tracking/";
+const TRACKING_URL: Record<string, string> = {
+  // Shadowfax's public tracker is a single-page app, so the waybill rides in
+  // the fragment and the server never sees it. Both this and "?awb=" return
+  // 200 on an empty shell, so neither form could be confirmed by fetching it —
+  // worth opening one from the dashboard to check it lands on the parcel.
+  shadowfax: "https://tracker.shadowfax.in/#/",
+  delhivery: "https://www.delhivery.com/track/package/",
+  shiprocket: "https://jmlooks.shiprocket.co/tracking/",
+};
+
+function trackingHref(awb: string): string {
+  const a = String(awb || "").trim();
+  const carrier = a.toUpperCase().startsWith("SF")
+    ? "shadowfax"
+    : a.startsWith("2606")
+      ? "delhivery"
+      : "shiprocket";
+  return TRACKING_URL[carrier] + encodeURIComponent(a);
+}
 
 const DRILL_LABELS: Record<string, string> = {
   delivered: "Delivered",
@@ -1123,10 +1147,10 @@ of which ${fmt(r.deliveredRevenue)} delivered`} value={fmt(r.grossSale)} strong
                             <td style={{ fontSize: 12 }}>
                               {o.awb ? (
                                 <a
-                                  href={`${TRACKING_BASE}${encodeURIComponent(o.awb)}`}
+                                  href={trackingHref(o.awb)}
                                   target="_blank"
                                   rel="noreferrer"
-                                  title="Open the tracking page"
+                                  title="Open the carrier's tracking page"
                                 >
                                   {o.awb}
                                 </a>
