@@ -16,7 +16,7 @@ import prisma from "../db.server";
 import { unauthenticated } from "../shopify.server";
 import { syncRevenueAndCogs, backfillShipping } from "../utils/pnl-sync.server";
 import { getPnlApp, runStandaloneSync, tokenAdmin } from "../utils/pnl-app.server";
-import { fetchAndApplyDeliverySheet } from "../utils/delivery-import.server";
+import { fetchAndApplyDeliverySheet, resolveUnsheetedOrders } from "../utils/delivery-import.server";
 import { refreshReturnHqCache } from "../utils/returnhq.server";
 import { computeMonth } from "../utils/monthly-pnl.server";
 
@@ -608,6 +608,27 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     } catch (e: any) {
       console.error("[pnl-cron] deliverySheet", String(e?.message || e).slice(0, 200));
       results["deliverySheet"] = { error: true };
+    }
+
+    // The sheet is the authority, but it is not complete: a few AWBs never
+    // reach it, and an order whose waybill has no row there can never be
+    // updated by the sync however often it runs. Those get asked of the
+    // carrier directly, right after the sheet has had its say, so the sheet
+    // still wins on everything it knows about.
+    try {
+      results["unsheeted"] = await resolveUnsheetedOrders(
+        standaloneApp.shopDomain,
+        standaloneApp.deliverySheetUrl,
+        {
+          shiprocketEmail: standaloneApp.shiprocketEmail || undefined,
+          shiprocketPassword: standaloneApp.shiprocketPassword || undefined,
+          delhiveryApiKey: standaloneApp.delhiveryApiKey || undefined,
+          shadowfaxApiToken: standaloneApp.shadowfaxApiToken || undefined,
+        },
+      );
+    } catch (e: any) {
+      console.error("[pnl-cron] unsheeted", String(e?.message || e).slice(0, 200));
+      results["unsheeted"] = { error: true };
     }
   }
 

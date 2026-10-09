@@ -281,3 +281,113 @@ export async function applyDeliveryStatuses(
   ).length;
   return { updated, delivered, rto, rtoDated };
 }
+
+/**
+ * Resolve orders the tracking sheet has never covered, by asking the carrier.
+ *
+ * The sheet is the authority for delivery status, but it is not complete: a
+ * handful of AWBs never reach it at all, and an order whose waybill has no row
+ * there can never be updated by the sync however many times it runs. Found
+ * 83 such orders across 2026, 67 of them delivered weeks earlier while the
+ * dashboard still read "unknown".
+ *
+ * Two distinct failures produced that, and both are covered here:
+ *   - the AWB is absent from the sheet, so nothing ever asks about it
+ *   - the AWB IS asked about, but by the wrong carrier. An SF prefix does not
+ *     prove Shadowfax booked it; some are Shiprocket's "Shadowfax Fashion"
+ *     service, which Shadowfax's own API disowns. So a miss on the routed
+ *     carrier falls through to the others rather than ending the search.
+ *
+ * Deliberately narrow. It only touches orders that are UNRESOLVED and whose
+ * AWB the sheet does not carry — never one the sheet has an opinion about,
+ * which stays the sheet's to own.
+ */
+export async function resolveUnsheetedOrders(
+  shop: string,
+  sheetUrl: string,
+  opts: {
+    shiprocketEmail?: string;
+    shiprocketPassword?: string;
+    delhiveryApiKey?: string;
+    shadowfaxApiToken?: string;
+    /** Cap per run: this is a live carrier call per order on a cron clock. */
+    limit?: number;
+    /** Wall-clock ceiling. The count alone is not a budget: each order can
+     *  try three carriers at 4s apiece, so 60 orders is 12 minutes in the
+     *  worst case against the cron's 300s. Whichever limit is hit first
+     *  stops the run, and the rest are picked up tomorrow. */
+    budgetMs?: number;
+  },
+): Promise<{ ok: boolean; checked: number; resolved: number; reason?: string }> {
+  const limit = opts.limit ?? 60;
+  const budgetMs = opts.budgetMs ?? 60_000;
+  const startedAt = Date.now();
+  let sheetAwbs: Set<string>;
+  try {
+    const res = await fetch(sheetUrl);
+    if (!res.ok) return { ok: false, checked: 0, resolved: 0, reason: `sheet HTTP ${res.status}` };
+    const lines = (await res.text()).split(/\r?\n/);
+    sheetAwbs = new Set<string>();
+    for (let i = 1; i < lines.length; i++) {
+      const k = (lines[i].split(",")[0] || "").replace(/[^0-9a-zA-Z]/g, "");
+      if (k) sheetAwbs.add(k);
+    }
+  } catch (e: any) {
+    return { ok: false, checked: 0, resolved: 0, reason: String(e?.message || e).slice(0, 120) };
+  }
+  // An empty read means the fetch succeeded but gave us nothing. Treating that
+  // as "the sheet covers no AWBs" would send every unresolved order to the
+  // carriers at once.
+  if (sheetAwbs.size < 1000) {
+    return { ok: false, checked: 0, resolved: 0, reason: `sheet looks truncated (${sheetAwbs.size} AWBs)` };
+  }
+
+  const candidates = (
+    await prisma.orderFinancials.findMany({
+      where: {
+        shop,
+        awb: { not: "" },
+        deliveryStatus: { in: ["unknown", "in_transit"] },
+      },
+      select: { orderId: true, awb: true },
+      orderBy: { orderCreatedAt: "desc" },
+      take: 4000,
+    })
+  )
+    .filter((o) => !sheetAwbs.has(o.awb.replace(/[^0-9a-zA-Z]/g, "")))
+    .slice(0, limit);
+
+  if (!candidates.length) return { ok: true, checked: 0, resolved: 0 };
+
+  const { trackParcel } = await import("./tracking.server");
+  let resolved = 0;
+  let checked = 0;
+  for (const o of candidates) {
+    if (Date.now() - startedAt > budgetMs) break;
+    checked++;
+    try {
+      // trackParcel already routes by prefix and falls through on a miss.
+      const r = await trackParcel({ awb: o.awb, ...opts });
+      if (!r) continue;
+      const outcome = mapSheetStatus(`${r.status} ${r.lastActivity}`);
+      if (!outcome || outcome === "no-awb") continue;
+      const at = r.lastUpdate ? new Date(r.lastUpdate) : null;
+      const dated = at && !Number.isNaN(at.getTime()) ? at : null;
+      await prisma.orderFinancials.update({
+        where: { shop_orderId: { shop, orderId: o.orderId } },
+        data: {
+          deliveryStatus: outcome,
+          deliverySyncedAt: new Date(),
+          // Same rule as the sheet importer: a return still moving is not
+          // dated, or the claim clock starts while the courier still has it.
+          ...(outcome === "delivered" && dated ? { deliveredAt: dated } : {}),
+          ...(outcome === "rto" && dated ? { rtoReceivedAt: dated } : {}),
+        },
+      });
+      resolved++;
+    } catch (e: any) {
+      console.error("[unsheeted]", o.awb, String(e?.message || e).slice(0, 120));
+    }
+  }
+  return { ok: true, checked, resolved };
+}
