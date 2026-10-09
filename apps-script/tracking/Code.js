@@ -709,6 +709,119 @@ function trackAWBsIgnoreDateGate() {
   try { trackAWBsSmartRouting(); } finally { DATE_GATE_ON = true; }
 }
 
+/**
+ * Re-check ONLY the rows whose last check failed.
+ *
+ * The full run walks every unresolved row in a 130,000-row sheet and spends
+ * most of its six minutes on parcels that are simply still in transit. After
+ * a fix to one carrier's handling, the rows worth re-asking are the handful
+ * that already carry a FAIL — this goes straight to them.
+ *
+ * Reads the Last Check Result column rather than the status: a failure leaves
+ * the status untouched (that is the whole problem), so FAIL in the result
+ * column is the only durable record that the row was tried and lost.
+ *
+ * Deliberately ignores the date gate and the final-status skip. A row that
+ * failed is worth another ask whatever its age, and if it had a final status
+ * it would not have been attempted in the first place.
+ *
+ * Same per-carrier functions as the main run, including the Shadowfax ->
+ * Shiprocket fallback, so the two can never drift apart.
+ */
+function retryFailedAWBs() {
+  if (!credentialsReady_()) return;
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
+  if (!sheet) { Logger.log('Sheet "%s" not found!', SHEET_NAME); return; }
+  const COLS = resolveColumns_(sheet);
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) { Logger.log('No data'); return; }
+  const allData = sheet.getRange(2, 1, lastRow - 1, COLS.width).getValues();
+
+  const sr = [], dl = [], sfx = [];
+  const reasons = {};
+  for (let i = 0; i < allData.length; i++) {
+    const row = allData[i];
+    const awb = row[AWB_COLUMN - 1];
+    if (!awb || !awb.toString().trim()) continue;
+    const last = (row[COLS.lastCheck - 1] || '').toString();
+    if (last.indexOf('FAIL') !== 0) continue;
+    // Group the reasons so the log says WHAT failed, not just how many.
+    const why = last.split('|')[0].trim();
+    reasons[why] = (reasons[why] || 0) + 1;
+    const item = { awb: awb.toString().trim(), rowIndex: i + 2, dataIndex: i };
+    const c = detectCourier(item.awb);
+    if (c === 'DELHIVERY') dl.push(item);
+    else if (c === 'SHADOWFAX') sfx.push(item);
+    else sr.push(item);
+  }
+
+  const total = sr.length + dl.length + sfx.length;
+  Logger.log('========================================');
+  Logger.log('Retrying %s failed rows (SR %s, Delhivery %s, Shadowfax %s)', total, sr.length, dl.length, sfx.length);
+  Object.keys(reasons).sort(function (a, b) { return reasons[b] - reasons[a]; }).forEach(function (k) {
+    Logger.log('   %s x %s', reasons[k], k);
+  });
+  Logger.log('========================================');
+  if (!total) { Logger.log('Nothing to retry.'); return; }
+
+  const statusUpdates = [], deliveryDateUpdates = [], firstScanDateUpdates = [], resultUpdates = [];
+  const stamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd-MMM HH:mm');
+  const existingDates = allData.map(function (r) { return r[DELIVERY_DATE_COLUMN - 1]; });
+  const existingFirstScan = allData.map(function (r) { return r[COLS.firstScan - 1]; });
+  let fixed = 0, stillFailing = 0;
+
+  function ok(item, result) {
+    statusUpdates.push({ row: item.rowIndex, col: STATUS_COLUMN, value: result.status });
+    if (result.deliveryDate && !existingDates[item.dataIndex]) {
+      deliveryDateUpdates.push({ row: item.rowIndex, col: DELIVERY_DATE_COLUMN, value: result.deliveryDate });
+    }
+    if (result.firstScanDate && !existingFirstScan[item.dataIndex]) {
+      firstScanDateUpdates.push({ row: item.rowIndex, col: COLS.firstScan, value: result.firstScanDate });
+    }
+    resultUpdates.push({ row: item.rowIndex, col: COLS.lastCheck, value: 'OK: ' + result.status + ' | ' + stamp });
+    fixed++;
+  }
+  function fail(item, why) {
+    resultUpdates.push({ row: item.rowIndex, col: COLS.lastCheck, value: 'FAIL: ' + why + ' | ' + stamp });
+    stillFailing++;
+  }
+
+  const token = (sr.length || sfx.length) ? getShiprocketToken() : null;
+
+  for (let i = 0; i < sr.length; i++) {
+    const r = token ? trackWithShiprocket(sr[i].awb, token) : null;
+    if (r && r.found) ok(sr[i], r); else fail(sr[i], (r && r.status) || 'No Response (SR)');
+    if (i < sr.length - 1) Utilities.sleep(300);
+  }
+
+  for (let b = 0; b < dl.length; b += BATCH_SIZE) {
+    trackWithDelhivery(dl.slice(b, b + BATCH_SIZE)).forEach(function (r) {
+      if (r.found) ok(r.item, r); else fail(r.item, r.status || 'Unresolved (DL)');
+    });
+    if (b + BATCH_SIZE < dl.length) Utilities.sleep(500);
+  }
+
+  // Shadowfax first, then Shiprocket for whatever it disowns — the same
+  // fallback the main run uses, and the reason most of these rows failed.
+  for (let b = 0; b < sfx.length; b += SFX_BULK_SIZE) {
+    const batch = sfx.slice(b, b + SFX_BULK_SIZE);
+    const map = trackWithShadowfaxBulk(batch.map(function (it) { return it.awb; }));
+    for (let j = 0; j < batch.length; j++) {
+      const item = batch[j];
+      const r = map[item.awb];
+      if (r && r.found) { ok(item, r); continue; }
+      const viaSr = token ? trackWithShiprocket(item.awb, token) : null;
+      if (viaSr && viaSr.found) ok(item, viaSr); else fail(item, 'No Data (SFX+SR)');
+      Utilities.sleep(300);
+    }
+    if (b + SFX_BULK_SIZE < sfx.length) Utilities.sleep(400);
+  }
+
+  writeUpdatesToSheet(sheet, statusUpdates, deliveryDateUpdates, firstScanDateUpdates, resultUpdates);
+  Logger.log('Retry done. Resolved %s, still failing %s.', fixed, stillFailing);
+}
+
 // ========================================
 // ONE-TIME CREDENTIAL SETUP
 // ========================================
@@ -1294,6 +1407,7 @@ function onOpen() {
     SpreadsheetApp.getUi()
       .createMenu('Tracking')
       .addItem('Run tracking now', 'trackAWBsSmartRouting')
+      .addItem('Retry only the failures', 'retryFailedAWBs')
       .addSeparator()
       .addItem('Fill missing dates (drain)', 'backfillDeliveryDates')
       .addItem('Stop the drain', 'stopBackfillDrain')
