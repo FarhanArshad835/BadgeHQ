@@ -54,6 +54,28 @@ export function mapSheetStatus(raw: string): DeliveryOutcome | "no-awb" | null {
   if (/\bnot delivered\b|\bundelivered\b/.test(s)) return "in_transit";
   if (/\bdelivered\b/.test(s)) return "delivered"; // plain delivered (returns handled above)
   if (/in transit|out for delivery|shipped|pickup|dispatch|ofd/.test(s)) return "in_transit";
+  // Shadowfax's in-transit vocabulary, which shares almost no words with the
+  // other two carriers'. Without these the row returns null, the importer
+  // skips it entirely, and the order sits at "unknown" having never been
+  // synced at all — 87 of the 204 September unknowns were exactly this.
+  //
+  // Every one of them means the parcel is SOMEWHERE IN THE NETWORK and has
+  // not reached a terminal outcome, so they all map to in_transit. None of
+  // them is a delivery or a return, and guessing either would be worse than
+  // the unknown they replace.
+  if (
+    /\bnot picked\b|\bnot attempted\b|\bpincode updated\b|\bnew\b|\breceived at\b|\bassigned for\b|\bnot contactable\b|\bon hold\b|\bopen\b|\bmanifest|\bdelay\b|\bpending\b|\bndr\b/.test(s)
+  ) {
+    return "in_transit";
+  }
+  // A parcel the carrier has written off. Not a return — nothing comes back —
+  // so it is the same loss as "lost" and belongs in that bucket rather than
+  // sitting unknown and holding the month below the resolution gate.
+  if (/\bdisposed\b|\bdestroyed\b/.test(s)) return "lost";
+  // Everything else stays null ON PURPOSE. "No Status" and "Auth Error" are
+  // the sheet admitting it does not know — "Auth Error" especially means the
+  // carrier lookup FAILED, and mapping that to in_transit would turn a
+  // credential problem into a silent claim about where the parcel is.
   return null;
 }
 
