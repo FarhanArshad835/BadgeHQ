@@ -602,19 +602,48 @@ function trackAWBsSmartRouting() {
   flushIfDue(true);
 
   // Shadowfax (BULK — up to 50 AWBs per POST via /v4/clients/bulk_track/) — runs last.
+  const sfxMisses = [];
   for (let b = 0; b < shadowfaxAWBs.length; b += SFX_BULK_SIZE) {
     const batch = shadowfaxAWBs.slice(b, b + SFX_BULK_SIZE);
     const map = trackWithShadowfaxBulk(batch.map(it => it.awb));
     batch.forEach(item => {
       const r = map[item.awb];
       if (r && r.found) pushResult(item, r);
-      else noteCheck(item, 'FAIL: ' + ((r && r.status) || 'No Data (SFX)'));
+      else sfxMisses.push(item); // unresolved → ask Shiprocket before giving up
     });
     flushIfDue(false);
     Logger.log('Shadowfax bulk: %s/%s', Math.min(b + SFX_BULK_SIZE, shadowfaxAWBs.length), shadowfaxAWBs.length);
     if (b + SFX_BULK_SIZE < shadowfaxAWBs.length) Utilities.sleep(400);
   }
   flushIfDue(true);
+
+  // An SF prefix does not mean Shadowfax booked it. Some SF waybills are
+  // Shiprocket's "Shadowfax Fashion" service, and Shadowfax's own API returns
+  // zero rows for those — the row was then written off as "No Data (SFX)" and,
+  // because that is not an arrival status, never retried.
+  //
+  // Checked on the four such AWBs in the sheet (SF…KAA, 15 chars rather than
+  // the usual 13): Shadowfax knows none of them, Shiprocket knows all four and
+  // reports every one Delivered, courier "Shadowfax Fashion". One of them,
+  // SF3156273662KAA, is the order that prompted this.
+  if (sfxMisses.length) {
+    const srToken = getShiprocketToken();
+    if (!srToken) {
+      Logger.log('Shadowfax fallback: no Shiprocket token, %s left unresolved', sfxMisses.length);
+      sfxMisses.forEach(item => noteCheck(item, 'FAIL: No Data (SFX)'));
+    } else {
+      Logger.log('Shadowfax fallback -> Shiprocket for %s AWBs', sfxMisses.length);
+      for (let i = 0; i < sfxMisses.length; i++) {
+        const item = sfxMisses[i];
+        const result = trackWithShiprocket(item.awb, srToken);
+        if (result && result.found) pushResult(item, result);
+        else noteCheck(item, 'FAIL: No Data (SFX+SR)');
+        flushIfDue(false);
+        if (i < sfxMisses.length - 1) Utilities.sleep(300);
+      }
+    }
+    flushIfDue(true);
+  }
 
   Logger.log('DONE. Re-run until "Total AWBs to check" reaches ~0 (6-min limit truncates big runs).');
 }
