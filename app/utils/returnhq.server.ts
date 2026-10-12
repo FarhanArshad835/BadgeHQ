@@ -522,3 +522,51 @@ export async function returnHqExportRows(): Promise<Array<Record<string, string>
     tracking_url: str(r.tracking_url),
   }));
 }
+
+/**
+ * Customer returns the courier has handed back, by the day it did so.
+ *
+ * Needed because a return's arrival date lives HERE, in ReturnHQ's
+ * carrier_received_at, not in OrderFinancials.rtoReceivedAt — so a daily
+ * count built only from our own tables misses every customer return. On
+ * 10 October that was 14 parcels against 26 RTOs: the chart read 26 where
+ * the bench had 40.
+ *
+ * Returns the AWBs per day rather than a count, because whether each one was
+ * scanned can only be answered from the scan table in the other database.
+ */
+export async function returnsReceivedByDay(
+  days: number,
+): Promise<Map<string, string[]>> {
+  const out = new Map<string, string[]>();
+  const db = await returnHqReady();
+  if (!db) return out;
+  try {
+    const shopId = await jmShopId(db);
+    if (shopId == null) return out;
+    const rows = await db.$queryRawUnsafe<Array<{ day: string; awb: string }>>(
+      `SELECT to_char(carrier_received_at + interval '5 hours 30 minutes', 'YYYY-MM-DD') AS day,
+              awb_number AS awb
+         FROM return_requests
+        WHERE shop_id = $1
+          AND status::text <> 'cancelled'
+          AND carrier_received_at IS NOT NULL
+          AND carrier_received_at >= now() - ($2 || ' days')::interval`,
+      shopId,
+      String(Math.min(120, Math.max(1, days))),
+    );
+    for (const r of rows) {
+      const awb = String(r.awb || "").trim();
+      if (!awb) continue;
+      const list = out.get(r.day);
+      if (list) list.push(awb);
+      else out.set(r.day, [awb]);
+    }
+    return out;
+  } catch (e: any) {
+    console.error("[returnhq] returnsReceivedByDay", String(e?.message || e).slice(0, 200));
+    return out;
+  } finally {
+    await db.$disconnect().catch(() => {});
+  }
+}

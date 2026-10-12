@@ -1327,7 +1327,11 @@ export async function claimCandidates(
  * astray daily rather than how much is outstanding today.
  *
  * Counts RTOs and customer returns together, because the bench does: both
- * arrive on the same trolley and Claims lists them in one table.
+ * arrive on the same trolley and Claims lists them in one table. They are
+ * dated in DIFFERENT places, though — an RTO by OrderFinancials.rtoReceivedAt,
+ * a customer return by ReturnHQ's carrier_received_at — so both have to be
+ * asked. Counting only the first reported 26 on 10 October where the bench
+ * had 40.
  *
  * Done in SQL rather than by loading rows. The claims list already pulls every
  * candidate to render them; this only needs 30 numbers, and over ~14,000
@@ -1368,6 +1372,21 @@ export async function missingPerDay(
      GROUP BY r.day
      ORDER BY r.day`;
 
+  // The other half of the pile: returns the courier handed back, dated in
+  // ReturnHQ. Scanned-ness still comes from our scan table, so the AWBs come
+  // across and are checked here.
+  const { returnsReceivedByDay } = await import("./returnhq.server");
+  const retByDay = await returnsReceivedByDay(span);
+  const retAwbs = Array.from(retByDay.values()).flat();
+  const scannedRet = new Set<string>();
+  for (let i = 0; i < retAwbs.length; i += 2000) {
+    const hit = await prisma.scanEvent.findMany({
+      where: { shop, result: "ok", awb: { in: retAwbs.slice(i, i + 2000) } },
+      select: { awb: true },
+    });
+    for (const h of hit) scannedRet.add(h.awb);
+  }
+
   const bySql = new Map(
     rows.map((x) => [
       x.day,
@@ -1390,11 +1409,17 @@ export async function missingPerDay(
     d.setUTCDate(d.getUTCDate() - i);
     const day = d.toISOString().slice(0, 10);
     const hit = bySql.get(day);
+    const rets = retByDay.get(day) || [];
+    const retFound = rets.filter((a) => scannedRet.has(a)).length;
+    const returned = (hit?.returned ?? 0) + rets.length;
+    const found = (hit?.found ?? 0) + retFound;
     out.push({
       day,
-      returned: hit?.returned ?? 0,
-      found: hit?.found ?? 0,
-      missing: hit ? hit.returned - hit.found : 0,
+      returned,
+      found,
+      missing: returned - found,
+      // ReturnHQ holds no stock cost, so this stays the RTO figure and the
+      // column says "where cost is known" rather than implying a total.
       costMinor: hit?.cost ?? null,
     });
   }
