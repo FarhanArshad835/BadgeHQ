@@ -1341,7 +1341,17 @@ export async function missingPerDay(
   shop: string,
   days = 30,
 ): Promise<
-  Array<{ day: string; returned: number; found: number; missing: number; costMinor: string | null }>
+  Array<{
+    day: string;
+    returned: number;
+    found: number;
+    missing: number;
+    /** The same missing total, split by counterparty: an RTO is a claim
+     *  against the carrier, a customer return is not. */
+    missingRto: number;
+    missingReturn: number;
+    costMinor: string | null;
+  }>
 > {
   const span = Math.min(120, Math.max(1, days));
   // IST, matching every other day boundary in the app: rtoReceivedAt is stored
@@ -1401,7 +1411,15 @@ export async function missingPerDay(
   // Every day in the span, including the quiet ones: a missing bar reads as
   // "no data", a zero-height bar reads as "nothing went missing", and those
   // are different facts.
-  const out: Array<{ day: string; returned: number; found: number; missing: number; costMinor: string | null }> = [];
+  const out: Array<{
+    day: string;
+    returned: number;
+    found: number;
+    missing: number;
+    missingRto: number;
+    missingReturn: number;
+    costMinor: string | null;
+  }> = [];
   const IST = 5.5 * 60 * 60 * 1000;
   const today = new Date(Date.now() + IST);
   for (let i = span - 1; i >= 0; i--) {
@@ -1413,11 +1431,15 @@ export async function missingPerDay(
     const retFound = rets.filter((a) => scannedRet.has(a)).length;
     const returned = (hit?.returned ?? 0) + rets.length;
     const found = (hit?.found ?? 0) + retFound;
+    const missingRto = (hit?.returned ?? 0) - (hit?.found ?? 0);
+    const missingReturn = rets.length - retFound;
     out.push({
       day,
       returned,
       found,
-      missing: returned - found,
+      missing: missingRto + missingReturn,
+      missingRto,
+      missingReturn,
       // ReturnHQ holds no stock cost, so this stays the RTO figure and the
       // column says "where cost is known" rather than implying a total.
       costMinor: hit?.cost ?? null,

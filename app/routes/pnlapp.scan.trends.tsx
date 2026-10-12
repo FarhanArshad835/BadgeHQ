@@ -40,6 +40,8 @@ type DayRow = {
   returned: number;
   found: number;
   missing: number;
+  missingRto: number;
+  missingReturn: number;
   costMinor: string | null;
 };
 
@@ -65,6 +67,10 @@ export default function Trends() {
   const rows = d.days;
   const peak = Math.max(1, ...rows.map((r) => r.missing));
   const totalMissing = rows.reduce((s, r) => s + r.missing, 0);
+  // Split by counterparty: an RTO is a claim against the carrier, a customer
+  // return is not, so the two numbers lead to different work.
+  const missingRto = rows.reduce((s, r) => s + r.missingRto, 0);
+  const missingReturn = rows.reduce((s, r) => s + r.missingReturn, 0);
   const totalReturned = rows.reduce((s, r) => s + r.returned, 0);
   const cost = rows.reduce((s, r) => s + Number(r.costMinor || 0), 0) / 100;
   // Averaged over days that saw any returns. The newest day is usually still
@@ -110,6 +116,16 @@ export default function Trends() {
                 <div className="tr-k">Went missing</div>
                 <div className="tr-v">{totalMissing.toLocaleString("en-IN")}</div>
                 <div className="tr-s">of {totalReturned.toLocaleString("en-IN")} returned</div>
+                {/* Which counterparty each half is owed by. An RTO can be
+                    claimed from the carrier; a customer return cannot. */}
+                <div className="tr-split">
+                  <span className="tr-pill rto">
+                    {missingRto.toLocaleString("en-IN")} RTO
+                  </span>
+                  <span className="tr-pill ret">
+                    {missingReturn.toLocaleString("en-IN")} return
+                  </span>
+                </div>
               </div>
               <div className="tr-stat">
                 <div className="tr-k">A day</div>
@@ -159,6 +175,7 @@ export default function Trends() {
                     <th className="num">Marked returned</th>
                     <th className="num">Scanned in</th>
                     <th className="num">Still missing</th>
+                    <th className="num">RTO / return</th>
                     <th className="num">Miss rate</th>
                     <th className="num">Stock cost</th>
                   </tr>
@@ -173,6 +190,9 @@ export default function Trends() {
                       <td className="num">{r.found.toLocaleString("en-IN")}</td>
                       <td className="num">
                         <b>{r.missing.toLocaleString("en-IN")}</b>
+                      </td>
+                      <td className="num tr-mix">
+                        {r.missing ? `${r.missingRto} / ${r.missingReturn}` : "—"}
                       </td>
                       <td className="num">
                         {r.returned ? ((r.missing / r.returned) * 100).toFixed(0) + "%" : "—"}
@@ -203,6 +223,11 @@ const CSS = `
 .claims-app .tr-k { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
 .claims-app .tr-v { font-size: 22px; font-weight: 650; line-height: 1.15; margin-top: 3px; font-variant-numeric: tabular-nums; }
 .claims-app .tr-s { font-size: 11px; color: var(--muted); margin-top: 1px; }
+.claims-app .tr-split { display: flex; gap: 5px; margin-top: 7px; flex-wrap: wrap; }
+.claims-app .tr-pill { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 5px; letter-spacing: .02em; white-space: nowrap; }
+.claims-app .tr-pill.rto { background: #DBEAFE; color: #1E3A8A; }
+.claims-app .tr-pill.ret { background: #DCFCE7; color: #14532D; }
+.claims-app .tr-mix { color: var(--muted); font-variant-numeric: tabular-nums; }
 .claims-app .tr-chart {
   display: flex; align-items: flex-end; gap: 4px; height: 220px;
   border: 1px solid var(--line); border-radius: 10px; background: var(--surface);
