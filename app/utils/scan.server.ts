@@ -1316,3 +1316,87 @@ export async function claimCandidates(
 
   return { rows, totalCogsMinor, totalRevenueMinor, scannedCount: seen.size, eligibleCount: rtos.length, undatedCount };
 }
+
+/**
+ * How many parcels went missing on each of the last N days.
+ *
+ * A day's figure is the parcels the COURIER marked returned that day which the
+ * bench has never scanned in. Bucketing on the courier's date rather than the
+ * scan date is what makes this a rate: a parcel marked on the 4th belongs to
+ * the 4th however long it stays missing, so the series says how much goes
+ * astray daily rather than how much is outstanding today.
+ *
+ * Counts RTOs and customer returns together, because the bench does: both
+ * arrive on the same trolley and Claims lists them in one table.
+ *
+ * Done in SQL rather than by loading rows. The claims list already pulls every
+ * candidate to render them; this only needs 30 numbers, and over ~14,000
+ * returns the difference is the page loading or not.
+ */
+export async function missingPerDay(
+  shop: string,
+  days = 30,
+): Promise<
+  Array<{ day: string; returned: number; found: number; missing: number; costMinor: string | null }>
+> {
+  const span = Math.min(120, Math.max(1, days));
+  // IST, matching every other day boundary in the app: rtoReceivedAt is stored
+  // UTC, so a plain date() would split a day at 05:30.
+  const rows = await prisma.$queryRaw<
+    Array<{ day: string; returned: bigint; found: bigint; cost: bigint | null }>
+  >`
+    WITH r AS (
+      SELECT o.awb,
+             o."cogsMinor",
+             to_char(o."rtoReceivedAt" + interval '5 hours 30 minutes', 'YYYY-MM-DD') AS day
+        FROM "OrderFinancials" o
+       WHERE o.shop = ${shop}
+         AND o."rtoReceivedAt" IS NOT NULL
+         AND o."rtoReceivedAt" >= (now() - (${span} || ' days')::interval)
+         AND o.awb <> ''
+    )
+    SELECT r.day,
+           count(*)                                                     AS returned,
+           count(s.awb)                                                 AS found,
+           sum(r."cogsMinor") FILTER (WHERE s.awb IS NULL)              AS cost
+      FROM r
+      LEFT JOIN (
+        SELECT DISTINCT awb FROM "ScanEvent"
+         WHERE shop = ${shop} AND result = 'ok'
+           AND kind IN ('rto', 'customer-return')
+      ) s ON s.awb = r.awb
+     GROUP BY r.day
+     ORDER BY r.day`;
+
+  const bySql = new Map(
+    rows.map((x) => [
+      x.day,
+      {
+        returned: Number(x.returned),
+        found: Number(x.found),
+        cost: x.cost == null ? null : String(x.cost),
+      },
+    ]),
+  );
+
+  // Every day in the span, including the quiet ones: a missing bar reads as
+  // "no data", a zero-height bar reads as "nothing went missing", and those
+  // are different facts.
+  const out: Array<{ day: string; returned: number; found: number; missing: number; costMinor: string | null }> = [];
+  const IST = 5.5 * 60 * 60 * 1000;
+  const today = new Date(Date.now() + IST);
+  for (let i = span - 1; i >= 0; i--) {
+    const d = new Date(today);
+    d.setUTCDate(d.getUTCDate() - i);
+    const day = d.toISOString().slice(0, 10);
+    const hit = bySql.get(day);
+    out.push({
+      day,
+      returned: hit?.returned ?? 0,
+      found: hit?.found ?? 0,
+      missing: hit ? hit.returned - hit.found : 0,
+      costMinor: hit?.cost ?? null,
+    });
+  }
+  return out;
+}

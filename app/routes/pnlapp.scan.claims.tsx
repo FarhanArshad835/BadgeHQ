@@ -26,7 +26,6 @@ import {
   type ClaimStatus,
 } from "../utils/scan.server";
 import { ClaimsStyles } from "../components/ClaimsStyles";
-import { MissingPerDay } from "../components/MissingPerDay";
 import { ColumnFilter } from "../components/ColumnFilter";
 import { ScanNav } from "../components/ScanNav";
 import { BusyBar } from "../components/BusyBar";
@@ -263,28 +262,6 @@ export default function Claims() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, search, carrier, step, sortCol, sortDir, age, custom, claimWindow, showScanned, typeFilter]);
 
-  /**
-   * What the chart counts.
-   *
-   * Every filter EXCEPT the date range: picking one day would otherwise
-   * collapse the chart to a single bar, which is the one shape that cannot
-   * answer "how does today compare". The chart is the context the date chips
-   * are read against, so it has to outlive them.
-   *
-   * Scanned parcels are kept whatever the list is showing, so the pale part of
-   * each bar can say how much of that day was eventually found.
-   */
-  const chartRows = useMemo(
-    () =>
-      rows.filter(
-        (r) =>
-          (!typeFilter || r.type === typeFilter) &&
-          (!carrier || r.carrier === carrier) &&
-          (!step || nextStep(r) === step),
-      ),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [rows, typeFilter, carrier, step, claimWindow],
-  );
 
   /**
    * A sortable header.
@@ -675,11 +652,6 @@ export default function Claims() {
             </button>
           </div>
         </div>
-
-        {/* Above the table, because it is the context the list is read in:
-            "53 on 11 Oct" means nothing until you know whether 53 is a normal
-            day. */}
-        <MissingPerDay rows={chartRows} days={10} inr={inr} />
 
         <div className="table-card">
           <table>

@@ -31,6 +31,7 @@ const pnlAppRoutes = [
   route("/pnl-app/scan/logout", "routes/pnlapp.scan.logout.tsx"),
   route("/pnl-app/scan/dispatch", "routes/pnlapp.scan.dispatch.tsx"),
   route("/pnl-app/scan/returns", "routes/pnlapp.scan.returns.tsx"),
+  route("/pnl-app/scan/trends", "routes/pnlapp.scan.trends.tsx"),
   // The mobile inbound scanner. Its own path rather than a breakpoint on
   // /returns: it is a different design, not a narrower one, and a bench
   // phone can be bookmarked straight to it.

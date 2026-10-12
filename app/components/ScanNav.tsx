@@ -10,6 +10,7 @@ const TABS = [
   { key: "dispatch", href: "/pnl-app/scan/dispatch", label: "Dispatch" },
   { key: "returns", href: "/pnl-app/scan/returns", label: "Inbound" },
   { key: "claims", href: "/pnl-app/scan/claims", label: "Claims" },
+  { key: "trends", href: "/pnl-app/scan/trends", label: "Trends" },
   { key: "history", href: "/pnl-app/scan/history", label: "History" },
 ];
 
