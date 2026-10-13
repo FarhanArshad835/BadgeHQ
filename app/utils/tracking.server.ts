@@ -416,6 +416,12 @@ export function trackingContextForLlm(r: TrackingResult): string {
     `. (Today's date is ${today}. Use the scan date exactly as given above — do ` +
     `NOT say "today" unless the scan date is actually today, and do not invent a ` +
     `newer time.)`;
+  // The customer's own tracking page, already resolved. Without this the bot
+  // could only offer the generic portal, where the shopper has to find and type
+  // the AWB it already knows — the thing it is being asked about.
+  out +=
+    ` Their tracking page is ${trackingUrlFor(r.awb)} — include that link when ` +
+    `giving a status, so they can watch it themselves.`;
   if (r.failedAttempt) {
     out +=
       " IMPORTANT: the latest scan is a FAILED delivery attempt (the courier " +
@@ -427,4 +433,29 @@ export function trackingContextForLlm(r: TrackingResult): string {
       "to arrange redelivery.";
   }
   return out;
+}
+
+/**
+ * The carrier's own tracking page for a waybill.
+ *
+ * Shared with the P&L dashboard's funnel list, which had this logic privately.
+ * Routed by AWB prefix, the same rule detectCourier uses, because the stored
+ * carrier column is unreliable — 2,138 waybills booked since August are
+ * recorded as Delhivery but do not carry Delhivery's prefix, and every
+ * Shadowfax one has it blank.
+ *
+ * Shiprocket is the fallback rather than a guess: it is the aggregator that
+ * books everything the other two prefixes do not claim, and its page resolves
+ * AWBs from the carriers it brokers.
+ */
+export function trackingUrlFor(awb: string): string {
+  const a = String(awb || "").trim();
+  if (!a) return "https://jmlooks.shiprocket.co/";
+  const base =
+    a.toUpperCase().startsWith(SHADOWFAX_PREFIX)
+      ? "https://tracker.shadowfax.in/#/"
+      : a.startsWith(DELHIVERY_PREFIX)
+        ? "https://www.delhivery.com/track/package/"
+        : "https://jmlooks.shiprocket.co/tracking/";
+  return base + encodeURIComponent(a);
 }
