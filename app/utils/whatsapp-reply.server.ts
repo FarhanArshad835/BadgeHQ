@@ -507,7 +507,7 @@ async function handleJob(job: {
   if (job.message === "__handoff__") {
     const wa = await send(HANDOFF_REPLY, "badgehq-ai-handoff");
     await assignChatViaFlow("Customer asked to talk to a human.", "asked");
-    return wa.ok ? { ok: true } : { ok: false, error: wa.error };
+    return wa.ok ? { ok: true, reply: HANDOFF_REPLY } : { ok: false, error: wa.error };
   }
 
   const convo = await prisma.whatsAppConversation.findUnique({
@@ -594,23 +594,21 @@ async function handleJob(job: {
         buttonLabel: MENU_BUTTON,
         rows: MENU_ROWS,
       });
-      return wa.ok ? { ok: true } : { ok: false, error: wa.error };
+      // An interactive list, not a text message. Recorded by name because
+      // quoting its body would imply we sent a paragraph we did not.
+      return wa.ok ? { ok: true, reply: "[menu]" } : { ok: false, error: wa.error };
     }
-    const wa = await send(
-      settings.greeting || "Hi! How can I help you today?",
-      "badgehq-ai-greeting",
-    );
-    return wa.ok ? { ok: true } : { ok: false, error: wa.error };
+    const greeting = settings.greeting || "Hi! How can I help you today?";
+    const wa = await send(greeting, "badgehq-ai-greeting");
+    return wa.ok ? { ok: true, reply: greeting } : { ok: false, error: wa.error };
   }
   if (cheap === "nudge") {
     // A nudge ("are you there?", "hello??") carries no issue to identify, so per
     // "don't escalate without identifying the issue" we don't hand off — we ask
     // what they need and stay live so their answer reaches the AI.
-    const wa = await send(
-      "I'm here! " + TRIAGE_PHRASE + " and I'll help you right away.",
-      "badgehq-ai-nudge",
-    );
-    return wa.ok ? { ok: true } : { ok: false, error: wa.error };
+    const nudge = "I'm here! " + TRIAGE_PHRASE + " and I'll help you right away.";
+    const wa = await send(nudge, "badgehq-ai-nudge");
+    return wa.ok ? { ok: true, reply: nudge } : { ok: false, error: wa.error };
   }
 
   // The deterministic menu: button taps and short typed questions that the
@@ -637,10 +635,8 @@ async function handleJob(job: {
 
     if (timesAskedWhatYouNeed >= 2) {
       // Asked twice, still no describable issue — escalate so a human reaches out.
-      const wa = await send(
-        isBusinessHoursIST() ? HANDOVER_REPLY : OFF_HOURS_REPLY,
-        "badgehq-menu-human",
-      );
+      const text = isBusinessHoursIST() ? HANDOVER_REPLY : OFF_HOURS_REPLY;
+      const wa = await send(text, "badgehq-menu-human");
       if (wa.ok) {
         await assignChatViaFlow(
           "Customer asked for a human but never described an issue.",
@@ -659,7 +655,7 @@ async function handleJob(job: {
             mutedUntil: new Date(Date.now() + HANDOFF_MUTE_HOURS * 3600_000),
           },
         });
-        return { ok: true };
+        return { ok: true, reply: text };
       }
       return { ok: false, error: wa.error };
     }
@@ -679,7 +675,7 @@ async function handleJob(job: {
       create: { shop: job.shop, phone: job.phone, turns: appendTurns([], job.message, triage) },
       update: { turns: appendTurns(priorTurns, job.message, triage) },
     });
-    return { ok: true };
+    return { ok: true, reply: triage };
   }
   // A message-borne AWB means the customer wants a LIVE status, so it must beat
   // both the canned "track here" menu link below and the human escalation
@@ -741,11 +737,15 @@ async function handleJob(job: {
       // Nothing to look up (or lookup failed): the canned reply asks for the AWB
       // and links the self-service page — the on-ramp to a live lookup next time.
       const wa = await send(MENU_REPLIES.track, "badgehq-menu-track");
-      return wa.ok ? { ok: true } : { ok: false, error: wa.error };
+      return wa.ok
+        ? { ok: true, reply: MENU_REPLIES.track }
+        : { ok: false, error: wa.error };
     }
   } else if (intent) {
     const wa = await send(MENU_REPLIES[intent], `badgehq-menu-${intent}`);
-    return wa.ok ? { ok: true } : { ok: false, error: wa.error };
+    return wa.ok
+      ? { ok: true, reply: MENU_REPLIES[intent] }
+      : { ok: false, error: wa.error };
   }
 
   // Rule: identify the issue before escalating. A refund/status chase used to
@@ -893,10 +893,8 @@ async function handleJob(job: {
       ai.error === "no-answer";
     const outOfTries = job.attempts >= MAX_ATTEMPTS;
     if (permanent || ai.error === "quota-exhausted" || (transient && outOfTries)) {
-      const wa = await send(
-        isBusinessHoursIST() ? HANDOVER_REPLY : OFF_HOURS_REPLY,
-        "badgehq-ai-unavailable",
-      );
+      const text = isBusinessHoursIST() ? HANDOVER_REPLY : OFF_HOURS_REPLY;
+      const wa = await send(text, "badgehq-ai-unavailable");
       // Only hand over if the customer actually heard something. If the send
       // failed too, the whole channel is down — let the job retry rather than
       // assigning a chat nobody was told about.
@@ -913,7 +911,7 @@ async function handleJob(job: {
         });
         // Done, not failed: a person owns this conversation now, and a bot
         // reply arriving later would talk over them.
-        return { ok: true };
+        return { ok: true, reply: text };
       }
     }
 
