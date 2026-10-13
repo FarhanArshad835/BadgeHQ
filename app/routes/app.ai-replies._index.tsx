@@ -8,6 +8,7 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData, useSearchParams, useNavigation } from "@remix-run/react";
+import type { CSSProperties } from "react";
 import { useState } from "react";
 import {
   Page,
@@ -110,11 +111,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       who: a.who,
       // Long messages would push every other column off screen; the full text is
       // on hover, where it costs nothing.
-      message: a.message.length > 90 ? `${a.message.slice(0, 90)}...` : a.message,
+      message: a.message.length > 54 ? `${a.message.slice(0, 54)}...` : a.message,
       fullMessage: a.message,
       // Trimmed harder than the question: a reply runs long, and the column
       // only needs to show WHICH answer went out. The whole text is on hover.
-      reply: a.reply.length > 70 ? `${a.reply.slice(0, 70)}...` : a.reply,
+      reply: a.reply.length > 54 ? `${a.reply.slice(0, 54)}...` : a.reply,
       fullReply: a.reply,
       status: a.status,
       // For a skip this holds the reason, not an error. Translated here so the
@@ -122,6 +123,22 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       note: a.status === "skipped" ? skipLabel(a.error) : a.error,
     })),
   });
+};
+
+/**
+ * One line, clipped at a fixed width.
+ *
+ * The table lives in Shopify's embedded frame, which does not grow — so a cell
+ * that refuses to shrink pushes the Result badge off the right edge behind a
+ * horizontal scrollbar. The full text is on hover either way.
+ */
+const CLAMP: CSSProperties = {
+  display: "inline-block",
+  maxWidth: 320,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  verticalAlign: "bottom",
 };
 
 export default function AiRepliesActivityPage() {
@@ -407,9 +424,13 @@ export default function AiRepliesActivityPage() {
             resourceName={{ singular: "message", plural: "messages" }}
             itemCount={d.activity.length}
             selectable={false}
+            // Channel is gone as its own column: every one of 25,744 rows says
+            // WhatsApp, so it spent width to repeat a constant and pushed the
+            // table into a horizontal scroll that cut the Result badge off the
+            // right edge. It survives as an icon-free note beside an Instagram
+            // shopper, which is the only case where it tells you anything.
             headings={[
               { title: "Shopper" },
-              { title: "Channel" },
               { title: "Message" },
               { title: "Bot replied" },
               { title: "When" },
@@ -427,9 +448,14 @@ export default function AiRepliesActivityPage() {
                     <Text as="span" tone="subdued">Instagram user</Text>
                   )}
                 </IndexTable.Cell>
-                <IndexTable.Cell>{a.channel}</IndexTable.Cell>
+                {/* Both text columns are width-capped and clipped. The trim
+                    above handles the common case; this handles a single long
+                    unbroken token, which no character count can shorten and
+                    which is what forces the table wider than its frame. */}
                 <IndexTable.Cell>
-                  <span title={a.fullMessage}>{a.message || "No text"}</span>
+                  <span title={a.fullMessage} style={CLAMP}>
+                    {a.message || "No text"}
+                  </span>
                 </IndexTable.Cell>
                 {/* Blank is honest here. A skip, an ack, and a coalesced
                     sibling all legitimately sent nothing, and inventing a
@@ -437,7 +463,7 @@ export default function AiRepliesActivityPage() {
                     deliberate silence. */}
                 <IndexTable.Cell>
                   {a.reply ? (
-                    <span title={a.fullReply}>
+                    <span title={a.fullReply} style={CLAMP}>
                       <Text as="span" tone="subdued">{a.reply}</Text>
                     </span>
                   ) : (
@@ -452,6 +478,15 @@ export default function AiRepliesActivityPage() {
                 <IndexTable.Cell>
                   {a.status === "done" ? (
                     <Badge tone="success">Answered</Badge>
+                  ) : a.status === "failed" && a.note === "human-replied" ? (
+                    // Not a failure. A teammate answered before the bot got
+                    // there, which is the outcome we want — showing it in red
+                    // beside real breakages made a good day look broken.
+                    <Badge tone="info">Human replied</Badge>
+                  ) : a.status === "failed" && a.note === "too-old" ? (
+                    // Also distinct: nothing broke, the message simply aged out
+                    // of the window where a reply would still have been useful.
+                    <span title={a.note}><Badge>Too late</Badge></span>
                   ) : a.status === "failed" ? (
                     <span title={a.note}><Badge tone="critical">Failed</Badge></span>
                   ) : a.status === "skipped" ? (
