@@ -17,6 +17,7 @@ import prisma from "../db.server";
 import { buildSystemPrompt, callAi } from "./ai-replies.server";
 import { sendDoubleTickList, sendWhatsAppText } from "./whatsapp.server";
 import {
+  AI_DOWN_MUTE_HOURS,
   HANDOFF_MUTE_HOURS,
   HANDOFF_REPLY,
   cheapReplyKind,
@@ -145,6 +146,12 @@ export async function processReplyJob(id: string): Promise<"sent" | "failed" | "
     // dropped forever (the cron only ever picks up "pending"). Observed live:
     // 13 of 15 customers silently lost, including "It's urgent" and "Call me
     // pls". Rate-limited jobs go back to pending with the attempt refunded.
+    // Deliberately NOT including ":upstream" here, though a 529 overloaded is
+    // just as transient. Refunding its attempts would stop the counter ever
+    // reaching MAX_ATTEMPTS, and the handoff in handleJob fires on exactly that
+    // — so the job would loop silently to the 2-hour cutoff instead of pulling
+    // in a human. It gets three honest tries and then a person, which is the
+    // better end for a customer who is waiting either way.
     const throttled =
       result.error.endsWith(":rate-limited") || result.error.endsWith(":quota-exhausted");
     if (throttled) {
@@ -365,6 +372,8 @@ async function handleJob(job: {
   message: string;
   providerMessageId: string;
   createdAt: Date;
+  /** Which try this is. A first blip is retried; a last one hands off. */
+  attempts: number;
 }): Promise<JobResult> {
   const settings = await prisma.aiReplySettings.findUnique({ where: { shop: job.shop } });
   if (!settings?.waReplyEnabled || !settings.isEnabled || !settings.apiKey) {
@@ -853,6 +862,48 @@ async function handleJob(job: {
     // message was dropped as failed, hours before the quota would reset. Reset
     // the attempt counter for those so the job survives until the quota does.
     const permanent = ai.error === "bad-key" || ai.error === "bad-model";
+
+    // The model cannot answer, and retrying will not change that. Until now
+    // this returned here and the customer got NOTHING — no reply, no human, no
+    // trace beyond a failed row nobody reads. A revoked key silently swallowed
+    // every message until somebody noticed the dashboard.
+    //
+    // So do what a real escalation does, because operationally this IS one: the
+    // bot is out and a person has to take the thread. The handoff fires on a
+    // configuration failure immediately, and on a transient one only once the
+    // retries are spent — a single blip should not pull a human out of their
+    // day when the next attempt will probably succeed.
+    const transient =
+      ai.error === "upstream" ||
+      ai.error === "timeout" ||
+      ai.error === "network" ||
+      ai.error === "no-answer";
+    const outOfTries = job.attempts >= MAX_ATTEMPTS;
+    if (permanent || ai.error === "quota-exhausted" || (transient && outOfTries)) {
+      const wa = await send(
+        isBusinessHoursIST() ? HANDOVER_REPLY : OFF_HOURS_REPLY,
+        "badgehq-ai-unavailable",
+      );
+      // Only hand over if the customer actually heard something. If the send
+      // failed too, the whole channel is down — let the job retry rather than
+      // assigning a chat nobody was told about.
+      if (wa.ok) {
+        await assignChatViaFlow(
+          `The assistant could not answer (${settings.aiProvider}:${ai.error}).`,
+          "ai-unavailable",
+        );
+        const mutedUntil = new Date(Date.now() + AI_DOWN_MUTE_HOURS * 3600_000);
+        await prisma.whatsAppConversation.upsert({
+          where: { shop_phone: { shop: job.shop, phone: job.phone } },
+          create: { shop: job.shop, phone: job.phone, optedOut: true, mutedUntil },
+          update: { optedOut: true, mutedUntil },
+        });
+        // Done, not failed: a person owns this conversation now, and a bot
+        // reply arriving later would talk over them.
+        return { ok: true };
+      }
+    }
+
     return { ok: false, error: `${settings.aiProvider}:${ai.error}`, permanent };
   }
 

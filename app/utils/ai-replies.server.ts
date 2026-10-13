@@ -309,15 +309,26 @@ export async function callClaude(opts: {
       // labels regardless of provider. Anthropic reports credit exhaustion as a
       // 400 with type "billing_error"; treat it like a quota problem so the
       // merchant knows it needs money, not a new key.
-      const billing = /billing|credit|insufficient|quota/i.test(detail);
+      // Read the structured type where Anthropic gives one. The regex below
+      // still catches the credit case today only because the message happens to
+      // contain "credit balance" — reword that and a merchant with no credit
+      // would be told the service was down instead of being told to top up.
+      let errType = "";
+      try {
+        errType = String(JSON.parse(detail)?.error?.type || "");
+      } catch {
+        /* a non-JSON body is an upstream problem, handled by status below */
+      }
+      const billing =
+        errType === "billing_error" || /billing|credit|insufficient|quota/i.test(detail);
       const error =
         res.status === 404
           ? "bad-model"
-          : res.status === 429
+          : res.status === 429 || errType === "rate_limit_error"
           ? "rate-limited"
           : (res.status === 400 && billing) || res.status === 402
           ? "quota-exhausted"
-          : res.status === 401 || res.status === 403
+          : res.status === 401 || res.status === 403 || errType === "authentication_error"
           ? "bad-key"
           : "upstream";
       return { ok: false, error };

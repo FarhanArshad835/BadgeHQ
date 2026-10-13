@@ -293,6 +293,21 @@ export default function AiRepliesActivityPage() {
                   <Text as="span">Asked but never said what was wrong</Text>
                   <Text as="span" fontWeight="semibold">{nfmt(s.unresolvedHandovers)}</Text>
                 </InlineStack>
+                {/* Only when it has happened. A permanent zero would read as a
+                    worry to keep an eye on; the number appearing at all is the
+                    signal, and it means the assistant was out — no credit, a
+                    dead key, or the API down — not that a conversation was
+                    hard. */}
+                {s.aiUnavailable > 0 && (
+                  <InlineStack align="space-between" blockAlign="center">
+                    <Text as="span" tone="critical">
+                      Assistant unavailable — check credit and key
+                    </Text>
+                    <Text as="span" fontWeight="semibold" tone="critical">
+                      {nfmt(s.aiUnavailable)}
+                    </Text>
+                  </InlineStack>
+                )}
                 <InlineStack align="space-between" blockAlign="center">
                   <Text as="span">WhatsApp / Instagram replies</Text>
                   <Text as="span" fontWeight="semibold">

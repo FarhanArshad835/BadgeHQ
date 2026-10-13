@@ -35,6 +35,18 @@ export const PURGE_AFTER_HOURS = 24;
 export const HANDOFF_MUTE_HOURS = 12;
 
 /**
+ * How long the bot stays quiet after handing off because IT could not answer —
+ * credits gone, key revoked, the API down.
+ *
+ * Longer than the 12 hours a complaint gets, because the two are different
+ * problems. A complaint ends when the team finishes the thread; this ends when
+ * somebody tops up an account or rotates a key, which realistically happens the
+ * next working day. Unmuting sooner would put the bot back in front of a
+ * customer a human is already talking to, still unable to answer.
+ */
+export const AI_DOWN_MUTE_HOURS = 24;
+
+/**
  * Messages that deserve a reply but not a model call.
  *
  * Measured on a real day's traffic: of 53 inbound messages, 21 were bare
@@ -315,9 +327,16 @@ export type DoubleTickAgent = { name: string; phone: string; status: string };
 
 /**
  * List the merchant's DoubleTick team members so the admin can pick which agent
- * receives handoff alerts. GET /team is the only agent endpoint that works —
- * DoubleTick has no API to assign a chat to an agent (probed ~50 paths, all
- * 404), so "pick an agent to ping" is the closest thing to routing it allows.
+ * receives handoff alerts.
+ *
+ * NOTE, 2026-10: this used to say DoubleTick had no assign API at all (~50
+ * paths probed, all 404). That is no longer true — POST /team-member/assign now
+ * exists, taking {assignedUserPhoneNumber, customerPhoneNumber, wabaNumber,
+ * reassign}; probed against the live key it returns 400 validating the payload,
+ * not 404. Handoff still goes through the Bot Studio flow webhook because that
+ * works and is what the merchant has configured, but the API would allow
+ * round-robin across the ONLINE agents this endpoint lists, instead of the one
+ * fixed agent inside the flow.
  * Read-only, best-effort: on any failure returns [] and the admin falls back to
  * typing a number by hand.
  */

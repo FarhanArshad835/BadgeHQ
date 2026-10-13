@@ -42,10 +42,27 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   // the cron never looks at "failed" again — so those people got permanent
   // silence for a limit that cleared a minute later. Recent ones are worth one
   // more try; older than an hour, a reply would arrive too late to be useful.
+  //
+  // Widened past rate limits: a revoked key failed on the FIRST attempt and was
+  // never looked at again, so every message during the outage was lost even
+  // after the key was fixed. The same held for a timeout or a 529. All of these
+  // clear on their own or on an admin action, and none is a reason to abandon a
+  // customer who is still waiting.
+  //
+  // Still bounded by the hour: a reply arriving later than that answers a
+  // question the shopper has moved on from, and the handoff has by then put a
+  // person on the thread anyway.
   await prisma.whatsAppReplyJob.updateMany({
     where: {
       status: "failed",
-      error: { contains: "rate-limited" },
+      OR: [
+        { error: { contains: "rate-limited" } },
+        { error: { contains: "quota-exhausted" } },
+        { error: { contains: "bad-key" } },
+        { error: { contains: "upstream" } },
+        { error: { contains: "timeout" } },
+        { error: { contains: "network" } },
+      ],
       updatedAt: { gt: new Date(now.getTime() - 3600_000) },
     },
     data: { status: "pending", attempts: 0 },
@@ -57,8 +74,21 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     data: { status: "pending" },
   });
 
+  // A job that just failed is left alone for three minutes, the same spacing
+  // drainPendingBacklog uses. Without it consecutive ticks re-ran a job that
+  // had failed seconds earlier, burning all three attempts on an outage that
+  // had not had time to clear — and for a "no-answer" each retry repeated the
+  // whole pipeline, thread fetch and paid model call included, on identical
+  // input that produced the identical empty reply.
+  //
+  // Jobs that have never been tried are not delayed: attempts 0 means this is
+  // the first look, and the retry spacing should not become a cold start.
+  const retryAfter = new Date(now.getTime() - 3 * 60_000);
   const candidates = await prisma.whatsAppReplyJob.findMany({
-    where: { status: "pending" },
+    where: {
+      status: "pending",
+      OR: [{ attempts: 0 }, { updatedAt: { lt: retryAfter } }],
+    },
     orderBy: { createdAt: "asc" },
     take: BATCH,
     select: { id: true },

@@ -34,6 +34,9 @@ const IG_CHANNEL = "instagram";
 
 /** How long an automatic handoff mute lasts — mirrors WhatsApp's 12h. */
 const IG_HANDOFF_MUTE_HOURS = 12;
+/** Longer than a handoff mute: this ends when someone tops up or fixes a key,
+ *  realistically the next working day. Mirrors AI_DOWN_MUTE_HOURS. */
+const IG_AI_DOWN_MUTE_HOURS = 24;
 
 // Instagram can't look up live order status (no AWB in the DM), so delivery and
 // refund chasing get a redirect to WhatsApp, where the bot CAN track. Kept as a
@@ -166,6 +169,8 @@ async function handleSocialJob(job: {
   customerId: string;
   message: string;
   createdAt: Date;
+  /** Which try this is. A first blip is retried; a last one hands off. */
+  attempts: number;
 }): Promise<IgJobResult> {
   const settings = await prisma.aiReplySettings.findUnique({ where: { shop: job.shop } });
   if (!settings?.igEnabled || !settings.isEnabled || !settings.apiKey) {
@@ -280,6 +285,61 @@ async function handleSocialJob(job: {
 
   if (!ai.ok) {
     const permanent = ai.error === "bad-key" || ai.error === "bad-model";
+
+    // Same hole as the WhatsApp worker had: the model cannot answer, so the
+    // customer got nothing at all and nobody was told. Instagram has no chat
+    // assignment to call, so the handover is the reply plus the mute plus the
+    // Handover row — which is what a report reads later anyway.
+    //
+    // Configuration failures hand off at once; a transient one only after its
+    // retries are spent, so a blip does not escalate on the first wobble.
+    const transient =
+      ai.error === "upstream" ||
+      ai.error === "timeout" ||
+      ai.error === "network" ||
+      ai.error === "no-answer";
+    if (permanent || ai.error === "quota-exhausted" || (transient && job.attempts >= IG_MAX_ATTEMPTS)) {
+      const wa = await send(
+        "Thanks for reaching out! Our team will reply to you here shortly.",
+      );
+      // Only hand over if the customer actually heard something — a failed send
+      // means the channel is down too, and the job should retry instead.
+      if (wa.ok) {
+        try {
+          await prisma.handover.create({
+            data: {
+              shop: job.shop,
+              channel: IG_CHANNEL,
+              customerId: job.customerId,
+              reason: "ai-unavailable",
+            },
+          });
+        } catch (e: any) {
+          console.error("[ig-reply] handover record failed:", String(e?.message || e).slice(0, 160));
+        }
+        const mutedUntil = new Date(Date.now() + IG_AI_DOWN_MUTE_HOURS * 3600_000);
+        await prisma.socialConversation.upsert({
+          where: {
+            shop_channel_customerId: {
+              shop: job.shop,
+              channel: IG_CHANNEL,
+              customerId: job.customerId,
+            },
+          },
+          create: {
+            shop: job.shop,
+            channel: IG_CHANNEL,
+            customerId: job.customerId,
+            optedOut: true,
+            mutedUntil,
+          },
+          update: { optedOut: true, mutedUntil },
+        });
+        // Done, not failed: a person owns this now.
+        return { ok: true };
+      }
+    }
+
     return { ok: false, error: `${settings.aiProvider}:${ai.error}`, permanent };
   }
 

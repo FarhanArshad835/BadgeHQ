@@ -47,6 +47,7 @@ export type AiReplyStats = {
   handedOver: number; // handovers in the range
   escalatedByBot: number; // the assistant decided it could not finish
   askedForHuman: number; // the shopper asked for a person
+  aiUnavailable: number; // the assistant was down (no credits, bad key, API out)
   unresolvedHandovers: number; // asked twice and never described an issue
   // Bot speed, from the message landing to the reply going out. Median rather
   // than mean: one 40s LLM timeout would drag a mean into fiction.
@@ -200,6 +201,12 @@ export async function aiReplyStats(
 
   const escalatedByBot = handovers.filter((h) => h.reason === "escalated").length;
   const askedForHuman = handovers.filter((h) => h.reason === "asked").length;
+  // Counted separately because unresolvedHandovers is derived by subtraction:
+  // without this, every handoff caused by the model being unavailable would be
+  // reported as a shopper who could not describe their problem. They are
+  // opposite diagnoses — one is a bot failure, the other a conversation that
+  // needed a person.
+  const aiUnavailable = handovers.filter((h) => h.reason === "ai-unavailable").length;
 
   latencies.sort((a, b) => a - b);
   const medianReplySeconds =
@@ -250,7 +257,8 @@ export async function aiReplyStats(
     handedOver: handledByHuman,
     escalatedByBot,
     askedForHuman,
-    unresolvedHandovers: handovers.length - escalatedByBot - askedForHuman,
+    aiUnavailable,
+    unresolvedHandovers: handovers.length - escalatedByBot - askedForHuman - aiUnavailable,
     medianReplySeconds,
     repliesUnderAMinute,
     // Everything the bot did not resolve is work that reached a person: the
