@@ -474,19 +474,34 @@ async function handleJob(job: {
   // Look an AWB up on the courier and return an LLM system-prompt block phrasing
   // the live status — or null if it can't be resolved (no creds, courier down,
   // unknown AWB). Shared by the menu "track" tap and the main AI flow so both
-  // answer with real data. Delhivery key is reused from the storefront
-  // delivery-estimate feature; Shiprocket creds live on the AI-replies settings.
+  // answer with real data.
+  //
+  // Each carrier's credential lives wherever that integration was first built:
+  // Shiprocket on the AI-replies settings, Delhivery reused from the storefront
+  // delivery-estimate feature, Shadowfax on the standalone P&L app record (the
+  // same place the scan screen reads it from). All three must be passed —
+  // trackParcel silently drops any carrier it has no credential for, so a
+  // missing token doesn't read as "lookup failed", it reads as "that waybill
+  // doesn't exist", which is how an SF parcel ended up being sent to Shiprocket.
   const resolveTrackingContext = async (awb: string): Promise<string | null> => {
     if (!settings.waTrackingEnabled || !awb) return null;
-    const delivery = await prisma.deliverySettings.findUnique({
-      where: { shop: job.shop },
-      select: { apiToken: true },
-    });
+    const [delivery, pnlApp] = await Promise.all([
+      prisma.deliverySettings.findUnique({
+        where: { shop: job.shop },
+        select: { apiToken: true },
+      }),
+      // Singleton row, so a miss here is a not-yet-configured shop, not an error.
+      prisma.pnlApp.findUnique({
+        where: { id: "default" },
+        select: { shadowfaxApiToken: true },
+      }),
+    ]);
     const tracking = await trackParcel({
       awb,
       shiprocketEmail: settings.waShiprocketEmail || undefined,
       shiprocketPassword: settings.waShiprocketPassword || undefined,
       delhiveryApiKey: delivery?.apiToken || undefined,
+      shadowfaxApiToken: pnlApp?.shadowfaxApiToken || undefined,
     });
     if (!tracking) return null;
     return (
