@@ -103,7 +103,16 @@ const WANTS_TRACKING_RE =
  */
 export const STALE_REPLY_MS = 2 * 60 * 60 * 1000;
 
-export type JobResult = { ok: true } | { ok: false; error: string; permanent?: boolean };
+/**
+ * `reply` is what the shopper was actually told, carried back so the activity
+ * table can show both halves of the exchange. Optional because several
+ * successes send nothing at all — an "ack" to "thanks", a burst stand-down, a
+ * coalesced sibling — and those rows should stay blank rather than claim a
+ * reply that never went out.
+ */
+export type JobResult =
+  | { ok: true; reply?: string }
+  | { ok: false; error: string; permanent?: boolean };
 
 /**
  * Atomically claim one job. True means the caller now owns it and must call
@@ -135,7 +144,11 @@ export async function processReplyJob(id: string): Promise<"sent" | "failed" | "
     if (result.ok) {
       await prisma.whatsAppReplyJob.update({
         where: { id },
-        data: { status: "done", error: "" },
+        // The reply is stored here because nothing else keeps it: the
+        // conversation's turns are purged after a day, and this table is what
+        // the activity view reads weeks later when someone is checking a
+        // complaint.
+        data: { status: "done", error: "", reply: (result.reply || "").slice(0, 2000) },
       });
       return "sent";
     }
@@ -970,5 +983,5 @@ async function handleJob(job: {
     },
   });
 
-  return { ok: true };
+  return { ok: true, reply: replyText };
 }

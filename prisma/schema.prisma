@@ -570,6 +570,11 @@ model WhatsAppReplyJob {
   status            String   @default("pending") // pending | claimed | done | failed
   attempts          Int      @default(0)
   error             String   @default("")
+  /// What the shopper was actually told. Kept here rather than read from the
+  /// conversation's turns, which are purged after 24 hours — this table is what
+  /// the activity view reads weeks later. Blank where a success sent nothing
+  /// (an ack, a coalesced sibling), which is not the same as an empty reply.
+  reply             String   @default("")
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 

@@ -277,6 +277,9 @@ export type AiReplyActivityRow = {
   channel: string;
   who: string;
   message: string;
+  /** What the bot actually said back. Blank for a skip, or for a success that
+   *  deliberately sent nothing (an ack, a coalesced sibling). */
+  reply: string;
   status: string;
   error: string;
 };
@@ -293,7 +296,15 @@ export async function recentAiReplyActivity(shop: string, limit = 50): Promise<A
       where: { shop },
       orderBy: { createdAt: "desc" },
       take: limit,
-      select: { id: true, createdAt: true, phone: true, message: true, status: true, error: true },
+      select: {
+        id: true,
+        createdAt: true,
+        phone: true,
+        message: true,
+        reply: true,
+        status: true,
+        error: true,
+      },
     }),
     prisma.socialReplyJob.findMany({
       where: { shop },
@@ -322,6 +333,7 @@ export async function recentAiReplyActivity(shop: string, limit = 50): Promise<A
       channel: "WhatsApp",
       who: j.phone,
       message: j.message,
+      reply: j.reply,
       status: j.status,
       error: j.error,
     })),
@@ -331,6 +343,7 @@ export async function recentAiReplyActivity(shop: string, limit = 50): Promise<A
       channel: j.channel === "instagram" ? "Instagram" : j.channel,
       who: j.customerId,
       message: j.message,
+      reply: "",
       status: j.status,
       error: j.error,
     })),
@@ -340,6 +353,7 @@ export async function recentAiReplyActivity(shop: string, limit = 50): Promise<A
       channel: "WhatsApp",
       who: s.phone,
       message: s.preview,
+      reply: "",
       status: "skipped",
       error: s.reason,
     })),
@@ -349,6 +363,7 @@ export async function recentAiReplyActivity(shop: string, limit = 50): Promise<A
       channel: s.channel === "instagram" ? "Instagram" : s.channel,
       who: s.customerId,
       message: s.preview,
+      reply: "",
       status: "skipped",
       error: s.reason,
     })),

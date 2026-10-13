@@ -112,6 +112,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       // on hover, where it costs nothing.
       message: a.message.length > 90 ? `${a.message.slice(0, 90)}...` : a.message,
       fullMessage: a.message,
+      // Trimmed harder than the question: a reply runs long, and the column
+      // only needs to show WHICH answer went out. The whole text is on hover.
+      reply: a.reply.length > 70 ? `${a.reply.slice(0, 70)}...` : a.reply,
+      fullReply: a.reply,
       status: a.status,
       // For a skip this holds the reason, not an error. Translated here so the
       // table never renders a raw enum like "rate-limited".
@@ -407,6 +411,7 @@ export default function AiRepliesActivityPage() {
               { title: "Shopper" },
               { title: "Channel" },
               { title: "Message" },
+              { title: "Bot replied" },
               { title: "When" },
               { title: "Result" },
             ]}
@@ -425,6 +430,19 @@ export default function AiRepliesActivityPage() {
                 <IndexTable.Cell>{a.channel}</IndexTable.Cell>
                 <IndexTable.Cell>
                   <span title={a.fullMessage}>{a.message || "No text"}</span>
+                </IndexTable.Cell>
+                {/* Blank is honest here. A skip, an ack, and a coalesced
+                    sibling all legitimately sent nothing, and inventing a
+                    dash for each would read as a missing reply rather than a
+                    deliberate silence. */}
+                <IndexTable.Cell>
+                  {a.reply ? (
+                    <span title={a.fullReply}>
+                      <Text as="span" tone="subdued">{a.reply}</Text>
+                    </span>
+                  ) : (
+                    ""
+                  )}
                 </IndexTable.Cell>
                 {/* Exact time on hover: "2 hours ago" scans faster, but the real
                     timestamp is what someone reconciling a complaint needs. */}
