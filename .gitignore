@@ -16,3 +16,6 @@ prisma/dev.sqlite-journal
 
 extensions/*/dist
 .vercel
+
+# Recovery exports: real customer phone numbers, not for the repo.
+unanswered-outage.csv
