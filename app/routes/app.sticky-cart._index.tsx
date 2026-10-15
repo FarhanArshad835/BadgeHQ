@@ -47,6 +47,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       textColor: data.textColor,
       buttonStyle: data.buttonStyle,
       buttonRadius: data.buttonRadius,
+      barPadding: data.barPadding,
       showPrice: data.showPrice,
       showQuantity: data.showQuantity,
       alwaysShow: data.alwaysShow,
@@ -84,6 +85,7 @@ export default function StickyCartSettings() {
     textColor: cart?.textColor || "#ffffff",
     buttonStyle: cart?.buttonStyle || "solid",
     buttonRadius: cart?.buttonRadius || "6",
+    barPadding: cart?.barPadding || "10",
     showPrice: cart?.showPrice ?? true,
     showQuantity: cart?.showQuantity ?? true,
     alwaysShow: cart?.alwaysShow ?? false,
@@ -99,6 +101,7 @@ export default function StickyCartSettings() {
   const [textColor, setTextColor] = useState(initial.textColor);
   const [buttonStyle, setButtonStyle] = useState(initial.buttonStyle);
   const [buttonRadius, setButtonRadius] = useState(initial.buttonRadius);
+  const [barPadding, setBarPadding] = useState(initial.barPadding);
   const [showPrice, setShowPrice] = useState(initial.showPrice);
   const [showQuantity, setShowQuantity] = useState(initial.showQuantity);
   const [alwaysShow, setAlwaysShow] = useState(initial.alwaysShow);
@@ -116,6 +119,7 @@ export default function StickyCartSettings() {
     textColor !== initial.textColor ||
     buttonStyle !== initial.buttonStyle ||
     buttonRadius !== initial.buttonRadius ||
+    barPadding !== initial.barPadding ||
     showPrice !== initial.showPrice ||
     showQuantity !== initial.showQuantity ||
     alwaysShow !== initial.alwaysShow ||
@@ -139,6 +143,7 @@ export default function StickyCartSettings() {
     setTextColor(initial.textColor);
     setButtonStyle(initial.buttonStyle);
     setButtonRadius(initial.buttonRadius);
+    setBarPadding(initial.barPadding);
     setShowPrice(initial.showPrice);
     setShowQuantity(initial.showQuantity);
     setAlwaysShow(initial.alwaysShow);
@@ -151,13 +156,14 @@ export default function StickyCartSettings() {
   const handleSave = () => {
     const data = {
       buttonText, buttonColor, bgColor, textColor,
-      buttonStyle, buttonRadius, showPrice, showQuantity, alwaysShow,
+      buttonStyle, buttonRadius, barPadding, showPrice, showQuantity, alwaysShow,
       showMobile, showDesktop, position, isActive,
     };
     submit({ data: JSON.stringify(data) }, { method: "POST" });
   };
 
   const radiusPx = parseInt(buttonRadius) || 6;
+  const padPx = parseInt(barPadding) || 10;
   const isOutline = buttonStyle === "outline";
 
   return (
@@ -250,6 +256,19 @@ export default function StickyCartSettings() {
                   onChange={setButtonRadius}
                 />
                 <Select
+                  label="Bar Height"
+                  options={[
+                    { label: "Compact", value: "6" },
+                    { label: "Standard", value: "10" },
+                    { label: "Comfortable", value: "16" },
+                    { label: "Tall", value: "22" },
+                    { label: "Extra tall", value: "30" },
+                  ]}
+                  value={barPadding}
+                  onChange={setBarPadding}
+                  helpText="Space above and below the bar's contents"
+                />
+                <Select
                   label="Position"
                   options={[
                     { label: "Top of screen", value: "top" },
@@ -285,7 +304,9 @@ export default function StickyCartSettings() {
                     left: 0, right: 0,
                     ...(position === "top" ? { top: 0 } : { bottom: 0 }),
                     backgroundColor: bgColor,
-                    padding: "10px 16px",
+                    // Scaled to the preview's smaller type so the proportions
+                    // match the storefront rather than the raw px value.
+                    padding: `${Math.round(padPx * 0.75)}px 16px`,
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "space-between",

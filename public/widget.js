@@ -2337,6 +2337,13 @@
       'form[action*="/cart/add"] button[type="submit"], ' +
       '.product-form__submit, button[name="add"], [data-add-to-cart]';
 
+    // Buy controls injected by headless-checkout apps, used only when the
+    // native button is missing or hidden. Ordered by how directly each one
+    // adds to cart rather than jumping the shopper straight to checkout.
+    var ALT_BUY_SELECTORS =
+      '#gokwik-buy-now, button[name="sr-headless-button"], ' +
+      '.sr-headless-checkout, .shiprocket-headless, .magic-cart-btn';
+
     var atcBtn = document.querySelector(ATC_SELECTORS);
     if (!atcBtn) return;
 
@@ -2345,6 +2352,10 @@
     var bgColor     = cart.bgColor     || "#000000";
     var radius      = cart.buttonRadius || "6";
     var isOutline   = cart.buttonStyle === "outline";
+    // The bar has no fixed height - it is sized by its contents - so the
+    // vertical padding is what actually makes it taller or shorter.
+    var padY        = parseInt(cart.barPadding, 10);
+    if (!(padY >= 0)) padY = 10;
     var btnBg       = isOutline ? "transparent" : buttonColor;
     var btnColor    = isOutline ? buttonColor : bgColor;
     var btnBorder   = isOutline ? "2px solid " + buttonColor : "none";
@@ -2354,7 +2365,7 @@
     el.style.cssText =
       "position:fixed;left:0;right:0;z-index:9998;display:none;" +
       (cart.position === "top" ? "top:0;" : "bottom:0;") +
-      "background:" + bgColor + ";padding:10px 16px;" +
+      "background:" + bgColor + ";padding:" + padY + "px 16px;" +
       "box-shadow:0 " + (cart.position === "top" ? "2px" : "-2px") + " 8px rgba(0,0,0,0.15);";
 
     // Initial price text shown before async price resolves (shows formatted DOM value)
@@ -2460,8 +2471,24 @@
         freshQtyInput.dispatchEvent(new Event("change", { bubbles: true }));
       }
 
-      if (freshBtn && !freshBtn.disabled) {
-        freshBtn.click();
+      // Clicking a display:none button does nothing useful on themes where a
+      // headless checkout has taken over the buy flow: the native button is
+      // hidden by section CSS and its handler may never have been bound. Prefer
+      // whichever buy control is actually rendered, falling back to the native
+      // one (still correct on an ordinary theme) and then to the form itself.
+      var target = null;
+      if (freshBtn && !freshBtn.disabled && anchorIsRenderable(freshBtn)) {
+        target = freshBtn;
+      } else {
+        var alts = document.querySelectorAll(ALT_BUY_SELECTORS);
+        for (var ai = 0; ai < alts.length; ai++) {
+          if (!alts[ai].disabled && anchorIsRenderable(alts[ai])) { target = alts[ai]; break; }
+        }
+        if (!target && freshBtn && !freshBtn.disabled) target = freshBtn;
+      }
+
+      if (target) {
+        target.click();
       } else {
         // Last resort: submit the form directly
         var form = document.querySelector('form[action*="/cart/add"]');
@@ -2471,7 +2498,23 @@
 
     document.body.appendChild(el);
 
-    if (cart.alwaysShow) {
+    // A hidden anchor can never "scroll out of view", so the observer that
+    // normally reveals the bar would never fire and the bar would stay at its
+    // initial display:none - invisible on every scroll position.
+    //
+    // Themes hide the native ATC button routinely: a headless checkout
+    // (GoKwik, Shiprocket) replaces it with its own injected button, and the
+    // original is suppressed with section CSS. Treat an unrenderable anchor as
+    // "the buy button is never on screen" and just show the bar.
+    function anchorIsRenderable(node) {
+      if (!node) return false;
+      // offsetParent is null for display:none (and for position:fixed, which
+      // is why the box size is checked too rather than relying on it alone).
+      var box = node.getBoundingClientRect();
+      return box.width > 0 || box.height > 0;
+    }
+
+    if (cart.alwaysShow || !anchorIsRenderable(atcBtn)) {
       el.style.display = "block";
     } else {
       var observer = new IntersectionObserver(
@@ -2481,6 +2524,18 @@
         { threshold: 0 }
       );
       observer.observe(atcBtn);
+
+      // The anchor can be hidden AFTER mount: a variant change re-renders
+      // product-form, and a headless-checkout app swaps the button in once its
+      // own script loads. Re-check once things have settled so the bar does not
+      // get stranded invisible by a late DOM change.
+      setTimeout(function () {
+        var fresh = document.querySelector(ATC_SELECTORS);
+        if (!anchorIsRenderable(fresh)) {
+          observer.disconnect();
+          el.style.display = "block";
+        }
+      }, 3000);
     }
   }
 

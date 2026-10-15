@@ -158,6 +158,10 @@ model StickyCart {
   textColor    String   @default("#ffffff")
   buttonStyle  String   @default("solid")
   buttonRadius String   @default("6")
+  /** Vertical padding above and below the bar's contents, in px. The bar has no
+   *  fixed height — it grows with its tallest child — so this is the dial that
+   *  actually changes how tall it looks. "10" reproduces the original bar. */
+  barPadding   String   @default("10")
   showPrice    Boolean  @default(true)
   showQuantity Boolean  @default(true)
   alwaysShow   Boolean  @default(false)

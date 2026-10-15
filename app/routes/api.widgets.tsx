@@ -157,6 +157,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       textColor: b.textColor ?? "#ffffff",
       buttonStyle: b.buttonStyle ?? "solid",
       buttonRadius: b.buttonRadius ?? "6",
+      barPadding: b.barPadding ?? "10",
       showPrice: b.showPrice ?? true,
       showQuantity: b.showQuantity ?? true,
       alwaysShow: b.alwaysShow ?? false,
