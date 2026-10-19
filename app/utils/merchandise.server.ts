@@ -301,6 +301,30 @@ export async function applyOrder(
   collectionId: string,
   orderedIds: string[],
 ): Promise<{ ok: boolean; error?: string }> {
+  // Shopify refuses a reorder outright unless the collection is on MANUAL
+  // sort - "Can't reorder products unless collection is manually sorted" - so
+  // switch it first. Harmless when it is already MANUAL, and it is what the
+  // admin screen promises when it marks a collection "will switch to manual
+  // sort".
+  const sortRes = await admin.graphql(
+    `#graphql
+    mutation SetManual($input: CollectionInput!) {
+      collectionUpdate(input: $input) {
+        collection { id sortOrder }
+        userErrors { field message }
+      }
+    }`,
+    { variables: { input: { id: collectionId, sortOrder: "MANUAL" } } },
+  );
+  const sortBody: any = await sortRes.json();
+  const sortErrs = sortBody?.data?.collectionUpdate?.userErrors || [];
+  if (sortErrs.length) {
+    return {
+      ok: false,
+      error: `could not set manual sort: ${sortErrs.map((e: any) => e.message).join("; ")}`.slice(0, 300),
+    };
+  }
+
   for (let i = 0; i < orderedIds.length; i += REORDER_BATCH) {
     const moves = orderedIds
       .slice(i, i + REORDER_BATCH)
