@@ -4634,7 +4634,16 @@
       "click",
       function (e) {
         var btn = e.target.closest
-          ? e.target.closest("[data-wlh-id], [data-wlh-handle], .wishlist-btn, .wishlist-hero-custom-button, [data-wishlist-hero]")
+          // wishlisthero-floating is the class on the heart WishlistHero
+          // injects onto a product card - the one a shopper actually clicks on
+          // a collection page. It is added by their script, so it is absent
+          // from the server HTML and was missed when these selectors were
+          // written from it. [class*="wishlist"] catches the rest.
+          ? e.target.closest(
+              "[data-wlh-id], [data-wlh-handle], .wishlisthero-floating, " +
+                ".wishlist-hero-custom-button, .wishlist-btn, [data-wishlist-hero], " +
+                "[class*='wishlist'], [class*='Wishlist']",
+            )
           : null;
         if (!btn) return;
         var card = btn.closest("[data-product-id]");
@@ -4654,18 +4663,28 @@
           wlHandle;
         if (!id) return;
         // The class flips after the app handles the click, so read it late.
-        // Compared against its own earlier state rather than matched against a
-        // list of class names: every wishlist app spells "on" differently, and
-        // guessing wrong records an add as a removal.
-        var before = btn.className || "";
+        // Read the state from the whole button subtree, not just the element
+        // that matched. WishlistHero marks the INNER button with
+        // wishlisthero-product-in-wishlist and never touches the wrapper the
+        // click resolves to, so comparing the wrapper class saw no change on
+        // every click - and the old "no change means add" fallback then
+        // recorded each removal as a second add. Measured: a wishlist then
+        // un-wishlist stored wa:2 instead of wa:1, wr:1, which ranked a
+        // removed product ABOVE one that was still wishlisted.
+        var wlOnRe = /wishlisthero-product-in-wishlist|wishlisted|is-active|added|selected|filled/i;
+        var wlState = function (el) {
+          if (!el) return false;
+          if (wlOnRe.test(el.className || "")) return true;
+          return !!(el.querySelector && el.querySelector('[class*="in-wishlist"], [class*="wishlisted"], [aria-pressed="true"]'));
+        };
+        var before = wlState(btn);
         setTimeout(function () {
-          var after = btn.className || "";
-          var onRe = /wishlisted|is-active|active|added|selected|filled/i;
-          // No class change at all means the app re-rendered the button or
-          // signals state somewhere we cannot see. A click is then taken as
-          // intent to add, which is what it is the large majority of the time.
-          var add = before === after ? true : onRe.test(after);
-          bump(id, add ? "wa" : "wr", 1, wlHandle);
+          var after = wlState(btn);
+          // Unchanged means the state is somewhere this cannot see. Recording
+          // nothing is right: a wrong guess does not just miss a signal, it
+          // inverts one, and an invented add outranks a real one.
+          if (after === before) return;
+          bump(id, after ? "wa" : "wr", 1, wlHandle);
         }, 400);
       },
       true,
