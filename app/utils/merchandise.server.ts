@@ -155,6 +155,12 @@ async function behaviourByProduct(shop: string, windowDays: number) {
 
   const map = new Map<string, BehaviourCounts>();
   for (const r of rows) {
+    // Rows keyed by handle rather than product id come from themes that do
+    // not expose meta[property="product:id"]. They drive the instant
+    // client-side reorder, which matches on handle, but there is nothing to
+    // join them to here - the collection read returns GIDs. Skipped rather
+    // than turned into a GID that matches no product.
+    if (!/^\d+$/.test(r.productId)) continue;
     map.set(`gid://shopify/Product/${r.productId}`, {
       cart: Math.max(r.cartAdds - r.cartRemoves, 0),
       wish: Math.max(r.wishAdds - r.wishRemoves, 0),

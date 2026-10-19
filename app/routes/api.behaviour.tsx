@@ -71,7 +71,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // upsert rather than several.
     const merged = new Map<string, Record<string, number>>();
     for (const e of events) {
-      const id = String(e?.p || "").replace(/\D/g, "");
+      // A numeric product id, or a handle when the theme exposes no id -
+      // meta[property="product:id"] is a theme convention, not something
+      // Shopify guarantees. Stripping non-digits unconditionally turned every
+      // handle into an empty string and dropped the event.
+      const raw = String(e?.p || "").trim().toLowerCase();
+      const id = /^\d+$/.test(raw) ? raw : raw.replace(/[^a-z0-9-]/g, "").slice(0, 120);
       if (!id) continue;
       const cur = merged.get(id) || { v: 0, d: 0, ca: 0, cr: 0, wa: 0, wr: 0 };
       for (const k of ["v", "d", "ca", "cr", "wa", "wr"] as const) {

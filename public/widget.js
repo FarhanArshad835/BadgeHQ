@@ -4479,7 +4479,11 @@
 
     function bump(id, field, by, handle) {
       if (!id) return;
-      var k = String(id).replace(/\D/g, "");
+      // A numeric id stays numeric; a handle is kept as-is. Stripping
+      // non-digits unconditionally turned every handle into an empty string
+      // and silently dropped the event.
+      var raw = String(id);
+      var k = /^\d+$/.test(raw) ? raw : raw.replace(/[^a-z0-9-]/gi, "").toLowerCase();
       if (!k) return;
       if (!bag[k]) bag[k] = { p: k };
       bag[k][field] = (bag[k][field] || 0) + (by || 1);
@@ -4500,6 +4504,15 @@
       }
     }
 
+    /**
+     * The product being viewed, as an id when one is available.
+     *
+     * meta[property="product:id"] is a theme convention, not a Shopify
+     * guarantee, and this store's theme does not emit it - measured, not
+     * assumed. ShopifyAnalytics.meta is populated asynchronously, so it is
+     * usually still empty when the widget initialises. Hence the retry: the
+     * id is worth having for the server counters, but nothing waits on it.
+     */
     function currentProductId() {
       var m = document.querySelector('meta[property="product:id"]');
       if (m && m.content) return m.content;
@@ -4507,11 +4520,29 @@
           window.ShopifyAnalytics.meta.product) {
         return window.ShopifyAnalytics.meta.product.id;
       }
+      var mp = window.meta && window.meta.product;
+      if (mp && mp.id) return mp.id;
       return null;
     }
 
-    var pid = page === "product" ? currentProductId() : null;
-    if (pid) bump(pid, "v", 1);
+    // Keyed by HANDLE when no id can be found. The canonical link is on every
+    // product page, so this always resolves - and the handle is what the grid
+    // reorder matches on anyway. Without this a theme that omits the meta tag
+    // records nothing at all, which is what was happening here.
+    var pid = null;
+    if (page === "product") {
+      pid = currentProductId() || productHandleFromPage();
+      if (pid) bump(pid, "v", 1);
+      // ShopifyAnalytics may arrive late; if it brings a real id, record the
+      // view against that too so the server sees a product id rather than a
+      // handle. Deduped by the id being a different key.
+      if (!/^\d+$/.test(String(pid))) {
+        setTimeout(function () {
+          var real = currentProductId();
+          if (real && !bag[String(real)]) bump(real, "v", 1);
+        }, 2000);
+      }
+    }
 
     // Dwell: counted once, at 30s, rather than timing the whole visit - the
     // signal is "did they actually look at this", not how long exactly.
