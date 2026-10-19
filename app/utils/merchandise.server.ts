@@ -287,7 +287,6 @@ export function computeScores(
   return facts.map((p) => {
     const units = unitsOf(p);
     const b = behOf(p);
-    let score = 0;
 
     const parts: Array<{ label: string; points: number; detail: string }> = [];
     // Each signal contributes (its 0-1 share) x (its weight). Recorded on the
@@ -295,7 +294,6 @@ export function computeScores(
     // a merchant sees rather than to some internal intermediate.
     const add = (on: boolean, label: string, share: number, weight: number, detail: string) => {
       if (!on) return;
-      score += share * weight;
       parts.push({ label, points: Math.round((share * weight) / totalWeight * 1000), detail });
     };
 
