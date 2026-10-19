@@ -392,6 +392,7 @@ export async function applyOrder(
       `#graphql
       mutation Reorder($id: ID!, $moves: [MoveInput!]!) {
         collectionReorderProducts(id: $id, moves: $moves) {
+          job { id done }
           userErrors { field message }
         }
       }`,
@@ -400,8 +401,55 @@ export async function applyOrder(
     const body: any = await res.json();
     const errs = body?.data?.collectionReorderProducts?.userErrors || [];
     if (errs.length) return { ok: false, error: errs.map((e: any) => e.message).join("; ").slice(0, 300) };
+
+    // Shopify runs the reorder ASYNCHRONOUSLY and returns a job handle. Firing
+    // the next batch before this one finishes lets them interleave: on a
+    // 1,059-product collection the five batches raced and the final order was
+    // whichever job happened to land last, which is why the storefront's first
+    // product was not the one the engine ranked first. Each batch now waits.
+    const job = body?.data?.collectionReorderProducts?.job;
+    if (job?.id && !job.done) {
+      const ok = await waitForJob(admin, job.id);
+      if (!ok) return { ok: false, error: "reorder job did not finish in time" };
+    }
   }
   return { ok: true };
+}
+
+/**
+ * Block until a Shopify async job reports done.
+ *
+ * Polls rather than assuming: the reorder of a large collection takes a few
+ * seconds, and a fixed sleep would be either too short (orders interleave) or
+ * wastefully long on small collections.
+ */
+async function waitForJob(
+  admin: { graphql: (q: string, o?: any) => Promise<Response> },
+  jobId: string,
+  timeoutMs = 60_000,
+): Promise<boolean> {
+  const started = Date.now();
+  let delay = 400;
+  while (Date.now() - started < timeoutMs) {
+    const wait = delay;
+    await new Promise((r) => setTimeout(r, wait));
+    // Backs off so a slow job does not cost dozens of calls, capped so it
+    // still notices a quick finish promptly.
+    delay = Math.min(delay * 1.5, 3000);
+    try {
+      const res = await admin.graphql(
+        `#graphql
+        query JobStatus($id: ID!) { job(id: $id) { id done } }`,
+        { variables: { id: jobId } },
+      );
+      const body: any = await res.json();
+      if (body?.data?.job?.done) return true;
+    } catch {
+      // A transient failure to read status is not a failed reorder - keep
+      // polling until the timeout decides.
+    }
+  }
+  return false;
 }
 
 /** Persist the inputs behind each rank, so the admin screen can explain them. */
