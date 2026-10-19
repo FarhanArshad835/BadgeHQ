@@ -1060,13 +1060,28 @@ model MerchandiseSettings {
   weightSales      Int @default(60)
   weightReviews    Int @default(10)
   weightNewArrival Int @default(15)
+  /// Kept so an existing shop's saved value is not lost, and as the fallback
+  /// split across the four behaviour weights on first load after the upgrade.
   weightBehaviour  Int @default(15)
+
+  /// Each shopper action carries its own weight, alongside sales and reviews
+  /// rather than beneath a combined "behaviour" figure. They measure different
+  /// things: an add to cart is near-purchase intent, a view is barely a
+  /// signal, and a merchant should be able to say so directly.
+  weightCart  Int @default(8)
+  weightWish  Int @default(5)
+  weightDwell Int @default(2)
+  weightViews Int @default(1)
 
   /// Individually switchable, so a merchant can see what each signal is doing.
   useSales      Boolean @default(true)
   useReviews    Boolean @default(true)
   useNewArrival Boolean @default(true)
   useBehaviour  Boolean @default(false)
+  useCart       Boolean @default(false)
+  useWish       Boolean @default(false)
+  useDwell      Boolean @default(false)
+  useViews      Boolean @default(false)
 
   /// Points each shopper action is worth, and the ceiling on how many of each
   /// accumulate per product per day. Exposed because what an action signifies

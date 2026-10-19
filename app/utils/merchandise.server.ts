@@ -40,22 +40,21 @@ export type MerchSettings = {
   weightReviews: number;
   weightNewArrival: number;
   weightBehaviour: number;
+  weightCart: number;
+  weightWish: number;
+  weightDwell: number;
+  weightViews: number;
   useSales: boolean;
   useReviews: boolean;
   useNewArrival: boolean;
   useBehaviour: boolean;
+  useCart: boolean;
+  useWish: boolean;
+  useDwell: boolean;
+  useViews: boolean;
   newArrivalDays: number;
   salesWindowDays: number;
   sinkOutOfStock: boolean;
-  behCartPoints: number;
-  behCartCap: number;
-  behCartRemovePenalty: number;
-  behWishPoints: number;
-  behWishCap: number;
-  behWishRemovePenalty: number;
-  behDwellPoints: number;
-  behViewPoints: number;
-  behViewCap: number;
 };
 
 export async function getMerchSettings(shop: string): Promise<MerchSettings> {
@@ -99,25 +98,36 @@ async function salesByProduct(shop: string, windowDays: number) {
   return map;
 }
 
+/** The four shopper actions, each kept separate so each can carry its own
+ *  weight rather than being blended into one "behaviour" number. */
+export type BehaviourCounts = {
+  cart: number;
+  wish: number;
+  dwell: number;
+  views: number;
+};
+
 /**
- * Behaviour score per product, from the storefront beacon.
+ * Net shopper actions per product, from the storefront beacon.
  *
- * Weights are the merchant's existing ones, carried over from the theme's own
- * tracker so the numbers mean what they already meant:
+ * Returns the four actions separately. They measure different things - an add
+ * to cart is near-purchase intent, a view is barely a signal - and blending
+ * them into a single figure meant a merchant could only tune the blend, never
+ * say directly that a cart add matters more than a view.
  *
- *   added to cart  +12 each, capped at 24, minus 9 per removal
- *   wishlisted     +10,                     minus 9 per removal
- *   dwelt 30s+      +5
- *   each view       +1, capped at 4
+ * Removals subtract from their own action, floored at zero: a product added
+ * then abandoned is a weaker bet than one never added, but it should not go
+ * negative and start dragging down the other signals.
  *
- * The caps are what stop one obsessive shopper outweighing real demand, and
- * the removal penalties are deliberately close to the add value: a product
- * repeatedly added then abandoned is a worse bet than one never added.
+ * No caps here. Each action is normalised against the best performer in the
+ * same collection at scoring time, which bounds it to 0-1 naturally - the
+ * per-action caps the old points system needed were only there because the
+ * four were being summed into one raw number before weighting.
  *
  * Product ids arrive from the storefront as bare numbers; sales and Shopify
  * use GIDs. Normalised to the GID form here so one map keys the other.
  */
-async function behaviourByProduct(shop: string, windowDays: number, s: MerchSettings) {
+async function behaviourByProduct(shop: string, windowDays: number) {
   const rows = await prisma.$queryRawUnsafe<
     Array<{
       productId: string;
@@ -143,17 +153,14 @@ async function behaviourByProduct(shop: string, windowDays: number, s: MerchSett
     String(windowDays),
   );
 
-  const map = new Map<string, number>();
+  const map = new Map<string, BehaviourCounts>();
   for (const r of rows) {
-    // Points and caps come from settings. Every action is capped before the
-    // removal penalty is applied, so the cap limits what an action can earn
-    // rather than what it can lose - without that, enough adds would bank
-    // headroom that later removals could never spend.
-    const cart = Math.max(Math.min(r.cartAdds * s.behCartPoints, s.behCartCap) - r.cartRemoves * s.behCartRemovePenalty, 0);
-    const wish = Math.max(Math.min(r.wishAdds * s.behWishPoints, s.behWishCap) - r.wishRemoves * s.behWishRemovePenalty, 0);
-    const dwell = r.dwell30 > 0 ? s.behDwellPoints : 0;
-    const views = Math.min(r.views * s.behViewPoints, s.behViewCap);
-    map.set(`gid://shopify/Product/${r.productId}`, cart + wish + dwell + views);
+    map.set(`gid://shopify/Product/${r.productId}`, {
+      cart: Math.max(r.cartAdds - r.cartRemoves, 0),
+      wish: Math.max(r.wishAdds - r.wishRemoves, 0),
+      dwell: r.dwell30,
+      views: r.views,
+    });
   }
   return map;
 }
@@ -234,16 +241,28 @@ export async function fetchCollectionProducts(
 export function computeScores(
   facts: ProductFacts[],
   sales: Map<string, number>,
-  behaviour: Map<string, number>,
+  behaviour: Map<string, BehaviourCounts>,
   s: MerchSettings,
 ): Array<{ productId: string; score: number; inStock: boolean; unitsSold: number }> {
   const now = Date.now();
   const newMs = s.newArrivalDays * 86400_000;
 
   const unitsOf = (p: ProductFacts) => sales.get(p.productId) ?? 0;
+  const behOf = (p: ProductFacts) =>
+    behaviour.get(p.productId) ?? { cart: 0, wish: 0, dwell: 0, views: 0 };
+
   const maxUnitsLog = Math.max(...facts.map((p) => Math.log1p(unitsOf(p))), 1);
   const maxReviews = Math.max(...facts.map((p) => p.reviewCount), 1);
-  const maxBehaviour = Math.max(...facts.map((p) => behaviour.get(p.productId) ?? 0), 1);
+
+  // Each action is normalised against the best performer in the SAME
+  // collection, so a weight means the same thing whether an action happens ten
+  // times a day or ten thousand. This is also what replaces the old per-action
+  // caps: a runaway count can only ever reach 1.0 of its own signal, it cannot
+  // leak into the others.
+  const maxCart = Math.max(...facts.map((p) => behOf(p).cart), 1);
+  const maxWish = Math.max(...facts.map((p) => behOf(p).wish), 1);
+  const maxDwell = Math.max(...facts.map((p) => behOf(p).dwell), 1);
+  const maxViews = Math.max(...facts.map((p) => behOf(p).views), 1);
 
   // Only enabled signals share the weight, so switching one off redistributes
   // to the others rather than shrinking every score toward zero.
@@ -251,10 +270,14 @@ export function computeScores(
     (s.useSales ? s.weightSales : 0) +
     (s.useReviews ? s.weightReviews : 0) +
     (s.useNewArrival ? s.weightNewArrival : 0) +
-    (s.useBehaviour ? s.weightBehaviour : 0) || 1;
+    (s.useCart ? s.weightCart : 0) +
+    (s.useWish ? s.weightWish : 0) +
+    (s.useDwell ? s.weightDwell : 0) +
+    (s.useViews ? s.weightViews : 0) || 1;
 
   return facts.map((p) => {
     const units = unitsOf(p);
+    const b = behOf(p);
     let score = 0;
 
     if (s.useSales) {
@@ -269,9 +292,10 @@ export function computeScores(
       const freshness = age < newMs ? 1 - age / newMs : 0;
       score += freshness * s.weightNewArrival;
     }
-    if (s.useBehaviour) {
-      score += ((behaviour.get(p.productId) ?? 0) / maxBehaviour) * s.weightBehaviour;
-    }
+    if (s.useCart) score += (b.cart / maxCart) * s.weightCart;
+    if (s.useWish) score += (b.wish / maxWish) * s.weightWish;
+    if (s.useDwell) score += (b.dwell / maxDwell) * s.weightDwell;
+    if (s.useViews) score += (b.views / maxViews) * s.weightViews;
 
     return {
       productId: p.productId,
@@ -410,9 +434,10 @@ export async function runMerchandising(
 
   const sales = await salesByProduct(shop, s.salesWindowDays);
 
-  const behaviour = s.useBehaviour
-    ? await behaviourByProduct(shop, s.salesWindowDays, s)
-    : new Map<string, number>();
+  const anyBehaviour = s.useCart || s.useWish || s.useDwell || s.useViews;
+  const behaviour = anyBehaviour
+    ? await behaviourByProduct(shop, s.salesWindowDays)
+    : new Map<string, BehaviourCounts>();
 
   const results: Array<{ id: string; products: number; reordered: boolean; error?: string }> = [];
 

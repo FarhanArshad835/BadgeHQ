@@ -23,7 +23,6 @@ import {
   Box,
   RangeSlider,
   Select,
-  TextField,
   DataTable,
 } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
@@ -145,15 +144,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       useReviews: Boolean(data.useReviews),
       useNewArrival: Boolean(data.useNewArrival),
       useBehaviour: Boolean(data.useBehaviour),
-      behCartPoints: Number(data.behCartPoints) || 0,
-      behCartCap: Number(data.behCartCap) || 0,
-      behCartRemovePenalty: Number(data.behCartRemovePenalty) || 0,
-      behWishPoints: Number(data.behWishPoints) || 0,
-      behWishCap: Number(data.behWishCap) || 0,
-      behWishRemovePenalty: Number(data.behWishRemovePenalty) || 0,
-      behDwellPoints: Number(data.behDwellPoints) || 0,
-      behViewPoints: Number(data.behViewPoints) || 0,
-      behViewCap: Number(data.behViewCap) || 0,
+      weightCart: Number(data.weightCart) || 0,
+      weightWish: Number(data.weightWish) || 0,
+      weightDwell: Number(data.weightDwell) || 0,
+      weightViews: Number(data.weightViews) || 0,
+      useCart: Boolean(data.useCart),
+      useWish: Boolean(data.useWish),
+      useDwell: Boolean(data.useDwell),
+      useViews: Boolean(data.useViews),
       newArrivalDays: Number(data.newArrivalDays) || 30,
       salesWindowDays: Number(data.salesWindowDays) || 30,
       sinkOutOfStock: Boolean(data.sinkOutOfStock),
@@ -177,17 +175,14 @@ export default function Merchandising() {
   const [useSales, setUseSales] = useState(settings.useSales);
   const [useReviews, setUseReviews] = useState(settings.useReviews);
   const [useNew, setUseNew] = useState(settings.useNewArrival);
-  const [useBehaviour, setUseBehaviour] = useState(settings.useBehaviour);
-  const [bCart, setBCart] = useState(String(settings.behCartPoints));
-  const [bCartCap, setBCartCap] = useState(String(settings.behCartCap));
-  const [bCartRm, setBCartRm] = useState(String(settings.behCartRemovePenalty));
-  const [bWish, setBWish] = useState(String(settings.behWishPoints));
-  const [bWishCap, setBWishCap] = useState(String(settings.behWishCap));
-  const [bWishRm, setBWishRm] = useState(String(settings.behWishRemovePenalty));
-  const [bDwell, setBDwell] = useState(String(settings.behDwellPoints));
-  const [bView, setBView] = useState(String(settings.behViewPoints));
-  const [bViewCap, setBViewCap] = useState(String(settings.behViewCap));
-  const [wBehaviour, setWBehaviour] = useState(settings.weightBehaviour);
+  const [useCart, setUseCart] = useState(settings.useCart);
+  const [useWish, setUseWish] = useState(settings.useWish);
+  const [useDwell, setUseDwell] = useState(settings.useDwell);
+  const [useViews, setUseViews] = useState(settings.useViews);
+  const [wCart, setWCart] = useState(settings.weightCart);
+  const [wWish, setWWish] = useState(settings.weightWish);
+  const [wDwell, setWDwell] = useState(settings.weightDwell);
+  const [wViews, setWViews] = useState(settings.weightViews);
   const [sink, setSink] = useState(settings.sinkOutOfStock);
   const [salesWindow, setSalesWindow] = useState(String(settings.salesWindowDays));
   const [newDays, setNewDays] = useState(String(settings.newArrivalDays));
@@ -211,20 +206,19 @@ export default function Merchandising() {
           weightSales: wSales,
           weightReviews: wReviews,
           weightNewArrival: wNew,
-          weightBehaviour: wBehaviour,
+          weightBehaviour: settings.weightBehaviour,
           useSales,
           useReviews,
           useNewArrival: useNew,
-          useBehaviour,
-          behCartPoints: Number(bCart),
-          behCartCap: Number(bCartCap),
-          behCartRemovePenalty: Number(bCartRm),
-          behWishPoints: Number(bWish),
-          behWishCap: Number(bWishCap),
-          behWishRemovePenalty: Number(bWishRm),
-          behDwellPoints: Number(bDwell),
-          behViewPoints: Number(bView),
-          behViewCap: Number(bViewCap),
+          useBehaviour: useCart || useWish || useDwell || useViews,
+          weightCart: wCart,
+          weightWish: wWish,
+          weightDwell: wDwell,
+          weightViews: wViews,
+          useCart,
+          useWish,
+          useDwell,
+          useViews,
           newArrivalDays: Number(newDays),
           salesWindowDays: Number(salesWindow),
           sinkOutOfStock: sink,
@@ -354,63 +348,41 @@ export default function Merchandising() {
                   </>
                 )}
 
-                <Checkbox label="Shopper behaviour" checked={useBehaviour} onChange={setUseBehaviour}
-                  helpText="Views, time on page, add-to-cart and wishlist, collected from the storefront. Starts at zero and becomes useful after a few days of traffic." />
-                {useBehaviour && (
-                  <>
-                    <RangeSlider label={`Weight: ${wBehaviour}`} value={wBehaviour} min={0} max={100}
-                      onChange={(v) => setWBehaviour(Number(v))} output />
+                <Box paddingBlockStart="200">
+                  <Text as="h3" variant="headingSm">From shopper behaviour</Text>
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    Collected from the storefront. Each starts at zero and becomes useful after a
+                    few days of traffic. They measure different things &mdash; an add to cart is
+                    close to a purchase, a view barely counts &mdash; so each carries its own weight.
+                  </Text>
+                </Box>
 
-                    <Box paddingInlineStart="600">
-                      <BlockStack gap="300">
-                        <Text as="p" variant="bodySm" tone="subdued">
-                          What each action is worth. The cap is the most a product can earn from
-                          that action in one day, however many shoppers do it &mdash; without one,
-                          a single action can outweigh every other signal.
-                        </Text>
+                <Checkbox label="Added to cart" checked={useCart} onChange={setUseCart}
+                  helpText="Net of removals. The strongest behavioural signal." />
+                {useCart && (
+                  <RangeSlider label={`Weight: ${wCart}`} value={wCart} min={0} max={100}
+                    onChange={(v) => setWCart(Number(v))} output />
+                )}
 
-                        <InlineStack gap="300" wrap={false}>
-                          <TextField label="Add to cart" type="number" value={bCart}
-                            onChange={setBCart} autoComplete="off" suffix="pts" />
-                          <TextField label="Daily cap" type="number" value={bCartCap}
-                            onChange={setBCartCap} autoComplete="off" suffix="pts" />
-                          <TextField label="Removed from cart" type="number" value={bCartRm}
-                            onChange={setBCartRm} autoComplete="off" prefix="&minus;" suffix="pts" />
-                        </InlineStack>
+                <Checkbox label="Wishlisted" checked={useWish} onChange={setUseWish}
+                  helpText="Net of un-wishlisting." />
+                {useWish && (
+                  <RangeSlider label={`Weight: ${wWish}`} value={wWish} min={0} max={100}
+                    onChange={(v) => setWWish(Number(v))} output />
+                )}
 
-                        <InlineStack gap="300" wrap={false}>
-                          <TextField label="Wishlisted" type="number" value={bWish}
-                            onChange={setBWish} autoComplete="off" suffix="pts" />
-                          <TextField label="Daily cap" type="number" value={bWishCap}
-                            onChange={setBWishCap} autoComplete="off" suffix="pts" />
-                          <TextField label="Un-wishlisted" type="number" value={bWishRm}
-                            onChange={setBWishRm} autoComplete="off" prefix="&minus;" suffix="pts" />
-                        </InlineStack>
+                <Checkbox label="Viewed 30 seconds or more" checked={useDwell} onChange={setUseDwell}
+                  helpText="Shoppers who stayed on the page rather than bouncing." />
+                {useDwell && (
+                  <RangeSlider label={`Weight: ${wDwell}`} value={wDwell} min={0} max={100}
+                    onChange={(v) => setWDwell(Number(v))} output />
+                )}
 
-                        <InlineStack gap="300" wrap={false}>
-                          <TextField label="Viewed 30s+" type="number" value={bDwell}
-                            onChange={setBDwell} autoComplete="off" suffix="pts" />
-                          <TextField label="Each view" type="number" value={bView}
-                            onChange={setBView} autoComplete="off" suffix="pts" />
-                          <TextField label="Daily cap" type="number" value={bViewCap}
-                            onChange={setBViewCap} autoComplete="off" suffix="pts" />
-                        </InlineStack>
-
-                        <Text as="p" variant="bodySm" tone="subdued">
-                          A shopper who views a product, stays 30 seconds, adds it to the cart and
-                          wishlists it is worth{" "}
-                          <b>
-                            {Math.min(Number(bView) || 0, Number(bViewCap) || 0) +
-                              (Number(bDwell) || 0) +
-                              Math.min(Number(bCart) || 0, Number(bCartCap) || 0) +
-                              Math.min(Number(bWish) || 0, Number(bWishCap) || 0)}{" "}
-                            points
-                          </b>
-                          .
-                        </Text>
-                      </BlockStack>
-                    </Box>
-                  </>
+                <Checkbox label="Product views" checked={useViews} onChange={setUseViews}
+                  helpText="Weakest signal: a view says a shopper arrived, not that they liked it." />
+                {useViews && (
+                  <RangeSlider label={`Weight: ${wViews}`} value={wViews} min={0} max={100}
+                    onChange={(v) => setWViews(Number(v))} output />
                 )}
 
                 <Box paddingBlockStart="200">
