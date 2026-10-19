@@ -5059,7 +5059,16 @@
     if (cards.length < 2) return false;
 
     var byHandle = {};
-    for (var wi = 0; wi < wanted.length; wi++) byHandle[wanted[wi].handle] = wanted[wi].score;
+    // Summed, not assigned. One product can hold two entries in the bag: a
+    // product-page view keys by id where the theme exposes one, while a
+    // wishlist click on a card keys by handle. Both carry the same handle, so
+    // assigning would let whichever came last erase the other - a shopper who
+    // viewed AND wishlisted a product would be credited for only one of them.
+    for (var wi = 0; wi < wanted.length; wi++) {
+      var wh = wanted[wi].handle;
+      byHandle[wh] = (byHandle[wh] || 0) + wanted[wi].score;
+    }
+
 
     // Products the shopper wants that this page did not load. Without this
     // the sort can only rearrange what is already there, so a wishlisted
