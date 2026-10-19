@@ -159,7 +159,7 @@
     if (w.aiReplies && w.aiReplies.enabled) initAiReplies(w.aiReplies);
 
     if (w.behaviourTracking) initBehaviourBeacon(page);
-    if (w.behaviourTracking) reorderGridForShopper(page);
+    if (w.behaviourTracking) reorderGridForShopper(page, w.behaviourWeights);
 
     if (page === "product") setupProductRerenderWatch(data, page);
     else setupCardRerenderWatch(data, page);
@@ -4771,10 +4771,37 @@
    * two never disagree about what a shopper did.
    */
   var REORDER_MAX = 3;      // a hint, not a takeover
-  var REORDER_MIN_SCORE = 5; // one glance is not interest
+  /** A finite, non-negative number, or the fallback. */
+  function num(v, dflt) {
+    var n = Number(v);
+    return isFinite(n) && n >= 0 ? n : dflt;
+  }
 
-  function reorderGridForShopper(page) {
+  function reorderGridForShopper(page, weights) {
     if (page !== "collection" && page !== "home") return;
+
+    // Defaults match the old constants, so a shop that has never touched the
+    // sliders behaves exactly as before.
+    var W = {
+      cart: num(weights && weights.cart, 12),
+      wish: num(weights && weights.wish, 10),
+      dwell: num(weights && weights.dwell, 5),
+      views: num(weights && weights.views, 1),
+    };
+    // The bar is "did one deliberate action happen": the cheapest of a
+    // wishlist or a cart add clears it, repeated views do not.
+    //
+    // Scaling it off one weight was wrong. With every slider at 20 the bar
+    // landed at 21, so a wishlist (20) failed to lift while four views (80)
+    // succeeded - the opposite of what the weights say those actions mean.
+    // Capped just under the full view allowance so views alone never qualify
+    // however high that slider goes.
+    var deliberate = Math.min(W.wish || Infinity, W.cart || Infinity);
+    var minScore = isFinite(deliberate) && deliberate > 0 ? deliberate : W.dwell || 1;
+    // Views are capped below the bar rather than the bar being raised above
+    // them: raising it would also lock out the wishlist and cart adds it is
+    // meant to admit. Browsing contributes, but can never lift on its own.
+    var viewCap = Math.max(minScore - 1, 0);
 
     // A filtered or explicitly sorted view is the shopper asking for a
     // specific order. Overriding it would be wrong.
@@ -4794,13 +4821,20 @@
     for (var k in bag) {
       var b = bag[k];
       if (!b || !b.h) continue; // no handle recorded: cannot act on it
-      // Each component floors at zero independently, exactly as the server
-      // does. Without the floor a removal drags the whole score negative and
-      // a product with real cart interest could rank below one with none.
-      var cart = Math.max(Math.min((b.ca || 0) * 12, 24) - (b.cr || 0) * 9, 0);
-      var wish = Math.max(Math.min((b.wa || 0) * 10, 20) - (b.wr || 0) * 9, 0);
-      var sc = cart + wish + ((b.d || 0) > 0 ? 5 : 0) + Math.min(b.v || 0, 4);
-      if (sc < REORDER_MIN_SCORE) continue;
+      // Weights come from the merchant's four sliders. They used to be
+      // constants here while the sliders fed the shared server ranking -
+      // which is the wrong place for them, since what a shopper did belongs
+      // to that shopper and not to everyone else's ordering.
+      //
+      // Each component floors at zero independently. Without the floor a
+      // removal drags the whole score negative and a product with real cart
+      // interest could rank below one with none. Caps are twice the unit
+      // value, so a second action still counts and a tenth does not.
+      var cart = Math.max(Math.min((b.ca || 0) * W.cart, W.cart * 2) - (b.cr || 0) * Math.round(W.cart * 0.75), 0);
+      var wish = Math.max(Math.min((b.wa || 0) * W.wish, W.wish * 2) - (b.wr || 0) * Math.round(W.wish * 0.9), 0);
+      var views = Math.min(Math.min(b.v || 0, 4) * W.views, viewCap);
+      var sc = cart + wish + ((b.d || 0) > 0 ? W.dwell : 0) + views;
+      if (sc < minScore) continue;
       wanted.push({ handle: b.h, score: sc, seen: b.t || 0 });
     }
     if (!wanted.length) return;

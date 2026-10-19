@@ -85,7 +85,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     // (or cost a beacon) for a shop that has not enabled behaviour tracking.
     prisma.merchandiseSettings.findUnique({
       where: { shop },
-      select: { isEnabled: true, useBehaviour: true },
+      select: {
+        isEnabled: true,
+        weightCart: true,
+        weightWish: true,
+        weightDwell: true,
+        weightViews: true,
+      },
     }),
   ]);
 
@@ -156,7 +162,20 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       showProgress: b.showProgress,
       pages: JSON.parse(b.pages),
     })),
-    behaviourTracking: Boolean(merchSettings?.isEnabled && merchSettings?.useBehaviour),
+    // Tracking is on whenever merchandising is, independent of the server
+    // weights: the four behaviour sliders now drive the shopper's own
+    // client-side reorder, which is per-browser and needs the data collected
+    // even when the shared server ranking ignores behaviour entirely.
+    behaviourTracking: Boolean(merchSettings?.isEnabled),
+    // What each shopper action is worth in that client reorder. Sent so the
+    // merchant's sliders decide it rather than constants baked into the
+    // widget, and so a change takes effect on the next page load.
+    behaviourWeights: {
+      cart: merchSettings?.weightCart ?? 8,
+      wish: merchSettings?.weightWish ?? 5,
+      dwell: merchSettings?.weightDwell ?? 2,
+      views: merchSettings?.weightViews ?? 1,
+    },
     stickyCarts: stickyCarts.map((b) => ({
       id: b.id,
       buttonText: b.buttonText,

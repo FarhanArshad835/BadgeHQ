@@ -389,10 +389,10 @@ export default function Merchandising() {
           weightWish: wWish,
           weightDwell: wDwell,
           weightViews: wViews,
-          useCart,
-          useWish,
-          useDwell,
-          useViews,
+          useCart: false,
+          useWish: false,
+          useDwell: false,
+          useViews: false,
           newArrivalDays: Number(newDays),
           salesWindowDays: Number(salesWindow),
           sinkOutOfStock: sink,
@@ -412,14 +412,12 @@ export default function Merchandising() {
   // The denominator every score is divided by. Shown so a weight is read as a
   // share of the whole rather than an absolute: Best sellers 50 means 50/total,
   // which is what actually decides how much it can move a product.
+  // Only the shared-order signals. The four behaviour weights drive each
+  // shopper's own instant reorder, which is scored in the browser on its own
+  // scale, so folding them in here would misreport what decides the ranking
+  // everyone sees.
   const totalWeight =
-    (useSales ? wSales : 0) +
-    (useReviews ? wReviews : 0) +
-    (useNew ? wNew : 0) +
-    (useCart ? wCart : 0) +
-    (useWish ? wWish : 0) +
-    (useDwell ? wDwell : 0) +
-    (useViews ? wViews : 0);
+    (useSales ? wSales : 0) + (useReviews ? wReviews : 0) + (useNew ? wNew : 0);
 
   // Shades run dark to light in the design's own order, so the bar reads as
   // one ramp rather than seven unrelated colours.
@@ -427,10 +425,6 @@ export default function Merchandising() {
     { label: "New arrivals", weight: useNew ? wNew : 0, color: "#3B38C9" },
     { label: "Best sellers", weight: useSales ? wSales : 0, color: "#6C6AE0" },
     { label: "Reviews", weight: useReviews ? wReviews : 0, color: "#A9A8F0" },
-    { label: "Added to cart", weight: useCart ? wCart : 0, color: "#D2D1F7" },
-    { label: "Wishlisted", weight: useWish ? wWish : 0, color: "#E0DFF9" },
-    { label: "Viewed 30s+", weight: useDwell ? wDwell : 0, color: "#ECECFB" },
-    { label: "Views", weight: useViews ? wViews : 0, color: "#F2F2FC" },
   ];
   const mix = mixRaw.map((m) => ({
     ...m,
@@ -442,22 +436,22 @@ export default function Merchandising() {
     {
       id: "w-cart", label: "Added to cart", tag: "Strongest here",
       desc: "Net of removals. One step from a purchase.",
-      weight: wCart, set: setWCart, on: useCart, collected: counts.cart,
+      weight: wCart, set: setWCart, on: true, collected: counts.cart,
     },
     {
       id: "w-wish", label: "Wishlisted", tag: "",
       desc: "Net of un-wishlisting. Shows intent without a cart.",
-      weight: wWish, set: setWWish, on: useWish, collected: counts.wish,
+      weight: wWish, set: setWWish, on: true, collected: counts.wish,
     },
     {
       id: "w-dwell", label: "Viewed 30 s or more", tag: "",
       desc: "Shoppers who stayed on the page rather than bouncing.",
-      weight: wDwell, set: setWDwell, on: useDwell, collected: counts.dwell,
+      weight: wDwell, set: setWDwell, on: true, collected: counts.dwell,
     },
     {
       id: "w-view", label: "Product views", tag: "Weakest",
       desc: "A view says a shopper arrived, not that they liked it.",
-      weight: wViews, set: setWViews, on: useViews, collected: counts.views,
+      weight: wViews, set: setWViews, on: true, collected: counts.views,
     },
   ];
 
@@ -671,7 +665,7 @@ export default function Merchandising() {
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
                   <span className="merch-lab" style={{ color: "#141414" }}>From shopper behaviour</span>
-                  <span className="merch-sub">From the storefront.</span>
+                  <span className="merch-sub">Shown to that shopper only, instantly.</span>
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 16 }}>
                   {behaviourCards.map((c) => (
