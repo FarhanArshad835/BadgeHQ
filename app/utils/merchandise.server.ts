@@ -21,6 +21,7 @@
  * weight re-ranks instantly without re-reading Shopify.
  */
 import prisma from "../db.server";
+import { bumpConfigVersion } from "./config-version.server";
 
 /** Shopify caps a single reorder mutation's move list. Batched below it. */
 const REORDER_BATCH = 250;
@@ -557,6 +558,12 @@ export async function runMerchandising(
     // and firing them back to back is what triggers throttling.
     await new Promise((r) => setTimeout(r, BETWEEN_COLLECTIONS_MS));
   }
+
+  // The ranked order is cached an hour at the edge, so without this a run's
+  // new ordering stays invisible to storefronts for up to an hour - and the
+  // storefront keeps scoring against the previous payload. Best-effort: a
+  // failure here only means waiting out the TTL.
+  await bumpConfigVersion(shop);
 
   await prisma.merchandiseSettings.update({
     where: { shop },
