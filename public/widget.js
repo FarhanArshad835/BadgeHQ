@@ -4789,6 +4789,8 @@
    * against products that have not loaded.
    */
   var _orderRank = null;
+  /** Guards the re-sort that follows an injection from injecting again. */
+  var _injecting = false;
   function loadOrderRank(then) {
     if (_orderRank) return then(_orderRank);
     var KEY = "badgehq-order";
@@ -4916,6 +4918,107 @@
    * the page: one action moves a product a few places, sustained interest
    * moves it to the front.
    */
+  /**
+   * Bring in a product the shopper wants that is not on this page.
+   *
+   * A card is built by cloning one the theme already rendered and swapping in
+   * the new product's data, rather than asking the theme to render one. There
+   * is no universal section for that - the pinned-card section this store has
+   * is its own invention - but /products/<handle>.js exists on every Shopify
+   * store and carries everything a card shows. Cloning also means the card
+   * inherits the theme's own markup and styling for free.
+   *
+   * ~40KB per product against ~45KB for a single rendered card, and only for
+   * the handful a shopper has actually touched.
+   */
+  function fetchCardFor(handle, template, then) {
+    var CK = "badgehq-card-" + handle;
+    var cached = null;
+    try {
+      cached = JSON.parse(sessionStorage.getItem(CK) || "null");
+    } catch (e) {
+      /* private mode */
+    }
+    if (cached) return then(buildCard(cached, template));
+
+    fetch("/products/" + encodeURIComponent(handle) + ".js", { credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
+      .then(function (d) {
+        var lean = {
+          t: d.title,
+          u: d.url,
+          i: d.featured_image || (d.images && d.images[0]) || "",
+          p: d.price,
+          c: d.compare_at_price || 0,
+          a: d.available,
+        };
+        try {
+          sessionStorage.setItem(CK, JSON.stringify(lean));
+        } catch (e2) {
+          /* quota - it still works for this page */
+        }
+        then(buildCard(lean, template));
+      })
+      .catch(function () { then(null); });
+  }
+
+  /** Money in the shop's own format, from a card the theme already rendered. */
+  function formatMoneyLike(sample, cents) {
+    var m = String(sample || "").match(/^([^\d]*)([\d.,]+)/);
+    var symbol = m ? m[1] : "";
+    // Follow the sample on decimals as well as the symbol: this store shows
+    // no paise, but a shop pricing in dollars shows 12.00 and rendering that
+    // as 12 on one card out of twenty looks like a bug.
+    var showsDecimals = m ? /[.,]\d{2}$/.test(m[2]) : false;
+    var whole = showsDecimals ? Math.floor(cents / 100) : Math.round(cents / 100);
+    // Grouped the way the sample is, so a shop showing 1,099 does not get 1099.
+    var grouped = String(whole).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    if (showsDecimals) {
+      var sep = m[2].indexOf(",") > m[2].indexOf(".") ? "," : ".";
+      var cent = String(cents % 100);
+      grouped += sep + (cent.length < 2 ? "0" + cent : cent);
+    }
+    return symbol + grouped;
+  }
+
+  function buildCard(d, template) {
+    if (!template) return null;
+    var card = template.cloneNode(true);
+    card.setAttribute("data-badgehq-injected", "1");
+
+    // Every link points at the new product.
+    var links = card.querySelectorAll('a[href*="/products/"]');
+    for (var i = 0; i < links.length; i++) links[i].setAttribute("href", d.u);
+
+    // The image: srcset has to go, or the browser keeps the old one.
+    var imgs = card.querySelectorAll("img");
+    for (var j = 0; j < imgs.length; j++) {
+      if (!d.i) break;
+      imgs[j].removeAttribute("srcset");
+      imgs[j].removeAttribute("data-srcset");
+      imgs[j].setAttribute("src", d.i + (d.i.indexOf("?") > -1 ? "&" : "?") + "width=533");
+      imgs[j].setAttribute("alt", d.t);
+      imgs[j].setAttribute("loading", "eager");
+    }
+
+    // The title, wherever the theme puts it.
+    var title = card.querySelector('.card__heading a, .card__heading, [class*="title"] a, [class*="title"]');
+    if (title) title.textContent = d.t;
+
+    // Price, keeping whatever currency format the theme already shows.
+    var price = card.querySelector('.price-item--regular, [class*="price-item"], [class*="price"]');
+    if (price) price.textContent = formatMoneyLike(price.textContent, d.p);
+
+    // Anything stateful on the clone belongs to the product it came from.
+    var stale = card.querySelectorAll("[data-wlh-handle], [data-wlh-id], [data-product-id]");
+    for (var k = 0; k < stale.length; k++) {
+      stale[k].removeAttribute("data-wlh-handle");
+      stale[k].removeAttribute("data-wlh-id");
+      stale[k].removeAttribute("data-product-id");
+    }
+    return card;
+  }
+
   function applyShopperOrder(wanted) {
     // Reuse the wishlist's card selectors: they already cover Dawn and the
     // other themes this app runs on, and they are maintained in one place.
@@ -4939,6 +5042,38 @@
 
     var byHandle = {};
     for (var wi = 0; wi < wanted.length; wi++) byHandle[wanted[wi].handle] = wanted[wi].score;
+
+    // Products the shopper wants that this page did not load. Without this
+    // the sort can only rearrange what is already there, so a wishlisted
+    // product on page 20 of a 1,059-product collection stays invisible however
+    // high it scores. Capped: a handful is the point, not a second grid.
+    var present = {};
+    for (var pi = 0; pi < cards.length; pi++) present[cards[pi].handle] = true;
+    var missing = [];
+    for (var mi = 0; mi < wanted.length && missing.length < 3; mi++) {
+      if (!present[wanted[mi].handle]) missing.push(wanted[mi].handle);
+    }
+    if (missing.length && !_injecting) {
+      _injecting = true;
+      var template = cards[0].root;
+      var pending = missing.length;
+      missing.forEach(function (h) {
+        fetchCardFor(h, template, function (card) {
+          if (card) {
+            grid.appendChild(card);
+          }
+          // Re-sort once they have all answered: the new cards are appended at
+          // the end, and the sort is what puts them where they belong.
+          if (--pending === 0) {
+            _injecting = false;
+            applyShopperOrder(wanted);
+          }
+        });
+      });
+      // Fall through and sort what is here now; the callback sorts again when
+      // the fetched cards land, so the page is never left waiting on a network
+      // round trip to look right.
+    }
 
     // Each card's standing as points, with the shopper's score added. One
     // step between neighbours, so a behaviour score of N moves a card up by
