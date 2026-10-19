@@ -119,6 +119,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           score: sc?.score ?? 0,
           units: sc?.unitsSold ?? 0,
           inStock: sc?.inStock ?? true,
+          parts: sc?.parts ?? [],
         };
       }),
       total: order.length,
@@ -433,13 +434,29 @@ export default function Merchandising() {
                       Top 20 of {actionData.total} products
                     </Text>
                     <DataTable
-                      columnContentTypes={["numeric", "text", "numeric", "numeric", "text"]}
-                      headings={["#", "Product", "Score", "Sold", "Stock"]}
+                      columnContentTypes={["numeric", "text", "text", "numeric", "text"]}
+                      headings={["#", "Product", "Why it ranks here", "Score", "Stock"]}
                       rows={actionData.preview.map((p: any) => [
                         p.rank,
                         p.title,
+                        // The parts sum to the score, so this explains the
+                        // number rather than restating it. Ordered by
+                        // contribution: what actually decided the position
+                        // reads first.
+                        <InlineStack key={p.rank} gap="200" wrap>
+                          {[...p.parts]
+                            .sort((a: any, b: any) => b.points - a.points)
+                            .map((part: any) => (
+                              <Text key={part.label} as="span" variant="bodySm"
+                                tone={part.points === 0 ? "subdued" : undefined}>
+                                {part.label} <b>{part.points}</b>{" "}
+                                <Text as="span" variant="bodySm" tone="subdued">
+                                  ({part.detail})
+                                </Text>
+                              </Text>
+                            ))}
+                        </InlineStack>,
                         p.score,
-                        p.units,
                         p.inStock ? "In stock" : "Sold out",
                       ])}
                     />

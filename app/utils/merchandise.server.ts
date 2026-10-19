@@ -243,7 +243,16 @@ export function computeScores(
   sales: Map<string, number>,
   behaviour: Map<string, BehaviourCounts>,
   s: MerchSettings,
-): Array<{ productId: string; score: number; inStock: boolean; unitsSold: number }> {
+): Array<{
+  productId: string;
+  score: number;
+  inStock: boolean;
+  unitsSold: number;
+  /** What each signal contributed, on the same 0-1000 scale as the score, so
+   *  a merchant can see WHY a product ranks where it does rather than having
+   *  to trust the total. Only enabled signals appear. */
+  parts: Array<{ label: string; points: number; detail: string }>;
+}> {
   const now = Date.now();
   const newMs = s.newArrivalDays * 86400_000;
 
@@ -280,28 +289,42 @@ export function computeScores(
     const b = behOf(p);
     let score = 0;
 
-    if (s.useSales) {
-      score += (Math.log1p(units) / maxUnitsLog) * s.weightSales;
-    }
-    if (s.useReviews) {
-      score += (p.reviewCount / maxReviews) * s.weightReviews;
-    }
-    if (s.useNewArrival && p.publishedAt) {
+    const parts: Array<{ label: string; points: number; detail: string }> = [];
+    // Each signal contributes (its 0-1 share) x (its weight). Recorded on the
+    // same 0-1000 scale the final score uses, so the parts add up to the total
+    // a merchant sees rather than to some internal intermediate.
+    const add = (on: boolean, label: string, share: number, weight: number, detail: string) => {
+      if (!on) return;
+      score += share * weight;
+      parts.push({ label, points: Math.round((share * weight) / totalWeight * 1000), detail });
+    };
+
+    add(s.useSales, "Best sellers", Math.log1p(units) / maxUnitsLog, s.weightSales,
+      `${units} sold`);
+    add(s.useReviews, "Reviews", p.reviewCount / maxReviews, s.weightReviews,
+      `${p.reviewCount} review${p.reviewCount === 1 ? "" : "s"}`);
+    if (s.useNewArrival) {
       // Decays across the window rather than dropping off a cliff on day 31.
-      const age = now - p.publishedAt.getTime();
-      const freshness = age < newMs ? 1 - age / newMs : 0;
-      score += freshness * s.weightNewArrival;
+      const ageDays = p.publishedAt ? (now - p.publishedAt.getTime()) / 86400_000 : Infinity;
+      const freshness = p.publishedAt && ageDays * 86400_000 < newMs ? 1 - (ageDays * 86400_000) / newMs : 0;
+      add(true, "New arrival", freshness, s.weightNewArrival,
+        Number.isFinite(ageDays) ? `${Math.round(ageDays)}d old` : "no date");
     }
-    if (s.useCart) score += (b.cart / maxCart) * s.weightCart;
-    if (s.useWish) score += (b.wish / maxWish) * s.weightWish;
-    if (s.useDwell) score += (b.dwell / maxDwell) * s.weightDwell;
-    if (s.useViews) score += (b.views / maxViews) * s.weightViews;
+    add(s.useCart, "Added to cart", b.cart / maxCart, s.weightCart, `${b.cart}`);
+    add(s.useWish, "Wishlisted", b.wish / maxWish, s.weightWish, `${b.wish}`);
+    add(s.useDwell, "Viewed 30s+", b.dwell / maxDwell, s.weightDwell, `${b.dwell}`);
+    add(s.useViews, "Views", b.views / maxViews, s.weightViews, `${b.views}`);
 
     return {
       productId: p.productId,
-      score: Math.round((score / totalWeight) * 1000),
+      // Rounded from the summed parts, not from the raw score. Rounding each
+      // part independently can leave their total 1 off a separately-rounded
+      // score, and a breakdown that does not add up to the number beside it
+      // reads as a bug even when the ranking is right.
+      score: parts.reduce((a, x) => a + x.points, 0),
       inStock: p.inStock,
       unitsSold: units,
+      parts,
     };
   });
 }
