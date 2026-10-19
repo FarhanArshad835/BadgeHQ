@@ -136,8 +136,15 @@ async function behaviourByProduct(shop: string, windowDays: number) {
 
   const map = new Map<string, number>();
   for (const r of rows) {
+    // Every component is capped. The merchant's original weights capped carts
+    // and views but not wishlist, which is fine for one shopper's localStorage
+    // (where the flag is boolean) but not for a figure summed across a day:
+    // measured on 12 sessions, cart stopped at 24 and views at 4 while wishlist
+    // ran to 120, so a product that is wishlisted a lot would have been ranked
+    // almost entirely on that one signal. 20 keeps it meaningful - worth about
+    // two cart adds - without letting it dominate.
     const cart = Math.max(Math.min(r.cartAdds * 12, 24) - r.cartRemoves * 9, 0);
-    const wish = Math.max(r.wishAdds * 10 - r.wishRemoves * 9, 0);
+    const wish = Math.max(Math.min(r.wishAdds * 10, 20) - r.wishRemoves * 9, 0);
     const dwell = r.dwell30 > 0 ? 5 : 0;
     const views = Math.min(r.views, 4);
     map.set(`gid://shopify/Product/${r.productId}`, cart + wish + dwell + views);
