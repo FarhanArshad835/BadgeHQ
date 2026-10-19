@@ -47,6 +47,15 @@ export type MerchSettings = {
   newArrivalDays: number;
   salesWindowDays: number;
   sinkOutOfStock: boolean;
+  behCartPoints: number;
+  behCartCap: number;
+  behCartRemovePenalty: number;
+  behWishPoints: number;
+  behWishCap: number;
+  behWishRemovePenalty: number;
+  behDwellPoints: number;
+  behViewPoints: number;
+  behViewCap: number;
 };
 
 export async function getMerchSettings(shop: string): Promise<MerchSettings> {
@@ -108,7 +117,7 @@ async function salesByProduct(shop: string, windowDays: number) {
  * Product ids arrive from the storefront as bare numbers; sales and Shopify
  * use GIDs. Normalised to the GID form here so one map keys the other.
  */
-async function behaviourByProduct(shop: string, windowDays: number) {
+async function behaviourByProduct(shop: string, windowDays: number, s: MerchSettings) {
   const rows = await prisma.$queryRawUnsafe<
     Array<{
       productId: string;
@@ -136,17 +145,14 @@ async function behaviourByProduct(shop: string, windowDays: number) {
 
   const map = new Map<string, number>();
   for (const r of rows) {
-    // Every component is capped. The merchant's original weights capped carts
-    // and views but not wishlist, which is fine for one shopper's localStorage
-    // (where the flag is boolean) but not for a figure summed across a day:
-    // measured on 12 sessions, cart stopped at 24 and views at 4 while wishlist
-    // ran to 120, so a product that is wishlisted a lot would have been ranked
-    // almost entirely on that one signal. 20 keeps it meaningful - worth about
-    // two cart adds - without letting it dominate.
-    const cart = Math.max(Math.min(r.cartAdds * 12, 24) - r.cartRemoves * 9, 0);
-    const wish = Math.max(Math.min(r.wishAdds * 10, 20) - r.wishRemoves * 9, 0);
-    const dwell = r.dwell30 > 0 ? 5 : 0;
-    const views = Math.min(r.views, 4);
+    // Points and caps come from settings. Every action is capped before the
+    // removal penalty is applied, so the cap limits what an action can earn
+    // rather than what it can lose - without that, enough adds would bank
+    // headroom that later removals could never spend.
+    const cart = Math.max(Math.min(r.cartAdds * s.behCartPoints, s.behCartCap) - r.cartRemoves * s.behCartRemovePenalty, 0);
+    const wish = Math.max(Math.min(r.wishAdds * s.behWishPoints, s.behWishCap) - r.wishRemoves * s.behWishRemovePenalty, 0);
+    const dwell = r.dwell30 > 0 ? s.behDwellPoints : 0;
+    const views = Math.min(r.views * s.behViewPoints, s.behViewCap);
     map.set(`gid://shopify/Product/${r.productId}`, cart + wish + dwell + views);
   }
   return map;
@@ -405,7 +411,7 @@ export async function runMerchandising(
   const sales = await salesByProduct(shop, s.salesWindowDays);
 
   const behaviour = s.useBehaviour
-    ? await behaviourByProduct(shop, s.salesWindowDays)
+    ? await behaviourByProduct(shop, s.salesWindowDays, s)
     : new Map<string, number>();
 
   const results: Array<{ id: string; products: number; reordered: boolean; error?: string }> = [];

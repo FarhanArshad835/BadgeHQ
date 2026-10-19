@@ -23,6 +23,7 @@ import {
   Box,
   RangeSlider,
   Select,
+  TextField,
   DataTable,
 } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
@@ -144,6 +145,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       useReviews: Boolean(data.useReviews),
       useNewArrival: Boolean(data.useNewArrival),
       useBehaviour: Boolean(data.useBehaviour),
+      behCartPoints: Number(data.behCartPoints) || 0,
+      behCartCap: Number(data.behCartCap) || 0,
+      behCartRemovePenalty: Number(data.behCartRemovePenalty) || 0,
+      behWishPoints: Number(data.behWishPoints) || 0,
+      behWishCap: Number(data.behWishCap) || 0,
+      behWishRemovePenalty: Number(data.behWishRemovePenalty) || 0,
+      behDwellPoints: Number(data.behDwellPoints) || 0,
+      behViewPoints: Number(data.behViewPoints) || 0,
+      behViewCap: Number(data.behViewCap) || 0,
       newArrivalDays: Number(data.newArrivalDays) || 30,
       salesWindowDays: Number(data.salesWindowDays) || 30,
       sinkOutOfStock: Boolean(data.sinkOutOfStock),
@@ -168,6 +178,15 @@ export default function Merchandising() {
   const [useReviews, setUseReviews] = useState(settings.useReviews);
   const [useNew, setUseNew] = useState(settings.useNewArrival);
   const [useBehaviour, setUseBehaviour] = useState(settings.useBehaviour);
+  const [bCart, setBCart] = useState(String(settings.behCartPoints));
+  const [bCartCap, setBCartCap] = useState(String(settings.behCartCap));
+  const [bCartRm, setBCartRm] = useState(String(settings.behCartRemovePenalty));
+  const [bWish, setBWish] = useState(String(settings.behWishPoints));
+  const [bWishCap, setBWishCap] = useState(String(settings.behWishCap));
+  const [bWishRm, setBWishRm] = useState(String(settings.behWishRemovePenalty));
+  const [bDwell, setBDwell] = useState(String(settings.behDwellPoints));
+  const [bView, setBView] = useState(String(settings.behViewPoints));
+  const [bViewCap, setBViewCap] = useState(String(settings.behViewCap));
   const [wBehaviour, setWBehaviour] = useState(settings.weightBehaviour);
   const [sink, setSink] = useState(settings.sinkOutOfStock);
   const [salesWindow, setSalesWindow] = useState(String(settings.salesWindowDays));
@@ -197,6 +216,15 @@ export default function Merchandising() {
           useReviews,
           useNewArrival: useNew,
           useBehaviour,
+          behCartPoints: Number(bCart),
+          behCartCap: Number(bCartCap),
+          behCartRemovePenalty: Number(bCartRm),
+          behWishPoints: Number(bWish),
+          behWishCap: Number(bWishCap),
+          behWishRemovePenalty: Number(bWishRm),
+          behDwellPoints: Number(bDwell),
+          behViewPoints: Number(bView),
+          behViewCap: Number(bViewCap),
           newArrivalDays: Number(newDays),
           salesWindowDays: Number(salesWindow),
           sinkOutOfStock: sink,
@@ -329,8 +357,60 @@ export default function Merchandising() {
                 <Checkbox label="Shopper behaviour" checked={useBehaviour} onChange={setUseBehaviour}
                   helpText="Views, time on page, add-to-cart and wishlist, collected from the storefront. Starts at zero and becomes useful after a few days of traffic." />
                 {useBehaviour && (
-                  <RangeSlider label={`Weight: ${wBehaviour}`} value={wBehaviour} min={0} max={100}
-                    onChange={(v) => setWBehaviour(Number(v))} output />
+                  <>
+                    <RangeSlider label={`Weight: ${wBehaviour}`} value={wBehaviour} min={0} max={100}
+                      onChange={(v) => setWBehaviour(Number(v))} output />
+
+                    <Box paddingInlineStart="600">
+                      <BlockStack gap="300">
+                        <Text as="p" variant="bodySm" tone="subdued">
+                          What each action is worth. The cap is the most a product can earn from
+                          that action in one day, however many shoppers do it &mdash; without one,
+                          a single action can outweigh every other signal.
+                        </Text>
+
+                        <InlineStack gap="300" wrap={false}>
+                          <TextField label="Add to cart" type="number" value={bCart}
+                            onChange={setBCart} autoComplete="off" suffix="pts" />
+                          <TextField label="Daily cap" type="number" value={bCartCap}
+                            onChange={setBCartCap} autoComplete="off" suffix="pts" />
+                          <TextField label="Removed from cart" type="number" value={bCartRm}
+                            onChange={setBCartRm} autoComplete="off" prefix="&minus;" suffix="pts" />
+                        </InlineStack>
+
+                        <InlineStack gap="300" wrap={false}>
+                          <TextField label="Wishlisted" type="number" value={bWish}
+                            onChange={setBWish} autoComplete="off" suffix="pts" />
+                          <TextField label="Daily cap" type="number" value={bWishCap}
+                            onChange={setBWishCap} autoComplete="off" suffix="pts" />
+                          <TextField label="Un-wishlisted" type="number" value={bWishRm}
+                            onChange={setBWishRm} autoComplete="off" prefix="&minus;" suffix="pts" />
+                        </InlineStack>
+
+                        <InlineStack gap="300" wrap={false}>
+                          <TextField label="Viewed 30s+" type="number" value={bDwell}
+                            onChange={setBDwell} autoComplete="off" suffix="pts" />
+                          <TextField label="Each view" type="number" value={bView}
+                            onChange={setBView} autoComplete="off" suffix="pts" />
+                          <TextField label="Daily cap" type="number" value={bViewCap}
+                            onChange={setBViewCap} autoComplete="off" suffix="pts" />
+                        </InlineStack>
+
+                        <Text as="p" variant="bodySm" tone="subdued">
+                          A shopper who views a product, stays 30 seconds, adds it to the cart and
+                          wishlists it is worth{" "}
+                          <b>
+                            {Math.min(Number(bView) || 0, Number(bViewCap) || 0) +
+                              (Number(bDwell) || 0) +
+                              Math.min(Number(bCart) || 0, Number(bCartCap) || 0) +
+                              Math.min(Number(bWish) || 0, Number(bWishCap) || 0)}{" "}
+                            points
+                          </b>
+                          .
+                        </Text>
+                      </BlockStack>
+                    </Box>
+                  </>
                 )}
 
                 <Box paddingBlockStart="200">

@@ -1068,6 +1068,26 @@ model MerchandiseSettings {
   useNewArrival Boolean @default(true)
   useBehaviour  Boolean @default(false)
 
+  /// Points each shopper action is worth, and the ceiling on how many of each
+  /// accumulate per product per day. Exposed because what an action signifies
+  /// is a merchant judgement, not a constant: on a store where wishlisting is
+  /// casual it should count for less than on one where it predicts a purchase.
+  ///
+  /// Every action is capped. Uncapped, a single action summed across a day's
+  /// sessions can swamp every other signal - measured at 120 points from
+  /// wishlist alone against a cart ceiling of 24.
+  behCartPoints        Int @default(12)
+  behCartCap           Int @default(24)
+  /// Removals subtract. Deliberately close to the add value: a product added
+  /// then abandoned is a weaker bet than one never added at all.
+  behCartRemovePenalty Int @default(9)
+  behWishPoints        Int @default(10)
+  behWishCap           Int @default(20)
+  behWishRemovePenalty Int @default(9)
+  behDwellPoints       Int @default(5)
+  behViewPoints        Int @default(1)
+  behViewCap           Int @default(4)
+
   /// Days a product counts as "new". Shopify has no such concept; this is the
   /// window after publishedAt during which a product gets the new-arrival boost
   /// so it can gather sales history before being judged on it.
