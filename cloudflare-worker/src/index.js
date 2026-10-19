@@ -153,9 +153,29 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
-    // OPTIONS preflight
+    // OPTIONS preflight.
+    //
+    // CORS_HEADERS allows GET/HEAD/OPTIONS, which is right for the read-only
+    // endpoints but wrong for the POST ones below - this handler runs first,
+    // so a browser preflighting a POST was told the method was not allowed and
+    // dropped the request before it was ever sent. That silently killed the
+    // behaviour beacon: the endpoint was reachable by curl and invisible to a
+    // real page.
     if (request.method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: CORS_HEADERS });
+      const writePaths = [
+        "/api/behaviour",
+        "/api/back-in-stock",
+        "/api/wishlist-event",
+        "/api/ai-reply",
+      ];
+      const headers = writePaths.includes(url.pathname)
+        ? {
+            ...CORS_HEADERS,
+            "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type",
+          }
+        : CORS_HEADERS;
+      return new Response(null, { status: 204, headers });
     }
 
     // Back-in-stock signup. A write, so it must NOT be cached and must be
