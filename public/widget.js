@@ -4535,8 +4535,13 @@
         .then(function (r) { return r.json(); })
         .then(function (c) {
           var seen = {};
+          // Quantity, not just presence: adding a second unit of something
+          // already in the cart is still an add, and a presence-only diff
+          // cannot see it.
           (c && c.items ? c.items : []).forEach(function (i) {
-            seen[String(i.product_id)] = i.handle || true;
+            var k = String(i.product_id);
+            if (!seen[k]) seen[k] = { q: 0, h: i.handle || null };
+            seen[k].q += Number(i.quantity) || 0;
           });
           then(seen);
         })
@@ -4547,16 +4552,32 @@
     var prevCart = {};
     try {
       prevCart = JSON.parse(sessionStorage.getItem(CART_KEY) || "{}") || {};
+      // An earlier build stored a handle string per id rather than a
+      // {q, h} record. Reading one as the new shape gives q undefined and
+      // would report the whole cart as newly added, so drop it and let the
+      // next read rebuild the baseline.
+      for (var ck in prevCart) {
+        if (!prevCart[ck] || typeof prevCart[ck] !== "object") { prevCart = {}; break; }
+      }
     } catch (e) {
       prevCart = {};
     }
-    function diffCart() {
+    function diffCart(isFirstRead) {
       readCart(function (now) {
-        for (var id in now) {
-          if (!prevCart[id]) bump(id, "ca", 1, typeof now[id] === "string" ? now[id] : null);
-        }
-        for (var old in prevCart) {
-          if (!now[old]) bump(old, "cr", 1, typeof prevCart[old] === "string" ? prevCart[old] : null);
+        // The first read establishes a baseline only. Whatever is already in
+        // the cart was added on some earlier page - counting it here would
+        // credit it again on every page load.
+        if (!isFirstRead) {
+          for (var id in now) {
+            var was = prevCart[id] ? prevCart[id].q || 0 : 0;
+            var gained = (now[id].q || 0) - was;
+            if (gained > 0) bump(id, "ca", gained, now[id].h);
+          }
+          for (var old in prevCart) {
+            var before = prevCart[old].q || 0;
+            var after = now[old] ? now[old].q || 0 : 0;
+            if (after < before) bump(old, "cr", before - after, prevCart[old].h);
+          }
         }
         prevCart = now;
         try {
@@ -4564,7 +4585,8 @@
         } catch (e) {}
       });
     }
-    diffCart();
+    // Baseline on load; every later read is a real comparison.
+    diffCart(!Object.keys(prevCart).length);
 
     // Adding to cart does not reload the page on most themes, so a load-time
     // diff alone never sees it. The hooks at the top of this file flag a cart
