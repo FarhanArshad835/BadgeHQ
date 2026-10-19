@@ -43,12 +43,12 @@ import {
  * values - radii, padding, type scale, the slider track and thumb - are the
  * design's own, not approximations.
  *
- * Geist is loaded from Google Fonts, matching the design; it falls back to the
- * system stack if that request fails, so the layout never depends on it.
+ * Geist is loaded through the route's links() rather than an @import inside
+ * this string: an @import re-resolves every time the style element is
+ * recreated, which stutters a slider drag. Falls back to the system stack.
  */
 const MERCH_CSS = `
-@import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&display=swap');
-.merch{font-family:"Geist",system-ui,-apple-system,sans-serif;color:#141414;display:flex;flex-direction:column;gap:18px}
+.merch{font-family:"Geist",system-ui,-apple-system,sans-serif;color:#141414;display:flex;flex-direction:column;gap:18px;max-width:1400px;margin:0 auto;width:100%}
 .merch input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:4px;border-radius:999px;background:linear-gradient(to right,#3B38C9 var(--p,50%),#E4E4EA var(--p,50%));outline:none;margin:0}
 .merch input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:18px;height:18px;border-radius:50%;background:#fff;border:2px solid #3B38C9;box-shadow:0 1px 3px rgba(0,0,0,.18);cursor:pointer}
 .merch input[type=range]::-moz-range-thumb{width:18px;height:18px;border-radius:50%;background:#fff;border:2px solid #3B38C9;cursor:pointer}
@@ -61,7 +61,7 @@ const MERCH_CSS = `
 .merch-big{font-size:36px;font-weight:700;line-height:1;letter-spacing:-.02em;color:#141414}
 .merch-desc{font-size:13.5px;line-height:1.45;color:#4B4B55;margin:0}
 .merch-sub{font-size:13px;color:#6B6B76}
-.merch-pill{font-size:11px;font-weight:500;border-radius:999px;padding:3px 9px}
+.merch-pill{font-size:11px;font-weight:500;border-radius:999px;padding:3px 9px;white-space:nowrap;line-height:1.45;display:inline-flex;align-items:center;flex-shrink:0}
 .merch-pill--accent{color:#3B38C9;background:#ECECFB}
 .merch-pill--warn{color:#8A4B00;background:#FFF1E0}
 .merch-pill--mute{color:#6B6B76;background:#F4F4F6}
@@ -69,6 +69,16 @@ const MERCH_CSS = `
 @media (max-width:1100px){.merch [style*="repeat(4"]{grid-template-columns:repeat(2,minmax(0,1fr))!important}}
 @media (max-width:620px){.merch [style*="repeat(4"]{grid-template-columns:1fr!important}}
 `;
+
+/** Injected once per page load, outside the render tree. */
+export const links = () => [
+  { rel: "preconnect", href: "https://fonts.googleapis.com" },
+  { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
+  {
+    rel: "stylesheet",
+    href: "https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&display=swap",
+  },
+];
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, admin } = await authenticate.admin(request);
@@ -223,6 +233,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function Merchandising() {
+  // Injected once rather than rendered: a <style> inside the tree is recreated
+  // on every drag frame, and the restyle that triggers is what made the
+  // sliders stutter. Keyed by id so a remount cannot stack duplicates.
+  useEffect(() => {
+    const ID = "merch-css";
+    if (document.getElementById(ID)) return;
+    const el = document.createElement("style");
+    el.id = ID;
+    el.textContent = MERCH_CSS;
+    document.head.appendChild(el);
+  }, []);
+
   const { settings, collections, lastRun, counts } = useLoaderData<typeof loader>();
   const actionData = useActionData<any>();
   const submit = useSubmit();
@@ -350,7 +372,7 @@ export default function Merchandising() {
     .reduce((n: number, c: any) => n + c.count, 0);
 
   return (
-    <Page>
+    <Page fullWidth>
       <TitleBar title="Collection Merchandising">
         <button variant="primary" onClick={save} disabled={busy}>Save</button>
       </TitleBar>
@@ -422,9 +444,10 @@ export default function Merchandising() {
             {/* Signal weights, built to the supplied design: same grid, card
                 chrome, type scale and spacing. Styles are scoped under
                 .merch- so Polaris cannot restyle them and this cannot leak
-                out into the rest of the admin. */}
-            <style dangerouslySetInnerHTML={{ __html: MERCH_CSS }} />
-
+                out into the rest of the admin, and are injected once from
+                links() rather than from here - a <style> in the render tree is
+                recreated on every keystroke and drag frame, and the style
+                recalculation that forces is what made the sliders stutter. */}
             <div className="merch">
               <div className="merch-card" style={{ padding: "18px 22px", gap: 14 }}>
                 <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", justifyContent: "space-between", gap: 12 }}>
@@ -466,7 +489,7 @@ export default function Merchandising() {
 
                   <div className="merch-card">
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <span className="merch-lab">Best sellers</span>
+                      <span className="merch-lab" style={{ minWidth: 0 }}>Best sellers</span>
                       <span className="merch-pill merch-pill--accent">Strongest signal</span>
                     </div>
                     <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
@@ -573,7 +596,7 @@ export default function Merchandising() {
                   {behaviourCards.map((c) => (
                     <div className="merch-card" key={c.id}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <span className="merch-lab">{c.label}</span>
+                        <span className="merch-lab" style={{ minWidth: 0 }}>{c.label}</span>
                         {c.tag ? (
                           <span className={c.tag === "Weakest" ? "merch-pill merch-pill--mute" : "merch-pill merch-pill--accent"}>{c.tag}</span>
                         ) : null}
