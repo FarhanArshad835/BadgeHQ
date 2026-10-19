@@ -4671,36 +4671,61 @@
       true,
     );
 
-    // One send per session. pagehide is the reliable signal on mobile Safari,
-    // where unload often never fires.
-    var sent = false;
+    /**
+     * Send what has not been sent yet, on every page hide.
+     *
+     * This used to send once and then latch, which looked right for a single
+     * page view but is wrong for a session: the bag lives in sessionStorage and
+     * survives navigation, so after the first flush every later view, cart add
+     * and wishlist click was counted locally and never transmitted.
+     *
+     * Each counter now carries how much of it has already gone up, and only the
+     * difference is sent. A beacon that never arrives is retried on the next
+     * page hide rather than lost, and nothing is ever counted twice.
+     */
     function flush() {
-      if (sent) return;
       var events = [];
-      // Only the id and the counters go up. h and t exist purely for the
-      // local reorder, and the endpoint has no use for them.
+      var marks = [];
       for (var k in bag) {
         var b = bag[k];
+        var sentMap = b.s || {};
         var e = { p: b.p };
-        if (b.v) e.v = b.v;
-        if (b.d) e.d = b.d;
-        if (b.ca) e.ca = b.ca;
-        if (b.cr) e.cr = b.cr;
-        if (b.wa) e.wa = b.wa;
-        if (b.wr) e.wr = b.wr;
-        events.push(e);
+        var any = false;
+        var fields = ["v", "d", "ca", "cr", "wa", "wr"];
+        for (var fi = 0; fi < fields.length; fi++) {
+          var f = fields[fi];
+          var delta = (b[f] || 0) - (sentMap[f] || 0);
+          if (delta > 0) {
+            e[f] = delta;
+            any = true;
+          }
+        }
+        if (any) {
+          events.push(e);
+          marks.push(b);
+        }
       }
       if (!events.length) return;
-      sent = true;
       try {
-        navigator.sendBeacon(
+        var ok = navigator.sendBeacon(
           API_ORIGIN + "/api/behaviour",
           new Blob([JSON.stringify({ shop: SHOP, events: events })], {
             type: "application/json",
           }),
         );
-        sessionStorage.removeItem(KEY);
-      } catch (e) {
+        // Only mark as sent once the browser has taken the payload. If it
+        // refused, the same deltas go again next time.
+        if (ok) {
+          for (var mi = 0; mi < marks.length; mi++) {
+            var m = marks[mi];
+            m.s = {
+              v: m.v || 0, d: m.d || 0, ca: m.ca || 0,
+              cr: m.cr || 0, wa: m.wa || 0, wr: m.wr || 0,
+            };
+          }
+          sessionStorage.setItem(KEY, JSON.stringify(bag));
+        }
+      } catch (e2) {
         /* never let tracking break a page */
       }
     }
