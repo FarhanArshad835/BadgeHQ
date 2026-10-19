@@ -9,7 +9,7 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useActionData, useLoaderData, useSubmit, useNavigation } from "@remix-run/react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback, memo } from "react";
 import {
   Page,
   Layout,
@@ -232,6 +232,87 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   return json({ success: true });
 };
 
+/**
+ * The collection picker, held apart from the rest of the screen.
+ *
+ * It renders ~50 Polaris Checkbox/InlineStack/Text trees. Inline, every one of
+ * them re-rendered on each slider drag frame, which is what made dragging feel
+ * heavy - the sliders themselves are cheap. memo() keeps it off that path:
+ * it only re-renders when the selection actually changes.
+ */
+const CollectionPicker = memo(function CollectionPicker({
+  collections,
+  picked,
+  toggle,
+}: {
+  collections: Array<{ id: string; title: string; count: number; sortOrder: string }>;
+  picked: string[];
+  toggle: (id: string) => void;
+}) {
+  return (
+    <BlockStack gap="100">
+      {collections.map((c) => (
+        <InlineStack key={c.id} gap="300" blockAlign="center">
+          <Checkbox label={c.title} checked={picked.includes(c.id)} onChange={() => toggle(c.id)} />
+          <Text as="span" variant="bodySm" tone="subdued">
+            {c.count.toLocaleString("en-IN")} products
+            {c.sortOrder !== "MANUAL" ? " · will switch to manual sort" : ""}
+          </Text>
+        </InlineStack>
+      ))}
+    </BlockStack>
+  );
+});
+
+/**
+ * The preview table, held apart for the same reason as the picker.
+ *
+ * Twenty rows, each building a sorted list of signal contributions as nested
+ * Text nodes. Rebuilt inline on every drag frame it was the heaviest thing on
+ * the screen; memo() means a slider no longer touches it. It only changes when
+ * a new preview is actually run.
+ */
+const PreviewTable = memo(function PreviewTable({ preview }: { preview: any[] }) {
+  const rows = useMemo(
+    () =>
+      preview.map((p: any) => [
+        p.rank,
+        p.title,
+        // The parts sum to the score, so this explains the number rather than
+        // restating it. Ordered by contribution: what actually decided the
+        // position reads first.
+        <InlineStack key={p.rank} gap="200" wrap>
+          {[...p.parts]
+            .sort((a: any, b: any) => b.points - a.points)
+            .map((part: any) => (
+              <Text
+                key={part.label}
+                as="span"
+                variant="bodySm"
+                tone={part.points === 0 ? "subdued" : undefined}
+              >
+                {part.label} <b>{part.points}</b>{" "}
+                <Text as="span" variant="bodySm" tone="subdued">
+                  ({part.detail})
+                </Text>
+              </Text>
+            ))}
+        </InlineStack>,
+        p.score,
+        p.inStock ? "In stock" : "Sold out",
+      ]),
+    [preview],
+  );
+
+  return (
+    <DataTable
+      columnContentTypes={["numeric", "text", "text", "numeric", "text"]}
+      headings={["#", "Product", "Why it ranks here", "Score", "Stock"]}
+      rows={rows}
+    />
+  );
+});
+
 export default function Merchandising() {
   // Injected once rather than rendered: a <style> inside the tree is recreated
   // on every drag frame, and the restyle that triggers is what made the
@@ -311,8 +392,13 @@ export default function Merchandising() {
       { method: "POST" },
     );
 
-  const toggle = (id: string) =>
-    setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
+  // Stable identity: the collection list below is memoised, and a fresh
+  // closure each render would defeat that.
+  const toggle = useCallback(
+    (id: string) =>
+      setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id])),
+    [],
+  );
 
   // The denominator every score is divided by. Shown so a weight is read as a
   // share of the whole rather than an absolute: Best sellers 50 means 50/total,
@@ -423,21 +509,7 @@ export default function Merchandising() {
                   Only the collections you tick are ever written to. Start with a few — each reorder
                   queues a job on Shopify, and large collections take longer to apply.
                 </Text>
-                <BlockStack gap="100">
-                  {collections.map((c: any) => (
-                    <InlineStack key={c.id} gap="300" blockAlign="center">
-                      <Checkbox
-                        label={c.title}
-                        checked={picked.includes(c.id)}
-                        onChange={() => toggle(c.id)}
-                      />
-                      <Text as="span" variant="bodySm" tone="subdued">
-                        {c.count.toLocaleString("en-IN")} products
-                        {c.sortOrder !== "MANUAL" ? " · will switch to manual sort" : ""}
-                      </Text>
-                    </InlineStack>
-                  ))}
-                </BlockStack>
+                <CollectionPicker collections={collections} picked={picked} toggle={toggle} />
               </BlockStack>
             </Card>
 
@@ -661,33 +733,7 @@ export default function Merchandising() {
                     <Text as="p" variant="bodySm" tone="subdued">
                       Top 20 of {actionData.total} products
                     </Text>
-                    <DataTable
-                      columnContentTypes={["numeric", "text", "text", "numeric", "text"]}
-                      headings={["#", "Product", "Why it ranks here", "Score", "Stock"]}
-                      rows={actionData.preview.map((p: any) => [
-                        p.rank,
-                        p.title,
-                        // The parts sum to the score, so this explains the
-                        // number rather than restating it. Ordered by
-                        // contribution: what actually decided the position
-                        // reads first.
-                        <InlineStack key={p.rank} gap="200" wrap>
-                          {[...p.parts]
-                            .sort((a: any, b: any) => b.points - a.points)
-                            .map((part: any) => (
-                              <Text key={part.label} as="span" variant="bodySm"
-                                tone={part.points === 0 ? "subdued" : undefined}>
-                                {part.label} <b>{part.points}</b>{" "}
-                                <Text as="span" variant="bodySm" tone="subdued">
-                                  ({part.detail})
-                                </Text>
-                              </Text>
-                            ))}
-                        </InlineStack>,
-                        p.score,
-                        p.inStock ? "In stock" : "Sold out",
-                      ])}
-                    />
+                    <PreviewTable preview={actionData.preview} />
                   </BlockStack>
                 )}
               </BlockStack>
