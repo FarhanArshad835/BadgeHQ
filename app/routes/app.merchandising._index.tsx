@@ -322,6 +322,45 @@ const PreviewTable = memo(function PreviewTable({ preview }: { preview: any[] })
   );
 });
 
+
+/**
+ * Style objects hoisted out of the component.
+ *
+ * The weight panel holds over fifty of them. Written inline, each is a new
+ * object on every render, so React compares all of them against the DOM on
+ * every drag frame - which is what made the sliders feel heavy again after
+ * the panel was rebuilt to this design. As module constants their identity is
+ * stable and the comparison is skipped. The handful that depend on state or a
+ * loop variable stay inline, where they belong.
+ */
+const S0: React.CSSProperties = {padding: "18px 22px", gap: 14};
+const S1: React.CSSProperties = {display: "flex", flexWrap: "wrap", alignItems: "baseline", justifyContent: "space-between", gap: 12};
+const S2: React.CSSProperties = {display: "flex", alignItems: "baseline", gap: 14};
+const S3: React.CSSProperties = {margin: 0, fontSize: 15, fontWeight: 600, letterSpacing: "-.01em"};
+const S4: React.CSSProperties = {display: "flex", alignItems: "baseline", gap: 8};
+const S5: React.CSSProperties = {fontSize: 20, fontWeight: 700};
+const S6: React.CSSProperties = {display: "flex", height: 14, borderRadius: 999, overflow: "hidden", gap: 2};
+const S7: React.CSSProperties = {display: "flex", flexWrap: "wrap", gap: 22, fontSize: 13, color: "#4B4B55"};
+const S8: React.CSSProperties = {display: "flex", alignItems: "center", gap: 7};
+const S9: React.CSSProperties = {display: "flex", flexDirection: "column", gap: 10};
+const S10: React.CSSProperties = {display: "flex", alignItems: "baseline", gap: 10};
+const S11: React.CSSProperties = {color: "#141414"};
+const S12: React.CSSProperties = {display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 16};
+const S13: React.CSSProperties = {display: "flex", justifyContent: "space-between", alignItems: "center"};
+const S14: React.CSSProperties = {minWidth: 0};
+const S15: React.CSSProperties = {display: "flex", flexDirection: "column", gap: 6, marginTop: 2};
+const S16: React.CSSProperties = {fontSize: 12};
+const S17: React.CSSProperties = {width: 8, height: 8, borderRadius: "50%", background: "#1E9E5A"};
+const S18: React.CSSProperties = {display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10};
+const S19: React.CSSProperties = {fontSize: 18, fontWeight: 700, lineHeight: 1.2};
+const S20: React.CSSProperties = {position: "relative", display: "inline-flex", alignItems: "center", cursor: "pointer", flexShrink: 0};
+const S21: React.CSSProperties = {position: "absolute", opacity: 0, width: 44, height: 26, margin: 0, cursor: "pointer"};
+const S22: React.CSSProperties = {display: "flex", flexDirection: "column", gap: 6, marginTop: "auto"};
+const S23: React.CSSProperties = {display: "flex", gap: 8};
+const S24: React.CSSProperties = {fontSize: 12, padding: "6px 10px"};
+const S25: React.CSSProperties = {display: "flex", justifyContent: "space-between", marginTop: 2};
+const S26: React.CSSProperties = {fontSize: 13, fontWeight: 600};
+
 export default function Merchandising() {
   // Injected once rather than rendered: a <style> inside the tree is recreated
   // on every drag frame, and the restyle that triggers is what made the
@@ -524,20 +563,20 @@ export default function Merchandising() {
                 recreated on every keystroke and drag frame, and the style
                 recalculation that forces is what made the sliders stutter. */}
             <div className="merch">
-              <div className="merch-card" style={{ padding: "18px 22px", gap: 14 }}>
-                <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", justifyContent: "space-between", gap: 12 }}>
-                  <div style={{ display: "flex", alignItems: "baseline", gap: 14 }}>
-                    <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600, letterSpacing: "-.01em" }}>What decides the order</h2>
+              <div className="merch-card" style={S0}>
+                <div style={S1}>
+                  <div style={S2}>
+                    <h2 style={S3}>What decides the order</h2>
                     <span className="merch-sub">Higher total ranks first.</span>
                   </div>
-                  <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                  <div style={S4}>
                     <span className="merch-lab">Total weight</span>
-                    <span style={{ fontSize: 20, fontWeight: 700 }}>{totalWeight}</span>
+                    <span style={S5}>{totalWeight}</span>
                   </div>
                 </div>
 
                 <div
-                  style={{ display: "flex", height: 14, borderRadius: 999, overflow: "hidden", gap: 2 }}
+                  style={S6}
                   role="img"
                   aria-label={"Share of total weight: " + mix.filter((m) => m.weight > 0).map((m) => m.label + " " + m.pct + " percent").join(", ")}
                 >
@@ -545,9 +584,9 @@ export default function Merchandising() {
                     <div key={m.label} style={{ width: m.pct + "%", background: m.color }} />
                   ))}
                 </div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 22, fontSize: 13, color: "#4B4B55" }}>
+                <div style={S7}>
                   {mix.filter((m) => m.weight > 0).map((m) => (
-                    <span key={m.label} style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                    <span key={m.label} style={S8}>
                       <i style={{ width: 10, height: 10, borderRadius: 3, background: m.color }} />
                       {m.label} {m.weight}
                     </span>
@@ -555,19 +594,19 @@ export default function Merchandising() {
                 </div>
               </div>
 
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-                  <span className="merch-lab" style={{ color: "#141414" }}>Sales &amp; catalogue</span>
+              <div style={S9}>
+                <div style={S10}>
+                  <span className="merch-lab" style={S11}>Sales &amp; catalogue</span>
                   <span className="merch-sub">From your orders.</span>
                 </div>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 16 }}>
+                <div style={S12}>
 
                   <div className="merch-card">
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <span className="merch-lab" style={{ minWidth: 0 }}>Best sellers</span>
+                    <div style={S13}>
+                      <span className="merch-lab" style={S14}>Best sellers</span>
                       <span className="merch-pill merch-pill--accent">Strongest signal</span>
                     </div>
-                    <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                    <div style={S4}>
                       <span className="merch-big">{useSales ? wSales : 0}</span>
                       <span className="merch-sub">weight</span>
                     </div>
@@ -577,8 +616,8 @@ export default function Merchandising() {
                       onChange={(e) => setWSales(Number(e.currentTarget.value))}
                       style={{ ["--p" as any]: wSales + "%" }}
                     />
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 2 }}>
-                      <span className="merch-sub" style={{ fontSize: 12 }}>Sales window</span>
+                    <div style={S15}>
+                      <span className="merch-sub" style={S16}>Sales window</span>
                       <div className="merch-seg" role="group" aria-label="Sales window">
                         {["7", "14", "30", "60", "90"].map((d) => (
                           <button key={d} type="button" aria-pressed={salesWindow === d} onClick={() => setSalesWindow(d)}>{d}d</button>
@@ -589,7 +628,7 @@ export default function Merchandising() {
 
                   <div className="merch-card">
                     <span className="merch-lab">Reviews</span>
-                    <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                    <div style={S4}>
                       <span className="merch-big">{useReviews ? wReviews : 0}</span>
                       <span className="merch-sub">weight</span>
                     </div>
@@ -599,10 +638,10 @@ export default function Merchandising() {
                       onChange={(e) => setWReviews(Number(e.currentTarget.value))}
                       style={{ ["--p" as any]: wReviews + "%" }}
                     />
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 2 }}>
-                      <span className="merch-sub" style={{ fontSize: 12 }}>Source</span>
+                    <div style={S15}>
+                      <span className="merch-sub" style={S16}>Source</span>
                       <div className="merch-source">
-                        <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#1E9E5A" }} />
+                        <span style={S17} />
                         Doran &middot; read on each run
                       </div>
                     </div>
@@ -610,7 +649,7 @@ export default function Merchandising() {
 
                   <div className="merch-card">
                     <span className="merch-lab">New arrivals</span>
-                    <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                    <div style={S4}>
                       <span className="merch-big">{useNew ? wNew : 0}</span>
                       <span className="merch-sub">weight</span>
                     </div>
@@ -620,8 +659,8 @@ export default function Merchandising() {
                       onChange={(e) => setWNew(Number(e.currentTarget.value))}
                       style={{ ["--p" as any]: wNew + "%" }}
                     />
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 2 }}>
-                      <span className="merch-sub" style={{ fontSize: 12 }}>Counts as new for</span>
+                    <div style={S15}>
+                      <span className="merch-sub" style={S16}>Counts as new for</span>
                       <div className="merch-seg" role="group" aria-label="Counts as new for">
                         {["14", "30", "60"].map((d) => (
                           <button key={d} type="button" aria-pressed={newDays === d} onClick={() => setNewDays(d)}>{d} days</button>
@@ -632,13 +671,13 @@ export default function Merchandising() {
 
                   <div className="merch-card">
                     <span className="merch-lab">Out of stock</span>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-                      <span style={{ fontSize: 18, fontWeight: 700, lineHeight: 1.2 }}>Push sold-out<br />products down</span>
-                      <label style={{ position: "relative", display: "inline-flex", alignItems: "center", cursor: "pointer", flexShrink: 0 }}>
+                    <div style={S18}>
+                      <span style={S19}>Push sold-out<br />products down</span>
+                      <label style={S20}>
                         <input
                           type="checkbox" checked={sink} onChange={(e) => setSink(e.currentTarget.checked)}
                           aria-label="Push out-of-stock products down"
-                          style={{ position: "absolute", opacity: 0, width: 44, height: 26, margin: 0, cursor: "pointer" }}
+                          style={S21}
                         />
                         <span aria-hidden="true" style={{ width: 44, height: 26, borderRadius: 999, background: sink ? "#3B38C9" : "#C9C9D2", display: "block", position: "relative", transition: "background .15s" }}>
                           <span style={{ position: "absolute", top: 3, left: sink ? 21 : 3, width: 20, height: 20, borderRadius: "50%", background: "#fff", boxShadow: "0 1px 2px rgba(0,0,0,.25)", transition: "left .15s" }} />
@@ -646,13 +685,13 @@ export default function Merchandising() {
                       </label>
                     </div>
                     <p className="merch-desc">They sink below everything in stock, keeping their own order.</p>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: "auto" }}>
-                      <span className="merch-sub" style={{ fontSize: 12 }}>Right now</span>
-                      <div style={{ display: "flex", gap: 8 }}>
-                        <span className="merch-pill merch-pill--accent" style={{ fontSize: 12, padding: "6px 10px" }}>
+                    <div style={S22}>
+                      <span className="merch-sub" style={S16}>Right now</span>
+                      <div style={S23}>
+                        <span className="merch-pill merch-pill--accent" style={S24}>
                           {counts.inStock.toLocaleString("en-IN")} in stock
                         </span>
-                        <span className="merch-pill merch-pill--warn" style={{ fontSize: 12, padding: "6px 10px" }}>
+                        <span className="merch-pill merch-pill--warn" style={S24}>
                           {counts.soldOut.toLocaleString("en-IN")} sold out
                         </span>
                       </div>
@@ -662,21 +701,21 @@ export default function Merchandising() {
                 </div>
               </div>
 
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-                  <span className="merch-lab" style={{ color: "#141414" }}>From shopper behaviour</span>
+              <div style={S9}>
+                <div style={S10}>
+                  <span className="merch-lab" style={S11}>From shopper behaviour</span>
                   <span className="merch-sub">Shown to that shopper only, instantly.</span>
                 </div>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 16 }}>
+                <div style={S12}>
                   {behaviourCards.map((c) => (
                     <div className="merch-card" key={c.id}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <span className="merch-lab" style={{ minWidth: 0 }}>{c.label}</span>
+                      <div style={S13}>
+                        <span className="merch-lab" style={S14}>{c.label}</span>
                         {c.tag ? (
                           <span className={c.tag === "Weakest" ? "merch-pill merch-pill--mute" : "merch-pill merch-pill--accent"}>{c.tag}</span>
                         ) : null}
                       </div>
-                      <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                      <div style={S4}>
                         <span className="merch-big">{c.on ? c.weight : 0}</span>
                         <span className="merch-sub">weight</span>
                       </div>
@@ -686,9 +725,9 @@ export default function Merchandising() {
                         onChange={(e) => c.set(Number(e.currentTarget.value))}
                         style={{ ["--p" as any]: (c.weight / 20) * 100 + "%" }}
                       />
-                      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 2 }}>
-                        <span className="merch-sub" style={{ fontSize: 12 }}>Collected so far</span>
-                        <span style={{ fontSize: 13, fontWeight: 600 }}>{c.collected.toLocaleString("en-IN")}</span>
+                      <div style={S25}>
+                        <span className="merch-sub" style={S16}>Collected so far</span>
+                        <span style={S26}>{c.collected.toLocaleString("en-IN")}</span>
                       </div>
                     </div>
                   ))}
