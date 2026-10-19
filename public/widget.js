@@ -4793,8 +4793,14 @@
   var _injecting = false;
   function loadOrderRank(then) {
     if (_orderRank) return then(_orderRank);
-    var KEY = "badgehq-order";
+    // Versioned. The first build of this cached POSITIONS under the same key;
+    // read back as scores they make a wishlist worth twenty places instead of
+    // twenty points. sessionStorage survives a reload - only closing the tab
+    // clears it - so a stale entry would have outlived the fix on every tab
+    // that had already loaded the page. Bump this whenever the shape changes.
+    var KEY = "badgehq-order-v2";
     try {
+      sessionStorage.removeItem("badgehq-order");
       var cached = JSON.parse(sessionStorage.getItem(KEY) || "null");
       if (cached && cached.r) {
         _orderRank = cached.r;
@@ -4811,14 +4817,19 @@
         var rank = {};
         var list = (d && d.order) || [];
         var sc = (d && d.scores) || [];
-        for (var i = 0; i < list.length; i++) {
-          // Falls back to a positional score for an older payload with no
-          // scores array, so a stale edge cache still orders correctly.
-          rank[list[i]] = typeof sc[i] === "number" ? sc[i] : list.length - i;
+        // A payload with no scores array is an older cached one. Positions
+        // are NOT a substitute: the shopper's points get added to this, and on
+        // a positional scale a 20-point wishlist means twenty places, which is
+        // what made one click jump to the top. Better to order by DOM position
+        // for this page and pick the real scores up on the next load.
+        var usable = sc.length === list.length;
+        if (usable) {
+          for (var i = 0; i < list.length; i++) rank[list[i]] = sc[i];
         }
         _orderRank = rank;
         try {
-          sessionStorage.setItem(KEY, JSON.stringify({ r: rank }));
+          // Only cache a payload worth reusing.
+          if (usable) sessionStorage.setItem(KEY, JSON.stringify({ r: rank }));
         } catch (e2) {
           /* quota - it still works for this page */
         }
