@@ -4634,20 +4634,25 @@
       "click",
       function (e) {
         var btn = e.target.closest
-          ? e.target.closest("[data-wlh-id], .wishlist-btn, .wishlist-hero-custom-button, [data-wishlist-hero]")
+          ? e.target.closest("[data-wlh-id], [data-wlh-handle], .wishlist-btn, .wishlist-hero-custom-button, [data-wishlist-hero]")
           : null;
         if (!btn) return;
         var card = btn.closest("[data-product-id]");
+        // Measured on this store: WishlistHero renders data-wlh-handle and
+        // NOT data-wlh-id, and the cards carry no data-product-id either, so
+        // every id source failed and the click was dropped. The handle is a
+        // first-class key now, so it can be used directly.
+        var wrap = btn.closest ? btn.closest("li, article, .card-wrapper, [class*='product-card']") : null;
+        var wlHandle =
+          (btn.dataset ? btn.dataset.wlhHandle : null) ||
+          (wrap ? wlHandleFromLink(wrap) : null) ||
+          productHandleFromPage();
         var id =
           (card && card.dataset ? card.dataset.productId : null) ||
           (btn.dataset ? btn.dataset.wlhId || btn.dataset.productId : null) ||
-          pid;
+          pid ||
+          wlHandle;
         if (!id) return;
-        // The handle comes from the card's own product link. On a collection
-        // page there is no page handle to fall back on, so without this a
-        // wishlist click there would be recorded but unusable.
-        var wrap = btn.closest ? btn.closest("li, article, .card-wrapper, [class*='product-card']") : null;
-        var wlHandle = wrap ? wlHandleFromLink(wrap) : productHandleFromPage();
         // The class flips after the app handles the click, so read it late.
         // Compared against its own earlier state rather than matched against a
         // list of class names: every wishlist app spells "on" differently, and
