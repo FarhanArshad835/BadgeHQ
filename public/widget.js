@@ -4806,9 +4806,16 @@
     fetch(API_ORIGIN + "/api/order?shop=" + encodeURIComponent(SHOP))
       .then(function (r) { return r.json(); })
       .then(function (d) {
+        // handle -> the engine's own score, so the shopper's points are added
+        // on the same scale the merchant's weights produced.
         var rank = {};
         var list = (d && d.order) || [];
-        for (var i = 0; i < list.length; i++) rank[list[i]] = i;
+        var sc = (d && d.scores) || [];
+        for (var i = 0; i < list.length; i++) {
+          // Falls back to a positional score for an older payload with no
+          // scores array, so a stale edge cache still orders correctly.
+          rank[list[i]] = typeof sc[i] === "number" ? sc[i] : list.length - i;
+        }
         _orderRank = rank;
         try {
           sessionStorage.setItem(KEY, JSON.stringify({ r: rank }));
@@ -5075,18 +5082,19 @@
       // round trip to look right.
     }
 
-    // Each card's standing as points, with the shopper's score added. One
-    // step between neighbours, so a behaviour score of N moves a card up by
-    // roughly N positions and the merchant's weights mean something concrete.
+    // The engine's own score for each card, plus the shopper's points. Same
+    // scale, so a wishlist worth 20 means 20 of the engine's points - which
+    // near the top of a collection is a place or two, and further down is
+    // more, because that is where products actually sit close together.
     //
-    // Standing comes from the shop-wide ranking where the product appears in
-    // it, and from DOM position otherwise. The difference matters once more
-    // than one page is loaded: DOM position restarts at every batch, so a
-    // product at the top of page 2 would outrank one mid-page-1.
+    // Ranking by POSITION instead made 20 points mean 20 places regardless,
+    // so a single wishlist leapt past products scoring hundreds higher.
     var rank = _orderRank || {};
     var ranked = cards.map(function (c, idx) {
-      var global = rank[c.handle];
-      var standing = typeof global === "number" ? -global : -(idx + 1);
+      var base = rank[c.handle];
+      // Unranked products keep their place rather than sinking: a new
+      // product the engine has not scored yet is not a bad product.
+      var standing = typeof base === "number" ? base : -(idx + 1);
       return {
         root: c.root,
         idx: idx,

@@ -59,7 +59,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const rows = await prisma.productScore.findMany({
     where: { shop, handle: { not: "" } },
     orderBy: [{ inStock: "desc" }, { score: "desc" }],
-    select: { handle: true },
+    select: { handle: true, score: true },
   });
 
   return json(
@@ -70,6 +70,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       // objects: at a thousand products the key names would cost more than the
       // data.
       order: rows.map((r) => r.handle),
+      // The scores themselves, same order. The storefront adds the shopper's
+      // behaviour to these, so it has to compare on the scale the engine
+      // actually produced: ranking by position instead would make a 20-point
+      // wishlist worth 20 places, when 20 points is a few places here and
+      // nothing at all near the top, where products sit 250 points apart.
+      scores: rows.map((r) => r.score),
     },
     { headers: { ...CORS, ...CACHE } },
   );
