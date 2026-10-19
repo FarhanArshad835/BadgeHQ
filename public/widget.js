@@ -120,6 +120,7 @@
     if (w.aiReplies && w.aiReplies.enabled) initAiReplies(w.aiReplies);
 
     if (w.behaviourTracking) initBehaviourBeacon(page);
+    if (w.behaviourTracking) reorderGridForShopper(page);
 
     if (page === "product") setupProductRerenderWatch(data, page);
     else setupCardRerenderWatch(data, page);
@@ -4403,6 +4404,15 @@
     return '<div class="badgehq-ai-help">Need a person? ' + bits.join(" &middot; ") + "</div>";
   }
 
+  /** The current product page's handle, from the canonical link - present on
+   *  every product page and unaffected by query strings or variant choice. */
+  function productHandleFromPage() {
+    var c = document.querySelector('link[rel="canonical"]');
+    var href = c && c.href ? c.href : window.location.href;
+    var m = href.match(/\/products\/([^/?#]+)/);
+    return m ? decodeURIComponent(m[1]).toLowerCase() : null;
+  }
+
   /* ===================== BEHAVIOUR BEACON ===================== */
   /**
    * Feeds collection ranking: which products shoppers view, dwell on, add to
@@ -4434,6 +4444,13 @@
       if (!k) return;
       if (!bag[k]) bag[k] = { p: k };
       bag[k][field] = (bag[k][field] || 0) + (by || 1);
+      // Handle and timestamp are for the client-side reorder only and are
+      // never sent: the beacon strips everything except p and the counters.
+      // A grid identifies a card by the handle in its link, so an id alone
+      // cannot be acted on there.
+      var h = productHandleFromPage();
+      if (h) bag[k].h = h;
+      bag[k].t = Date.now();
       try {
         sessionStorage.setItem(KEY, JSON.stringify(bag));
       } catch (e) {
@@ -4528,7 +4545,19 @@
     function flush() {
       if (sent) return;
       var events = [];
-      for (var k in bag) events.push(bag[k]);
+      // Only the id and the counters go up. h and t exist purely for the
+      // local reorder, and the endpoint has no use for them.
+      for (var k in bag) {
+        var b = bag[k];
+        var e = { p: b.p };
+        if (b.v) e.v = b.v;
+        if (b.d) e.d = b.d;
+        if (b.ca) e.ca = b.ca;
+        if (b.cr) e.cr = b.cr;
+        if (b.wa) e.wa = b.wa;
+        if (b.wr) e.wr = b.wr;
+        events.push(e);
+      }
       if (!events.length) return;
       sent = true;
       try {
@@ -4547,5 +4576,119 @@
     document.addEventListener("visibilitychange", function () {
       if (document.hidden) flush();
     });
+  }
+
+  /* ============== PERSONALISED GRID ORDER (client-side) ==============
+   *
+   * Lifts the products THIS shopper has shown interest in to the top of a
+   * collection grid, instantly and without a server round trip.
+   *
+   * Works on any theme the app is installed on: cards are found by the same
+   * selector list the wishlist hearts already use, and a product is identified
+   * by the handle in its own link, so nothing depends on a merchant adding
+   * markup or editing a template.
+   *
+   * This is deliberately separate from the hourly server ranking. The server
+   * decides the base order for everyone from sales, reviews and newness; this
+   * only promotes a handful of cards for one shopper. Scores come from the
+   * same counters the beacon sends, read back out of sessionStorage, so the
+   * two never disagree about what a shopper did.
+   */
+  var REORDER_MAX = 3;      // a hint, not a takeover
+  var REORDER_MIN_SCORE = 5; // one glance is not interest
+
+  function reorderGridForShopper(page) {
+    if (page !== "collection" && page !== "home") return;
+
+    // A filtered or explicitly sorted view is the shopper asking for a
+    // specific order. Overriding it would be wrong.
+    var qs = window.location.search;
+    if (/[?&](filter\.|sort_by=)/.test(qs)) return;
+
+    var bag = {};
+    try {
+      bag = JSON.parse(sessionStorage.getItem("badgehq-behaviour") || "{}") || {};
+    } catch (e) {
+      return;
+    }
+
+    // Same weighting the server applies, so a product that ranks highly here
+    // is the one that would rank highly there.
+    var wanted = [];
+    for (var k in bag) {
+      var b = bag[k];
+      if (!b || !b.h) continue; // no handle recorded: cannot act on it
+      // Each component floors at zero independently, exactly as the server
+      // does. Without the floor a removal drags the whole score negative and
+      // a product with real cart interest could rank below one with none.
+      var cart = Math.max(Math.min((b.ca || 0) * 12, 24) - (b.cr || 0) * 9, 0);
+      var wish = Math.max(Math.min((b.wa || 0) * 10, 20) - (b.wr || 0) * 9, 0);
+      var sc = cart + wish + ((b.d || 0) > 0 ? 5 : 0) + Math.min(b.v || 0, 4);
+      if (sc < REORDER_MIN_SCORE) continue;
+      wanted.push({ handle: b.h, score: sc, seen: b.t || 0 });
+    }
+    if (!wanted.length) return;
+
+    wanted.sort(function (a, b2) {
+      if (b2.score !== a.score) return b2.score - a.score;
+      return b2.seen - a.seen; // equal interest: most recently seen first
+    });
+    wanted = wanted.slice(0, REORDER_MAX);
+
+    // Runs once the grid exists rather than on a timer: on a normal load the
+    // markup is already parsed by the time widget.js executes, so the move
+    // happens before the shopper has read the first row.
+    var tries = 0;
+    (function attempt() {
+      if (moveCardsToFront(wanted)) return;
+      if (++tries < 20) setTimeout(attempt, 150);
+    })();
+  }
+
+  /** Find the <li>/<article> wrapping a card, given any element inside it. */
+  function cardRootOf(el) {
+    var n = el;
+    for (var i = 0; i < 6 && n && n.parentElement; i++) {
+      var tag = n.tagName;
+      if (tag === "LI" || tag === "ARTICLE") return n;
+      n = n.parentElement;
+    }
+    return null;
+  }
+
+  function moveCardsToFront(wanted) {
+    // Reuse the wishlist's card selectors: they already cover Dawn and the
+    // other themes this app runs on, and they are maintained in one place.
+    var cards = [];
+    for (var s = 0; s < WL_CARD_SELECTORS.length && !cards.length; s++) {
+      var found = document.querySelectorAll(WL_CARD_SELECTORS[s]);
+      for (var i = 0; i < found.length; i++) {
+        var root = cardRootOf(found[i]);
+        var handle = wlHandleFromLink(found[i]);
+        if (root && handle) cards.push({ root: root, handle: handle.toLowerCase() });
+      }
+    }
+    if (cards.length < 2) return false;
+
+    var grid = cards[0].root.parentElement;
+    if (!grid) return false;
+
+    // Highest score last, so each insertAtFront leaves the best at position 1.
+    var placed = 0;
+    for (var w = wanted.length - 1; w >= 0; w--) {
+      for (var c = 0; c < cards.length; c++) {
+        if (cards[c].handle !== wanted[w].handle) continue;
+        if (cards[c].root.parentElement !== grid) continue;
+        if (cards[c].root.getAttribute("data-badgehq-lifted")) continue;
+        cards[c].root.setAttribute("data-badgehq-lifted", "1");
+        grid.insertBefore(cards[c].root, grid.firstElementChild);
+        placed++;
+        break;
+      }
+    }
+    // Returning true even with nothing placed: the grid was found and read, so
+    // retrying would only re-scan the same cards. A product the shopper viewed
+    // simply is not in this collection.
+    return true;
   }
 })();
