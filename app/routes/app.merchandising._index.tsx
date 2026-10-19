@@ -21,7 +21,6 @@ import {
   Banner,
   Badge,
   Box,
-  RangeSlider,
   Select,
   DataTable,
 } from "@shopify/polaris";
@@ -35,6 +34,41 @@ import {
   rankProducts,
   runMerchandising,
 } from "../utils/merchandise.server";
+
+/**
+ * Styles for the signal-weight panel, taken from the supplied design.
+ *
+ * Every selector is prefixed .merch- and the panel is wrapped in .merch, so
+ * these cannot reach Polaris chrome and Polaris cannot restyle the cards. The
+ * values - radii, padding, type scale, the slider track and thumb - are the
+ * design's own, not approximations.
+ *
+ * Geist is loaded from Google Fonts, matching the design; it falls back to the
+ * system stack if that request fails, so the layout never depends on it.
+ */
+const MERCH_CSS = `
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&display=swap');
+.merch{font-family:"Geist",system-ui,-apple-system,sans-serif;color:#141414;display:flex;flex-direction:column;gap:18px}
+.merch input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:4px;border-radius:999px;background:linear-gradient(to right,#3B38C9 var(--p,50%),#E4E4EA var(--p,50%));outline:none;margin:0}
+.merch input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:18px;height:18px;border-radius:50%;background:#fff;border:2px solid #3B38C9;box-shadow:0 1px 3px rgba(0,0,0,.18);cursor:pointer}
+.merch input[type=range]::-moz-range-thumb{width:18px;height:18px;border-radius:50%;background:#fff;border:2px solid #3B38C9;cursor:pointer}
+.merch input[type=range]:disabled{opacity:.45;cursor:not-allowed}
+.merch-seg{display:flex;gap:4px;background:#F4F4F6;border-radius:10px;padding:4px}
+.merch-seg button{flex:1;border:0;background:transparent;border-radius:7px;padding:7px 0;font:inherit;font-size:13px;font-weight:500;color:#4B4B55;cursor:pointer;min-height:32px}
+.merch-seg button[aria-pressed=true]{background:#141414;color:#fff}
+.merch-card{background:#fff;border:1px solid #E6E6EA;border-radius:14px;padding:20px 22px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.merch-lab{font-size:12px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:#6B6B76}
+.merch-big{font-size:36px;font-weight:700;line-height:1;letter-spacing:-.02em;color:#141414}
+.merch-desc{font-size:13.5px;line-height:1.45;color:#4B4B55;margin:0}
+.merch-sub{font-size:13px;color:#6B6B76}
+.merch-pill{font-size:11px;font-weight:500;border-radius:999px;padding:3px 9px}
+.merch-pill--accent{color:#3B38C9;background:#ECECFB}
+.merch-pill--warn{color:#8A4B00;background:#FFF1E0}
+.merch-pill--mute{color:#6B6B76;background:#F4F4F6}
+.merch-source{display:flex;align-items:center;gap:8px;background:#F4F4F6;border-radius:10px;padding:9px 12px;font-size:13px;font-weight:500;min-height:40px;box-sizing:border-box}
+@media (max-width:1100px){.merch [style*="repeat(4"]{grid-template-columns:repeat(2,minmax(0,1fr))!important}}
+@media (max-width:620px){.merch [style*="repeat(4"]{grid-template-columns:1fr!important}}
+`;
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, admin } = await authenticate.admin(request);
@@ -65,7 +99,34 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     select: { lastRunAt: true, lastRunStatus: true },
   });
 
-  return json({ settings, collections, lastRun });
+  // Figures the cards show beside each control, so a weight is set against
+  // what the signal actually holds rather than in the abstract: an empty
+  // behaviour counter explains a dead slider better than any help text.
+  const [stock, behaviour] = await Promise.all([
+    prisma.productScore.groupBy({
+      by: ["inStock"],
+      where: { shop: session.shop },
+      _count: { _all: true },
+    }),
+    prisma.productBehaviour.aggregate({
+      where: { shop: session.shop },
+      _sum: { cartAdds: true, wishAdds: true, dwell30: true, views: true },
+    }),
+  ]);
+
+  return json({
+    settings,
+    collections,
+    lastRun,
+    counts: {
+      inStock: stock.find((r) => r.inStock)?._count._all ?? 0,
+      soldOut: stock.find((r) => !r.inStock)?._count._all ?? 0,
+      cart: behaviour._sum.cartAdds ?? 0,
+      wish: behaviour._sum.wishAdds ?? 0,
+      dwell: behaviour._sum.dwell30 ?? 0,
+      views: behaviour._sum.views ?? 0,
+    },
+  });
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -162,7 +223,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function Merchandising() {
-  const { settings, collections, lastRun } = useLoaderData<typeof loader>();
+  const { settings, collections, lastRun, counts } = useLoaderData<typeof loader>();
   const actionData = useActionData<any>();
   const submit = useSubmit();
   const nav = useNavigation();
@@ -173,13 +234,13 @@ export default function Merchandising() {
   const [wSales, setWSales] = useState(settings.weightSales);
   const [wReviews, setWReviews] = useState(settings.weightReviews);
   const [wNew, setWNew] = useState(settings.weightNewArrival);
-  const [useSales, setUseSales] = useState(settings.useSales);
-  const [useReviews, setUseReviews] = useState(settings.useReviews);
-  const [useNew, setUseNew] = useState(settings.useNewArrival);
-  const [useCart, setUseCart] = useState(settings.useCart);
-  const [useWish, setUseWish] = useState(settings.useWish);
-  const [useDwell, setUseDwell] = useState(settings.useDwell);
-  const [useViews, setUseViews] = useState(settings.useViews);
+  const [useSales] = useState(settings.useSales);
+  const [useReviews] = useState(settings.useReviews);
+  const [useNew] = useState(settings.useNewArrival);
+  const [useCart] = useState(settings.useCart);
+  const [useWish] = useState(settings.useWish);
+  const [useDwell] = useState(settings.useDwell);
+  const [useViews] = useState(settings.useViews);
   const [wCart, setWCart] = useState(settings.weightCart);
   const [wWish, setWWish] = useState(settings.weightWish);
   const [wDwell, setWDwell] = useState(settings.weightDwell);
@@ -230,6 +291,58 @@ export default function Merchandising() {
 
   const toggle = (id: string) =>
     setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
+
+  // The denominator every score is divided by. Shown so a weight is read as a
+  // share of the whole rather than an absolute: Best sellers 50 means 50/total,
+  // which is what actually decides how much it can move a product.
+  const totalWeight =
+    (useSales ? wSales : 0) +
+    (useReviews ? wReviews : 0) +
+    (useNew ? wNew : 0) +
+    (useCart ? wCart : 0) +
+    (useWish ? wWish : 0) +
+    (useDwell ? wDwell : 0) +
+    (useViews ? wViews : 0);
+
+  // Shades run dark to light in the design's own order, so the bar reads as
+  // one ramp rather than seven unrelated colours.
+  const mixRaw = [
+    { label: "New arrivals", weight: useNew ? wNew : 0, color: "#3B38C9" },
+    { label: "Best sellers", weight: useSales ? wSales : 0, color: "#6C6AE0" },
+    { label: "Reviews", weight: useReviews ? wReviews : 0, color: "#A9A8F0" },
+    { label: "Added to cart", weight: useCart ? wCart : 0, color: "#D2D1F7" },
+    { label: "Wishlisted", weight: useWish ? wWish : 0, color: "#E0DFF9" },
+    { label: "Viewed 30s+", weight: useDwell ? wDwell : 0, color: "#ECECFB" },
+    { label: "Views", weight: useViews ? wViews : 0, color: "#F2F2FC" },
+  ];
+  const mix = mixRaw.map((m) => ({
+    ...m,
+    // Guarded: with every signal off the bar is simply empty rather than NaN.
+    pct: totalWeight > 0 ? Math.round((m.weight / totalWeight) * 1000) / 10 : 0,
+  }));
+
+  const behaviourCards = [
+    {
+      id: "w-cart", label: "Added to cart", tag: "Strongest here",
+      desc: "Net of removals. One step from a purchase.",
+      weight: wCart, set: setWCart, on: useCart, collected: counts.cart,
+    },
+    {
+      id: "w-wish", label: "Wishlisted", tag: "",
+      desc: "Net of un-wishlisting. Shows intent without a cart.",
+      weight: wWish, set: setWWish, on: useWish, collected: counts.wish,
+    },
+    {
+      id: "w-dwell", label: "Viewed 30 s or more", tag: "",
+      desc: "Shoppers who stayed on the page rather than bouncing.",
+      weight: wDwell, set: setWDwell, on: useDwell, collected: counts.dwell,
+    },
+    {
+      id: "w-view", label: "Product views", tag: "Weakest",
+      desc: "A view says a shopper arrived, not that they liked it.",
+      weight: wViews, set: setWViews, on: useViews, collected: counts.views,
+    },
+  ];
 
   const heavy = picked
     .map((id) => collections.find((c: any) => c.id === id))
@@ -306,92 +419,184 @@ export default function Merchandising() {
               </BlockStack>
             </Card>
 
-            <Card>
-              <BlockStack gap="400">
-                <Text as="h2" variant="headingMd">What decides the order</Text>
+            {/* Signal weights, built to the supplied design: same grid, card
+                chrome, type scale and spacing. Styles are scoped under
+                .merch- so Polaris cannot restyle them and this cannot leak
+                out into the rest of the admin. */}
+            <style dangerouslySetInnerHTML={{ __html: MERCH_CSS }} />
 
-                <Checkbox label="Best sellers" checked={useSales} onChange={setUseSales}
-                  helpText="Units sold in the window below. The strongest signal." />
-                {useSales && (
-                  <>
-                    <RangeSlider label={`Weight: ${wSales}`} value={wSales} min={0} max={100}
-                      onChange={(v) => setWSales(Number(v))} output />
-                    <Select label="Sales window" value={salesWindow} onChange={setSalesWindow}
-                      options={[
-                        { label: "Last 7 days", value: "7" },
-                        { label: "Last 14 days", value: "14" },
-                        { label: "Last 30 days", value: "30" },
-                        { label: "Last 60 days", value: "60" },
-                        { label: "Last 90 days", value: "90" },
-                      ]} />
-                  </>
-                )}
+            <div className="merch">
+              <div className="merch-card" style={{ padding: "18px 22px", gap: 14 }}>
+                <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", justifyContent: "space-between", gap: 12 }}>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 14 }}>
+                    <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600, letterSpacing: "-.01em" }}>What decides the order</h2>
+                    <span className="merch-sub">Higher total ranks first.</span>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                    <span className="merch-lab">Total weight</span>
+                    <span style={{ fontSize: 20, fontWeight: 700 }}>{totalWeight}</span>
+                  </div>
+                </div>
 
-                <Checkbox label="Reviews" checked={useReviews} onChange={setUseReviews}
-                  helpText="Review count from Doran." />
-                {useReviews && (
-                  <RangeSlider label={`Weight: ${wReviews}`} value={wReviews} min={0} max={100}
-                    onChange={(v) => setWReviews(Number(v))} output />
-                )}
+                <div
+                  style={{ display: "flex", height: 14, borderRadius: 999, overflow: "hidden", gap: 2 }}
+                  role="img"
+                  aria-label={"Share of total weight: " + mix.filter((m) => m.weight > 0).map((m) => m.label + " " + m.pct + " percent").join(", ")}
+                >
+                  {mix.filter((m) => m.weight > 0).map((m) => (
+                    <div key={m.label} style={{ width: m.pct + "%", background: m.color }} />
+                  ))}
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 22, fontSize: 13, color: "#4B4B55" }}>
+                  {mix.filter((m) => m.weight > 0).map((m) => (
+                    <span key={m.label} style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                      <i style={{ width: 10, height: 10, borderRadius: 3, background: m.color }} />
+                      {m.label} {m.weight}
+                    </span>
+                  ))}
+                </div>
+              </div>
 
-                <Checkbox label="New arrivals" checked={useNew} onChange={setUseNew}
-                  helpText="Boosts recently published products so they can gather sales history. Fades out across the window rather than stopping suddenly." />
-                {useNew && (
-                  <>
-                    <RangeSlider label={`Weight: ${wNew}`} value={wNew} min={0} max={100}
-                      onChange={(v) => setWNew(Number(v))} output />
-                    <Select label="Counts as new for" value={newDays} onChange={setNewDays}
-                      options={[
-                        { label: "14 days", value: "14" },
-                        { label: "30 days", value: "30" },
-                        { label: "60 days", value: "60" },
-                      ]} />
-                  </>
-                )}
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+                  <span className="merch-lab" style={{ color: "#141414" }}>Sales &amp; catalogue</span>
+                  <span className="merch-sub">From your orders.</span>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 16 }}>
 
-                <Box paddingBlockStart="200">
-                  <Text as="h3" variant="headingSm">From shopper behaviour</Text>
-                  <Text as="p" variant="bodySm" tone="subdued">
-                    Collected from the storefront. Each starts at zero and becomes useful after a
-                    few days of traffic. They measure different things &mdash; an add to cart is
-                    close to a purchase, a view barely counts &mdash; so each carries its own weight.
-                  </Text>
-                </Box>
+                  <div className="merch-card">
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <span className="merch-lab">Best sellers</span>
+                      <span className="merch-pill merch-pill--accent">Strongest signal</span>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                      <span className="merch-big">{useSales ? wSales : 0}</span>
+                      <span className="merch-sub">weight</span>
+                    </div>
+                    <label htmlFor="w-best" className="merch-desc">Units sold in the window below.</label>
+                    <input
+                      id="w-best" type="range" min={0} max={100} value={wSales} disabled={!useSales}
+                      onChange={(e) => setWSales(Number(e.currentTarget.value))}
+                      style={{ ["--p" as any]: wSales + "%" }}
+                    />
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 2 }}>
+                      <span className="merch-sub" style={{ fontSize: 12 }}>Sales window</span>
+                      <div className="merch-seg" role="group" aria-label="Sales window">
+                        {["7", "14", "30", "60", "90"].map((d) => (
+                          <button key={d} type="button" aria-pressed={salesWindow === d} onClick={() => setSalesWindow(d)}>{d}d</button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
 
-                <Checkbox label="Added to cart" checked={useCart} onChange={setUseCart}
-                  helpText="Net of removals. The strongest behavioural signal." />
-                {useCart && (
-                  <RangeSlider label={`Weight: ${wCart}`} value={wCart} min={0} max={100}
-                    onChange={(v) => setWCart(Number(v))} output />
-                )}
+                  <div className="merch-card">
+                    <span className="merch-lab">Reviews</span>
+                    <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                      <span className="merch-big">{useReviews ? wReviews : 0}</span>
+                      <span className="merch-sub">weight</span>
+                    </div>
+                    <label htmlFor="w-rev" className="merch-desc">Review count from Doran, not the star rating.</label>
+                    <input
+                      id="w-rev" type="range" min={0} max={100} value={wReviews} disabled={!useReviews}
+                      onChange={(e) => setWReviews(Number(e.currentTarget.value))}
+                      style={{ ["--p" as any]: wReviews + "%" }}
+                    />
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 2 }}>
+                      <span className="merch-sub" style={{ fontSize: 12 }}>Source</span>
+                      <div className="merch-source">
+                        <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#1E9E5A" }} />
+                        Doran &middot; read on each run
+                      </div>
+                    </div>
+                  </div>
 
-                <Checkbox label="Wishlisted" checked={useWish} onChange={setUseWish}
-                  helpText="Net of un-wishlisting." />
-                {useWish && (
-                  <RangeSlider label={`Weight: ${wWish}`} value={wWish} min={0} max={100}
-                    onChange={(v) => setWWish(Number(v))} output />
-                )}
+                  <div className="merch-card">
+                    <span className="merch-lab">New arrivals</span>
+                    <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                      <span className="merch-big">{useNew ? wNew : 0}</span>
+                      <span className="merch-sub">weight</span>
+                    </div>
+                    <label htmlFor="w-new" className="merch-desc">Boosts new products so they can gather sales history.</label>
+                    <input
+                      id="w-new" type="range" min={0} max={100} value={wNew} disabled={!useNew}
+                      onChange={(e) => setWNew(Number(e.currentTarget.value))}
+                      style={{ ["--p" as any]: wNew + "%" }}
+                    />
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 2 }}>
+                      <span className="merch-sub" style={{ fontSize: 12 }}>Counts as new for</span>
+                      <div className="merch-seg" role="group" aria-label="Counts as new for">
+                        {["14", "30", "60"].map((d) => (
+                          <button key={d} type="button" aria-pressed={newDays === d} onClick={() => setNewDays(d)}>{d} days</button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
 
-                <Checkbox label="Viewed 30 seconds or more" checked={useDwell} onChange={setUseDwell}
-                  helpText="Shoppers who stayed on the page rather than bouncing." />
-                {useDwell && (
-                  <RangeSlider label={`Weight: ${wDwell}`} value={wDwell} min={0} max={100}
-                    onChange={(v) => setWDwell(Number(v))} output />
-                )}
+                  <div className="merch-card">
+                    <span className="merch-lab">Out of stock</span>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                      <span style={{ fontSize: 18, fontWeight: 700, lineHeight: 1.2 }}>Push sold-out<br />products down</span>
+                      <label style={{ position: "relative", display: "inline-flex", alignItems: "center", cursor: "pointer", flexShrink: 0 }}>
+                        <input
+                          type="checkbox" checked={sink} onChange={(e) => setSink(e.currentTarget.checked)}
+                          aria-label="Push out-of-stock products down"
+                          style={{ position: "absolute", opacity: 0, width: 44, height: 26, margin: 0, cursor: "pointer" }}
+                        />
+                        <span aria-hidden="true" style={{ width: 44, height: 26, borderRadius: 999, background: sink ? "#3B38C9" : "#C9C9D2", display: "block", position: "relative", transition: "background .15s" }}>
+                          <span style={{ position: "absolute", top: 3, left: sink ? 21 : 3, width: 20, height: 20, borderRadius: "50%", background: "#fff", boxShadow: "0 1px 2px rgba(0,0,0,.25)", transition: "left .15s" }} />
+                        </span>
+                      </label>
+                    </div>
+                    <p className="merch-desc">They sink below everything in stock, keeping their own order.</p>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: "auto" }}>
+                      <span className="merch-sub" style={{ fontSize: 12 }}>Right now</span>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <span className="merch-pill merch-pill--accent" style={{ fontSize: 12, padding: "6px 10px" }}>
+                          {counts.inStock.toLocaleString("en-IN")} in stock
+                        </span>
+                        <span className="merch-pill merch-pill--warn" style={{ fontSize: 12, padding: "6px 10px" }}>
+                          {counts.soldOut.toLocaleString("en-IN")} sold out
+                        </span>
+                      </div>
+                    </div>
+                  </div>
 
-                <Checkbox label="Product views" checked={useViews} onChange={setUseViews}
-                  helpText="Weakest signal: a view says a shopper arrived, not that they liked it." />
-                {useViews && (
-                  <RangeSlider label={`Weight: ${wViews}`} value={wViews} min={0} max={100}
-                    onChange={(v) => setWViews(Number(v))} output />
-                )}
+                </div>
+              </div>
 
-                <Box paddingBlockStart="200">
-                  <Checkbox label="Push out-of-stock products down" checked={sink} onChange={setSink}
-                    helpText="Sold-out products move below everything in stock, but keep their order among themselves — a sold-out best seller still carries its Back in Stock signup." />
-                </Box>
-              </BlockStack>
-            </Card>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+                  <span className="merch-lab" style={{ color: "#141414" }}>From shopper behaviour</span>
+                  <span className="merch-sub">From the storefront.</span>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 16 }}>
+                  {behaviourCards.map((c) => (
+                    <div className="merch-card" key={c.id}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <span className="merch-lab">{c.label}</span>
+                        {c.tag ? (
+                          <span className={c.tag === "Weakest" ? "merch-pill merch-pill--mute" : "merch-pill merch-pill--accent"}>{c.tag}</span>
+                        ) : null}
+                      </div>
+                      <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                        <span className="merch-big">{c.on ? c.weight : 0}</span>
+                        <span className="merch-sub">weight</span>
+                      </div>
+                      <label htmlFor={c.id} className="merch-desc">{c.desc}</label>
+                      <input
+                        id={c.id} type="range" min={0} max={20} value={c.weight} disabled={!c.on}
+                        onChange={(e) => c.set(Number(e.currentTarget.value))}
+                        style={{ ["--p" as any]: (c.weight / 20) * 100 + "%" }}
+                      />
+                      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 2 }}>
+                        <span className="merch-sub" style={{ fontSize: 12 }}>Collected so far</span>
+                        <span style={{ fontSize: 13, fontWeight: 600 }}>{c.collected.toLocaleString("en-IN")}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
 
             <Card>
               <BlockStack gap="400">
