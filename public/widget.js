@@ -4770,7 +4770,6 @@
    * same counters the beacon sends, read back out of sessionStorage, so the
    * two never disagree about what a shopper did.
    */
-  var REORDER_MAX = 3;      // a hint, not a takeover
   /** A finite, non-negative number, or the fallback. */
   function num(v, dflt) {
     var n = Number(v);
@@ -4788,20 +4787,6 @@
       dwell: num(weights && weights.dwell, 5),
       views: num(weights && weights.views, 1),
     };
-    // The bar is "did one deliberate action happen": the cheapest of a
-    // wishlist or a cart add clears it, repeated views do not.
-    //
-    // Scaling it off one weight was wrong. With every slider at 20 the bar
-    // landed at 21, so a wishlist (20) failed to lift while four views (80)
-    // succeeded - the opposite of what the weights say those actions mean.
-    // Capped just under the full view allowance so views alone never qualify
-    // however high that slider goes.
-    var deliberate = Math.min(W.wish || Infinity, W.cart || Infinity);
-    var minScore = isFinite(deliberate) && deliberate > 0 ? deliberate : W.dwell || 1;
-    // Views are capped below the bar rather than the bar being raised above
-    // them: raising it would also lock out the wishlist and cart adds it is
-    // meant to admit. Browsing contributes, but can never lift on its own.
-    var viewCap = Math.max(minScore - 1, 0);
 
     // A filtered or explicitly sorted view is the shopper asking for a
     // specific order. Overriding it would be wrong.
@@ -4832,9 +4817,12 @@
       // value, so a second action still counts and a tenth does not.
       var cart = Math.max(Math.min((b.ca || 0) * W.cart, W.cart * 2) - (b.cr || 0) * Math.round(W.cart * 0.75), 0);
       var wish = Math.max(Math.min((b.wa || 0) * W.wish, W.wish * 2) - (b.wr || 0) * Math.round(W.wish * 0.9), 0);
-      var views = Math.min(Math.min(b.v || 0, 4) * W.views, viewCap);
+      var views = Math.min(b.v || 0, 4) * W.views;
       var sc = cart + wish + ((b.d || 0) > 0 ? W.dwell : 0) + views;
-      if (sc < minScore) continue;
+      // No threshold: a score simply adds to the product's standing and the
+      // grid re-sorts on the total. A small score moves a card a little, a
+      // large one moves it a lot, and nothing is pinned.
+      if (sc <= 0) continue;
       wanted.push({ handle: b.h, score: sc, seen: b.t || 0 });
     }
     if (!wanted.length) return;
@@ -4843,14 +4831,13 @@
       if (b2.score !== a.score) return b2.score - a.score;
       return b2.seen - a.seen; // equal interest: most recently seen first
     });
-    wanted = wanted.slice(0, REORDER_MAX);
 
     // Runs once the grid exists rather than on a timer: on a normal load the
     // markup is already parsed by the time widget.js executes, so the move
     // happens before the shopper has read the first row.
     var tries = 0;
     (function attempt() {
-      if (moveCardsToFront(wanted)) return;
+      if (applyShopperOrder(wanted)) return;
       if (++tries < 20) setTimeout(attempt, 150);
     })();
   }
@@ -4866,7 +4853,20 @@
     return null;
   }
 
-  function moveCardsToFront(wanted) {
+  /**
+   * Blend the shopper's own score into the merchandised order.
+   *
+   * The grid already arrives sorted by the server: best sellers first, then
+   * reviews and newness. Each card is given that standing as a score - top
+   * card highest - and the shopper's behaviour is added on top. Sorting by the
+   * total means a wishlisted product climbs past the cards it has overtaken
+   * and no further.
+   *
+   * This replaces pinning to position 1. A single click no longer reshuffles
+   * the page: one action moves a product a few places, sustained interest
+   * moves it to the front.
+   */
+  function applyShopperOrder(wanted) {
     // Reuse the wishlist's card selectors: they already cover Dawn and the
     // other themes this app runs on, and they are maintained in one place.
     var cards = [];
@@ -4882,21 +4882,41 @@
 
     var grid = cards[0].root.parentElement;
     if (!grid) return false;
+    cards = cards.filter(function (c) {
+      return c.root.parentElement === grid;
+    });
+    if (cards.length < 2) return false;
 
-    // Highest score last, so each insertAtFront leaves the best at position 1.
-    for (var w = wanted.length - 1; w >= 0; w--) {
-      for (var c = 0; c < cards.length; c++) {
-        if (cards[c].handle !== wanted[w].handle) continue;
-        if (cards[c].root.parentElement !== grid) continue;
-        if (cards[c].root.getAttribute("data-badgehq-lifted")) continue;
-        cards[c].root.setAttribute("data-badgehq-lifted", "1");
-        grid.insertBefore(cards[c].root, grid.firstElementChild);
-        break;
-      }
+    var byHandle = {};
+    for (var wi = 0; wi < wanted.length; wi++) byHandle[wanted[wi].handle] = wanted[wi].score;
+
+    // The server order expressed as points, so the two scales can be added.
+    // One step between neighbours: a behaviour score of N moves a card up by
+    // roughly N positions, which keeps the shopper's weights meaning something
+    // concrete rather than being swamped by an arbitrary spread.
+    var ranked = cards.map(function (c, idx) {
+      return {
+        root: c.root,
+        idx: idx,
+        total: (cards.length - idx) + (byHandle[c.handle] || 0),
+      };
+    });
+
+    var changed = false;
+    ranked.sort(function (a, b) {
+      if (b.total !== a.total) return b.total - a.total;
+      return a.idx - b.idx; // equal interest keeps the merchandised order
+    });
+    for (var r = 0; r < ranked.length; r++) {
+      if (ranked[r].idx !== r) { changed = true; break; }
     }
-    // Returning true even with nothing placed: the grid was found and read, so
-    // retrying would only re-scan the same cards. A product the shopper viewed
-    // simply is not in this collection.
+    if (!changed) return true;
+
+    // Appended in order into a fragment, so the grid is touched once rather
+    // than per card - a card at a time would force a reflow on each move.
+    var frag = document.createDocumentFragment();
+    for (var k = 0; k < ranked.length; k++) frag.appendChild(ranked[k].root);
+    grid.insertBefore(frag, grid.firstElementChild);
     return true;
   }
 })();
