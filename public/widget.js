@@ -4438,7 +4438,7 @@
       bag = {};
     }
 
-    function bump(id, field, by) {
+    function bump(id, field, by, handle) {
       if (!id) return;
       var k = String(id).replace(/\D/g, "");
       if (!k) return;
@@ -4448,7 +4448,10 @@
       // never sent: the beacon strips everything except p and the counters.
       // A grid identifies a card by the handle in its link, so an id alone
       // cannot be acted on there.
-      var h = productHandleFromPage();
+      // Prefer a handle the caller knows (a cart line, a clicked card);
+      // fall back to the page. Without this, anything detected away from a
+      // product page has no handle and the grid cannot act on it.
+      var h = handle || productHandleFromPage();
       if (h) bag[k].h = h;
       bag[k].t = Date.now();
       try {
@@ -4486,13 +4489,15 @@
     // Cart adds, observed by diffing /cart.js rather than guessing from
     // clicks: themes and headless checkouts rewire the add button, and a
     // click that failed is not an add.
+    // Maps product id -> handle for everything in the cart, so a cart add
+    // detected on a collection page still knows which product it was.
     function readCart(then) {
       fetch("/cart.js", { credentials: "same-origin" })
         .then(function (r) { return r.json(); })
         .then(function (c) {
           var seen = {};
           (c && c.items ? c.items : []).forEach(function (i) {
-            seen[String(i.product_id)] = true;
+            seen[String(i.product_id)] = i.handle || true;
           });
           then(seen);
         })
@@ -4506,13 +4511,46 @@
     } catch (e) {
       prevCart = {};
     }
-    readCart(function (now) {
-      for (var id in now) if (!prevCart[id]) bump(id, "ca", 1);
-      for (var old in prevCart) if (!now[old]) bump(old, "cr", 1);
-      try {
-        sessionStorage.setItem(CART_KEY, JSON.stringify(now));
-      } catch (e) {}
-    });
+    function diffCart() {
+      readCart(function (now) {
+        for (var id in now) {
+          if (!prevCart[id]) bump(id, "ca", 1, typeof now[id] === "string" ? now[id] : null);
+        }
+        for (var old in prevCart) {
+          if (!now[old]) bump(old, "cr", 1, typeof prevCart[old] === "string" ? prevCart[old] : null);
+        }
+        prevCart = now;
+        try {
+          sessionStorage.setItem(CART_KEY, JSON.stringify(now));
+        } catch (e) {}
+      });
+    }
+    diffCart();
+
+    // Adding to cart does not reload the page on most themes, so a
+    // load-time diff alone never sees it. Re-check shortly after any
+    // cart write: Shopify themes all POST to /cart/add, /cart/change or
+    // /cart/update, whatever the button looks like.
+    (function watchCart() {
+      var recheck = function () { setTimeout(diffCart, 900); };
+      var of = window.fetch;
+      if (of) {
+        window.fetch = function (input) {
+          var u = typeof input === "string" ? input : (input && input.url) || "";
+          var r = of.apply(this, arguments);
+          if (/\/cart\/(add|change|update|clear)/.test(u)) r.then(recheck, function () {});
+          return r;
+        };
+      }
+      var os = XMLHttpRequest.prototype.open;
+      XMLHttpRequest.prototype.open = function (m, u) {
+        if (/\/cart\/(add|change|update|clear)/.test(String(u || ""))) {
+          this.addEventListener("load", recheck);
+        }
+        return os.apply(this, arguments);
+      };
+      // A full-page form POST reloads, and the load-time diff covers that.
+    })();
 
     // Wishlist, including WishlistHero's own buttons - this store uses that
     // app rather than the built-in wishlist, so matching only our own class
@@ -4530,11 +4568,25 @@
           (btn.dataset ? btn.dataset.wlhId || btn.dataset.productId : null) ||
           pid;
         if (!id) return;
+        // The handle comes from the card's own product link. On a collection
+        // page there is no page handle to fall back on, so without this a
+        // wishlist click there would be recorded but unusable.
+        var wrap = btn.closest ? btn.closest("li, article, .card-wrapper, [class*='product-card']") : null;
+        var wlHandle = wrap ? wlHandleFromLink(wrap) : productHandleFromPage();
         // The class flips after the app handles the click, so read it late.
+        // Compared against its own earlier state rather than matched against a
+        // list of class names: every wishlist app spells "on" differently, and
+        // guessing wrong records an add as a removal.
+        var before = btn.className || "";
         setTimeout(function () {
-          var on = /wishlisted|is-active|active|added/i.test(btn.className || "");
-          bump(id, on ? "wa" : "wr", 1);
-        }, 250);
+          var after = btn.className || "";
+          var onRe = /wishlisted|is-active|active|added|selected|filled/i;
+          // No class change at all means the app re-rendered the button or
+          // signals state somewhere we cannot see. A click is then taken as
+          // intent to add, which is what it is the large majority of the time.
+          var add = before === after ? true : onRe.test(after);
+          bump(id, add ? "wa" : "wr", 1, wlHandle);
+        }, 400);
       },
       true,
     );
@@ -4674,7 +4726,6 @@
     if (!grid) return false;
 
     // Highest score last, so each insertAtFront leaves the best at position 1.
-    var placed = 0;
     for (var w = wanted.length - 1; w >= 0; w--) {
       for (var c = 0; c < cards.length; c++) {
         if (cards[c].handle !== wanted[w].handle) continue;
@@ -4682,7 +4733,6 @@
         if (cards[c].root.getAttribute("data-badgehq-lifted")) continue;
         cards[c].root.setAttribute("data-badgehq-lifted", "1");
         grid.insertBefore(cards[c].root, grid.firstElementChild);
-        placed++;
         break;
       }
     }
