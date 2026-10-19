@@ -44,5 +44,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }
   }
 
+  // Retention: behaviour rows older than any usable window are dead weight.
+  // 120 days covers the longest sales window (90) with room to spare.
+  await prisma.$executeRawUnsafe(
+    `DELETE FROM "ProductBehaviour" WHERE day < NOW() - INTERVAL '120 days'`,
+  ).catch(() => {
+    /* housekeeping only - never fail a run over it */
+  });
+
   return json({ ok: true, dryRun, shops: shops.length, results: out });
 };

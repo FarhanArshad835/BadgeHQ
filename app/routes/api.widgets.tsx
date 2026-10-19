@@ -64,6 +64,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     wishlistSettings,
     backInStockSettings,
     aiReplySettings,
+    merchSettings,
   ] = await Promise.all([
     prisma.trustBadge.findMany({ where: { shop, isEnabled: true } }),
     prisma.productBadge.findMany({ where: { shop, isActive: true }, orderBy: [{ priority: "desc" }, { createdAt: "desc" }] }),
@@ -80,6 +81,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     prisma.wishlistSettings.findUnique({ where: { shop } }),
     prisma.backInStockSettings.findUnique({ where: { shop } }),
     prisma.aiReplySettings.findUnique({ where: { shop } }),
+    // Only the on/off flag reaches the storefront: the collector must not run
+    // (or cost a beacon) for a shop that has not enabled behaviour tracking.
+    prisma.merchandiseSettings.findUnique({
+      where: { shop },
+      select: { isEnabled: true, useBehaviour: true },
+    }),
   ]);
 
   const globalSettings = appSettings
@@ -149,6 +156,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       showProgress: b.showProgress,
       pages: JSON.parse(b.pages),
     })),
+    behaviourTracking: Boolean(merchSettings?.isEnabled && merchSettings?.useBehaviour),
     stickyCarts: stickyCarts.map((b) => ({
       id: b.id,
       buttonText: b.buttonText,

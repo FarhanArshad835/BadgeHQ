@@ -90,6 +90,61 @@ async function salesByProduct(shop: string, windowDays: number) {
   return map;
 }
 
+/**
+ * Behaviour score per product, from the storefront beacon.
+ *
+ * Weights are the merchant's existing ones, carried over from the theme's own
+ * tracker so the numbers mean what they already meant:
+ *
+ *   added to cart  +12 each, capped at 24, minus 9 per removal
+ *   wishlisted     +10,                     minus 9 per removal
+ *   dwelt 30s+      +5
+ *   each view       +1, capped at 4
+ *
+ * The caps are what stop one obsessive shopper outweighing real demand, and
+ * the removal penalties are deliberately close to the add value: a product
+ * repeatedly added then abandoned is a worse bet than one never added.
+ *
+ * Product ids arrive from the storefront as bare numbers; sales and Shopify
+ * use GIDs. Normalised to the GID form here so one map keys the other.
+ */
+async function behaviourByProduct(shop: string, windowDays: number) {
+  const rows = await prisma.$queryRawUnsafe<
+    Array<{
+      productId: string;
+      views: number;
+      dwell30: number;
+      cartAdds: number;
+      cartRemoves: number;
+      wishAdds: number;
+      wishRemoves: number;
+    }>
+  >(
+    `SELECT "productId",
+            SUM(views)::int        AS views,
+            SUM(dwell30)::int      AS dwell30,
+            SUM("cartAdds")::int    AS "cartAdds",
+            SUM("cartRemoves")::int AS "cartRemoves",
+            SUM("wishAdds")::int    AS "wishAdds",
+            SUM("wishRemoves")::int AS "wishRemoves"
+       FROM "ProductBehaviour"
+      WHERE shop = $1 AND day >= NOW() - ($2 || ' days')::interval
+      GROUP BY "productId"`,
+    shop,
+    String(windowDays),
+  );
+
+  const map = new Map<string, number>();
+  for (const r of rows) {
+    const cart = Math.max(Math.min(r.cartAdds * 12, 24) - r.cartRemoves * 9, 0);
+    const wish = Math.max(r.wishAdds * 10 - r.wishRemoves * 9, 0);
+    const dwell = r.dwell30 > 0 ? 5 : 0;
+    const views = Math.min(r.views, 4);
+    map.set(`gid://shopify/Product/${r.productId}`, cart + wish + dwell + views);
+  }
+  return map;
+}
+
 type ProductFacts = {
   productId: string;
   reviewCount: number;
@@ -318,17 +373,9 @@ export async function runMerchandising(
 
   const sales = await salesByProduct(shop, s.salesWindowDays);
 
-  // Phase 2 fills this from the storefront beacon. Empty until then, which is
-  // why useBehaviour defaults off - an all-zero signal would otherwise drag
-  // every product toward the same score.
-  const behaviour = new Map<string, number>();
-  if (s.useBehaviour) {
-    const rows = await prisma.productScore.findMany({
-      where: { shop },
-      select: { productId: true, behaviourScore: true },
-    });
-    for (const r of rows) behaviour.set(r.productId, r.behaviourScore);
-  }
+  const behaviour = s.useBehaviour
+    ? await behaviourByProduct(shop, s.salesWindowDays)
+    : new Map<string, number>();
 
   const results: Array<{ id: string; products: number; reordered: boolean; error?: string }> = [];
 

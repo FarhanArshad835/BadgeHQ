@@ -150,7 +150,7 @@ async function proxyWithCache(request, originPath, env) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
     // OPTIONS preflight
@@ -191,6 +191,33 @@ export default {
       headers.set("Access-Control-Allow-Methods", "POST, OPTIONS");
       headers.set("Access-Control-Allow-Headers", "Content-Type");
       return new Response(upstream.body, { status: upstream.status, headers });
+    }
+
+    // Behaviour beacon. Sent once per session via navigator.sendBeacon when the
+    // page is hidden, so the shopper is already gone and nothing is waiting on
+    // the response.
+    //
+    // Answered 204 IMMEDIATELY and the origin write continues with
+    // waitUntil: a beacon that blocks on Vercel + Postgres would hold a
+    // connection open per departing visitor, and at this traffic that is the
+    // one thing that could make tracking cost real money.
+    if (url.pathname === "/api/behaviour") {
+      const cors = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
+        "Cache-Control": "no-store",
+      };
+      if (request.method !== "POST") return new Response(null, { status: 204, headers: cors });
+      const payload = await request.text();
+      ctx.waitUntil(
+        fetch(`${ORIGIN}/api/behaviour`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: payload,
+        }).catch(() => {}),
+      );
+      return new Response(null, { status: 204, headers: cors });
     }
 
     if (url.pathname === "/api/wishlist-event") {
@@ -259,7 +286,7 @@ export default {
           widget_hash: WIDGET_HASH,
           widget_built_at: WIDGET_BUILT_AT,
           widget_bytes: WIDGET_SOURCE.length,
-          routes: ["/widget.js", "/health", "/api/widgets", "/api/products/inventory", "/api/delivery-edd", "/api/back-in-stock", "/api/wishlist-event", "/api/ai-reply", "/internal/bump"],
+          routes: ["/widget.js", "/health", "/api/widgets", "/api/products/inventory", "/api/delivery-edd", "/api/back-in-stock", "/api/wishlist-event", "/api/behaviour", "/api/ai-reply", "/internal/bump"],
           origin: ORIGIN,
           cache_ttl_by_path_seconds: CACHE_TTL_BY_PATH,
         }),

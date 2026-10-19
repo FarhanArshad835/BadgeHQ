@@ -1111,3 +1111,34 @@ model ProductScore {
   @@unique([shop, productId])
   @@index([shop, score])
 }
+
+/// Rolling behaviour counters, ONE row per product per day.
+///
+/// Deliberately not an event log. At ~100k visitors/day a row per event is
+/// ~12M rows/month, which in Neon means continuous inserts holding compute
+/// awake and a table that only ever grows. Counters are incremented in place
+/// instead, so the table stays at roughly (products x retained days) and the
+/// write volume is bounded by how many distinct products get traffic.
+///
+/// Bucketed by day so the signal can be windowed the same way sales is, and so
+/// old rows can be dropped without touching current ones.
+model ProductBehaviour {
+  id        String   @id @default(cuid())
+  shop      String
+  productId String
+  /// UTC midnight of the bucket. Day granularity is enough for ranking and
+  /// keeps the row count down.
+  day       DateTime
+
+  views       Int @default(0)
+  dwell30     Int @default(0) // sessions that stayed past 30s
+  cartAdds    Int @default(0)
+  cartRemoves Int @default(0)
+  wishAdds    Int @default(0)
+  wishRemoves Int @default(0)
+
+  updatedAt DateTime @updatedAt
+
+  @@unique([shop, productId, day])
+  @@index([shop, day])
+}

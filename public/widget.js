@@ -119,6 +119,8 @@
     // Chat belongs on every page, so no page gate here.
     if (w.aiReplies && w.aiReplies.enabled) initAiReplies(w.aiReplies);
 
+    if (w.behaviourTracking) initBehaviourBeacon(page);
+
     if (page === "product") setupProductRerenderWatch(data, page);
     else setupCardRerenderWatch(data, page);
   }
@@ -4399,5 +4401,151 @@
     }
     if (!bits.length) return "";
     return '<div class="badgehq-ai-help">Need a person? ' + bits.join(" &middot; ") + "</div>";
+  }
+
+  /* ===================== BEHAVIOUR BEACON ===================== */
+  /**
+   * Feeds collection ranking: which products shoppers view, dwell on, add to
+   * cart and wishlist.
+   *
+   * Batched for the whole session and sent ONCE, when the page is hidden. A
+   * request per event would be millions a day at this traffic; this is one
+   * beacon per visit. sendBeacon hands the payload to the browser, which
+   * delivers it after the page is gone - so nothing here can delay a
+   * navigation or block rendering.
+   *
+   * Counts are per session and capped server-side. Nothing identifies the
+   * shopper: the payload is product ids and small integers.
+   */
+  function initBehaviourBeacon(page) {
+    if (!SHOP || !navigator.sendBeacon) return;
+
+    var KEY = "badgehq-behaviour";
+    var bag = {};
+    try {
+      bag = JSON.parse(sessionStorage.getItem(KEY) || "{}") || {};
+    } catch (e) {
+      bag = {};
+    }
+
+    function bump(id, field, by) {
+      if (!id) return;
+      var k = String(id).replace(/\D/g, "");
+      if (!k) return;
+      if (!bag[k]) bag[k] = { p: k };
+      bag[k][field] = (bag[k][field] || 0) + (by || 1);
+      try {
+        sessionStorage.setItem(KEY, JSON.stringify(bag));
+      } catch (e) {
+        /* private mode / quota - the beacon still sends what is in memory */
+      }
+    }
+
+    function currentProductId() {
+      var m = document.querySelector('meta[property="product:id"]');
+      if (m && m.content) return m.content;
+      if (window.ShopifyAnalytics && window.ShopifyAnalytics.meta &&
+          window.ShopifyAnalytics.meta.product) {
+        return window.ShopifyAnalytics.meta.product.id;
+      }
+      return null;
+    }
+
+    var pid = page === "product" ? currentProductId() : null;
+    if (pid) bump(pid, "v", 1);
+
+    // Dwell: counted once, at 30s, rather than timing the whole visit - the
+    // signal is "did they actually look at this", not how long exactly.
+    if (pid) {
+      var dwellSent = false;
+      setTimeout(function () {
+        if (!dwellSent && !document.hidden) {
+          dwellSent = true;
+          bump(pid, "d", 1);
+        }
+      }, 30000);
+    }
+
+    // Cart adds, observed by diffing /cart.js rather than guessing from
+    // clicks: themes and headless checkouts rewire the add button, and a
+    // click that failed is not an add.
+    function readCart(then) {
+      fetch("/cart.js", { credentials: "same-origin" })
+        .then(function (r) { return r.json(); })
+        .then(function (c) {
+          var seen = {};
+          (c && c.items ? c.items : []).forEach(function (i) {
+            seen[String(i.product_id)] = true;
+          });
+          then(seen);
+        })
+        .catch(function () {});
+    }
+
+    var CART_KEY = "badgehq-behaviour-cart";
+    var prevCart = {};
+    try {
+      prevCart = JSON.parse(sessionStorage.getItem(CART_KEY) || "{}") || {};
+    } catch (e) {
+      prevCart = {};
+    }
+    readCart(function (now) {
+      for (var id in now) if (!prevCart[id]) bump(id, "ca", 1);
+      for (var old in prevCart) if (!now[old]) bump(old, "cr", 1);
+      try {
+        sessionStorage.setItem(CART_KEY, JSON.stringify(now));
+      } catch (e) {}
+    });
+
+    // Wishlist, including WishlistHero's own buttons - this store uses that
+    // app rather than the built-in wishlist, so matching only our own class
+    // would record nothing.
+    document.addEventListener(
+      "click",
+      function (e) {
+        var btn = e.target.closest
+          ? e.target.closest("[data-wlh-id], .wishlist-btn, .wishlist-hero-custom-button, [data-wishlist-hero]")
+          : null;
+        if (!btn) return;
+        var card = btn.closest("[data-product-id]");
+        var id =
+          (card && card.dataset ? card.dataset.productId : null) ||
+          (btn.dataset ? btn.dataset.wlhId || btn.dataset.productId : null) ||
+          pid;
+        if (!id) return;
+        // The class flips after the app handles the click, so read it late.
+        setTimeout(function () {
+          var on = /wishlisted|is-active|active|added/i.test(btn.className || "");
+          bump(id, on ? "wa" : "wr", 1);
+        }, 250);
+      },
+      true,
+    );
+
+    // One send per session. pagehide is the reliable signal on mobile Safari,
+    // where unload often never fires.
+    var sent = false;
+    function flush() {
+      if (sent) return;
+      var events = [];
+      for (var k in bag) events.push(bag[k]);
+      if (!events.length) return;
+      sent = true;
+      try {
+        navigator.sendBeacon(
+          API_ORIGIN + "/api/behaviour",
+          new Blob([JSON.stringify({ shop: SHOP, events: events })], {
+            type: "application/json",
+          }),
+        );
+        sessionStorage.removeItem(KEY);
+      } catch (e) {
+        /* never let tracking break a page */
+      }
+    }
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", function () {
+      if (document.hidden) flush();
+    });
   }
 })();

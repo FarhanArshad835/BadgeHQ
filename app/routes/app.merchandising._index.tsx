@@ -167,6 +167,8 @@ export default function Merchandising() {
   const [useSales, setUseSales] = useState(settings.useSales);
   const [useReviews, setUseReviews] = useState(settings.useReviews);
   const [useNew, setUseNew] = useState(settings.useNewArrival);
+  const [useBehaviour, setUseBehaviour] = useState(settings.useBehaviour);
+  const [wBehaviour, setWBehaviour] = useState(settings.weightBehaviour);
   const [sink, setSink] = useState(settings.sinkOutOfStock);
   const [salesWindow, setSalesWindow] = useState(String(settings.salesWindowDays));
   const [newDays, setNewDays] = useState(String(settings.newArrivalDays));
@@ -190,11 +192,11 @@ export default function Merchandising() {
           weightSales: wSales,
           weightReviews: wReviews,
           weightNewArrival: wNew,
-          weightBehaviour: settings.weightBehaviour,
+          weightBehaviour: wBehaviour,
           useSales,
           useReviews,
           useNewArrival: useNew,
-          useBehaviour: false,
+          useBehaviour,
           newArrivalDays: Number(newDays),
           salesWindowDays: Number(salesWindow),
           sinkOutOfStock: sink,
@@ -322,6 +324,13 @@ export default function Merchandising() {
                         { label: "60 days", value: "60" },
                       ]} />
                   </>
+                )}
+
+                <Checkbox label="Shopper behaviour" checked={useBehaviour} onChange={setUseBehaviour}
+                  helpText="Views, time on page, add-to-cart and wishlist, collected from the storefront. Starts at zero and becomes useful after a few days of traffic." />
+                {useBehaviour && (
+                  <RangeSlider label={`Weight: ${wBehaviour}`} value={wBehaviour} min={0} max={100}
+                    onChange={(v) => setWBehaviour(Number(v))} output />
                 )}
 
                 <Box paddingBlockStart="200">
