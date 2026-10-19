@@ -158,9 +158,11 @@ model StickyCart {
   textColor    String   @default("#ffffff")
   buttonStyle  String   @default("solid")
   buttonRadius String   @default("6")
-  /** Vertical padding above and below the bar's contents, in px. The bar has no
-   *  fixed height — it grows with its tallest child — so this is the dial that
-   *  actually changes how tall it looks. "10" reproduces the original bar. */
+  /**
+   * Vertical padding above and below the bar's contents, in px. The bar has no
+   * fixed height — it grows with its tallest child — so this is the dial that
+   * actually changes how tall it looks. "10" reproduces the original bar.
+   */
   barPadding   String   @default("10")
   showPrice    Boolean  @default(true)
   showQuantity Boolean  @default(true)
@@ -1035,4 +1037,77 @@ model DispatchedAwb {
 
   @@unique([shop, awb])
   @@index([shop])
+}
+
+/// Which collections the merchandiser reorders, and how it weights each signal.
+/// One row per shop. Weights are stored as whole numbers (a UI slider, 0-100)
+/// and normalised at scoring time, so changing one never silently rescales the
+/// others.
+model MerchandiseSettings {
+  id        String  @id @default(cuid())
+  shop      String  @unique
+  isEnabled Boolean @default(false)
+
+  /// Shopify collection GIDs this engine is allowed to reorder. Deliberately an
+  /// allow-list: a reorder is a write against a live storefront, and the store
+  /// has 48 collections of which 18 hold 250+ products. Nothing is touched
+  /// until it is named here.
+  collectionIds String @default("[]")
+
+  /// Signal weights. Sales dominates by default: a product with 2,000 units
+  /// sold and one with 3 must not rank together because both happen to be in
+  /// stock and recently published.
+  weightSales      Int @default(60)
+  weightReviews    Int @default(10)
+  weightNewArrival Int @default(15)
+  weightBehaviour  Int @default(15)
+
+  /// Individually switchable, so a merchant can see what each signal is doing.
+  useSales      Boolean @default(true)
+  useReviews    Boolean @default(true)
+  useNewArrival Boolean @default(true)
+  useBehaviour  Boolean @default(false)
+
+  /// Days a product counts as "new". Shopify has no such concept; this is the
+  /// window after publishedAt during which a product gets the new-arrival boost
+  /// so it can gather sales history before being judged on it.
+  newArrivalDays  Int @default(30)
+  /// Rolling window for the sales signal.
+  salesWindowDays Int @default(30)
+
+  /// Out-of-stock products sink BELOW every in-stock product but keep their
+  /// relative order, rather than being pinned to the very bottom: a sold-out
+  /// hero still carries the Back in Stock signup, and burying it loses that.
+  sinkOutOfStock Boolean @default(true)
+
+  lastRunAt     DateTime?
+  lastRunStatus String    @default("")
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+/// One row per product: the inputs behind its rank, kept so a merchant can see
+/// WHY something sits where it does, and so a rerank needs no recomputation.
+model ProductScore {
+  id        String @id @default(cuid())
+  shop      String
+  productId String
+
+  /// Raw signal inputs, stored unweighted. Weighting happens at sort time, so
+  /// changing a weight re-ranks instantly without re-reading Shopify.
+  unitsSold      Int       @default(0)
+  reviewCount    Int       @default(0)
+  publishedAt    DateTime?
+  inStock        Boolean   @default(true)
+  /// Behaviour total from the storefront beacon (Phase 2). Zero until that
+  /// ships, which is why useBehaviour defaults off.
+  behaviourScore Int       @default(0)
+
+  /// The composite, 0-1000, recomputed whenever any input changes.
+  score Int @default(0)
+
+  updatedAt DateTime @updatedAt
+
+  @@unique([shop, productId])
+  @@index([shop, score])
 }

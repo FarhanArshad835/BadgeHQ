@@ -57,6 +57,7 @@ export default function App() {
         <Link to="/app/sticky-cart">Sticky Add to Cart</Link>
         <Link to="/app/countdown-timer">Countdown Timer</Link>
         <Link to="/app/delivery-estimate">Delivery Estimate</Link>
+        <Link to="/app/merchandising">Collection Merchandising</Link>
         {/* Order Management is hidden: Shopify returns ACCESS_DENIED on the
             Order object for this app (Protected Customer Data, request
             #106713), so neither cancellation nor address editing can work.
