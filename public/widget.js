@@ -53,6 +53,45 @@
     }
   }
 
+  /**
+   * Cart-write hooks, installed NOW rather than after the config fetch.
+   *
+   * widget.js is loaded async and everything else waits on a network round
+   * trip, so by the time initBadgeHQ runs the theme has long since bound its
+   * own add-to-cart handler and captured window.fetch. Wrapping it then is too
+   * late: the add fires through the original reference and is never seen.
+   *
+   * These only set a flag. Nothing is recorded until the beacon starts and
+   * decides whether tracking is even enabled for this shop.
+   */
+  var __bhqCartDirty = false;
+  var __bhqOnCartWrite = null;
+  (function installCartHooks() {
+    var CART_WRITE = /\/cart\/(add|change|update|clear)/;
+    var fire = function () {
+      __bhqCartDirty = true;
+      if (__bhqOnCartWrite) __bhqOnCartWrite();
+    };
+    try {
+      var of = window.fetch;
+      if (of) {
+        window.fetch = function (input) {
+          var u = typeof input === "string" ? input : (input && input.url) || "";
+          var r = of.apply(this, arguments);
+          if (CART_WRITE.test(u) && r && r.then) r.then(fire, function () {});
+          return r;
+        };
+      }
+      var os = XMLHttpRequest.prototype.open;
+      XMLHttpRequest.prototype.open = function (m, u) {
+        if (CART_WRITE.test(String(u || ""))) this.addEventListener("load", fire);
+        return os.apply(this, arguments);
+      };
+    } catch (e) {
+      /* a theme that froze these is not worth breaking the widget over */
+    }
+  })();
+
   fetch(API_URL)
     .then(function (r) {
       return r.json();
@@ -4527,30 +4566,13 @@
     }
     diffCart();
 
-    // Adding to cart does not reload the page on most themes, so a
-    // load-time diff alone never sees it. Re-check shortly after any
-    // cart write: Shopify themes all POST to /cart/add, /cart/change or
-    // /cart/update, whatever the button looks like.
-    (function watchCart() {
-      var recheck = function () { setTimeout(diffCart, 900); };
-      var of = window.fetch;
-      if (of) {
-        window.fetch = function (input) {
-          var u = typeof input === "string" ? input : (input && input.url) || "";
-          var r = of.apply(this, arguments);
-          if (/\/cart\/(add|change|update|clear)/.test(u)) r.then(recheck, function () {});
-          return r;
-        };
-      }
-      var os = XMLHttpRequest.prototype.open;
-      XMLHttpRequest.prototype.open = function (m, u) {
-        if (/\/cart\/(add|change|update|clear)/.test(String(u || ""))) {
-          this.addEventListener("load", recheck);
-        }
-        return os.apply(this, arguments);
-      };
-      // A full-page form POST reloads, and the load-time diff covers that.
-    })();
+    // Adding to cart does not reload the page on most themes, so a load-time
+    // diff alone never sees it. The hooks at the top of this file flag a cart
+    // write the moment it happens; this reacts to that flag.
+    __bhqOnCartWrite = function () { setTimeout(diffCart, 900); };
+    // A write that landed before the beacon started - the shopper added to
+    // cart while the config was still loading - is still pending here.
+    if (__bhqCartDirty) setTimeout(diffCart, 300);
 
     // Wishlist, including WishlistHero's own buttons - this store uses that
     // app rather than the built-in wishlist, so matching only our own class
