@@ -127,7 +127,7 @@ export type BehaviourCounts = {
  * Product ids arrive from the storefront as bare numbers; sales and Shopify
  * use GIDs. Normalised to the GID form here so one map keys the other.
  */
-async function behaviourByProduct(shop: string, windowDays: number) {
+export async function behaviourByProduct(shop: string, windowDays: number) {
   const rows = await prisma.$queryRawUnsafe<
     Array<{
       productId: string;

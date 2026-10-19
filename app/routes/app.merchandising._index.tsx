@@ -33,6 +33,7 @@ import {
   computeScores,
   rankProducts,
   runMerchandising,
+  behaviourByProduct,
 } from "../utils/merchandise.server";
 
 /**
@@ -162,7 +163,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       String(s.salesWindowDays),
     );
     const sales = new Map(rows.map((r) => [r.productId, r.units]));
-    const scored = computeScores(facts, sales, new Map(), s);
+    // The real run scores with behaviour; the preview passed an empty map, so
+    // it showed every product at zero behaviour and produced a different order
+    // from the one actually written - which read as the engine ignoring the
+    // preview. Same inputs now, so the preview is a preview.
+    const behaviour =
+      s.useCart || s.useWish || s.useDwell || s.useViews
+        ? await behaviourByProduct(session.shop, s.salesWindowDays)
+        : new Map();
+    const scored = computeScores(facts, sales, behaviour, s);
     const order = rankProducts(scored, s.sinkOutOfStock);
 
     // Titles only for what is shown — a preview should not cost a full catalogue read.
