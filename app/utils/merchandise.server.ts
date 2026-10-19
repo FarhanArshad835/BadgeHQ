@@ -173,6 +173,7 @@ export async function behaviourByProduct(shop: string, windowDays: number) {
 
 type ProductFacts = {
   productId: string;
+  handle: string;
   reviewCount: number;
   publishedAt: Date | null;
   inStock: boolean;
@@ -202,6 +203,7 @@ export async function fetchCollectionProducts(
             pageInfo { hasNextPage endCursor }
             nodes {
               id
+              handle
               publishedAt
               totalInventory
               reviews: metafield(namespace: "doran", key: "prReviewCount") { value }
@@ -218,6 +220,7 @@ export async function fetchCollectionProducts(
     for (const n of conn.nodes || []) {
       out.push({
         productId: String(n.id),
+        handle: String(n.handle || ""),
         reviewCount: Math.max(0, Number(n.reviews?.value) || 0),
         publishedAt: n.publishedAt ? new Date(n.publishedAt) : null,
         // totalInventory is null for products that do not track inventory;
@@ -472,6 +475,7 @@ async function saveScores(
       scored.slice(i, i + 100).map((s) => {
         const f = factBy.get(s.productId);
         const data = {
+          handle: f?.handle ?? "",
           unitsSold: s.unitsSold,
           reviewCount: f?.reviewCount ?? 0,
           publishedAt: f?.publishedAt ?? null,

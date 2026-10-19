@@ -1130,6 +1130,12 @@ model ProductScore {
 
   /// Raw signal inputs, stored unweighted. Weighting happens at sort time, so
   /// changing a weight re-ranks instantly without re-reading Shopify.
+  /// The storefront handle. Stored alongside the GID because the grid on a
+  /// collection page identifies a card by the handle in its own link - there
+  /// is no product id in the markup on most themes - so an order expressed in
+  /// GIDs cannot be applied client-side.
+  handle    String @default("")
+
   unitsSold      Int       @default(0)
   reviewCount    Int       @default(0)
   publishedAt    DateTime?

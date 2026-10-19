@@ -4776,6 +4776,54 @@
     return isFinite(n) && n >= 0 ? n : dflt;
   }
 
+  /**
+   * The shop's full ranked order, as handles, position = rank.
+   *
+   * Fetched once and cached for the session. A card is ~45KB of markup so a
+   * theme can only paginate two dozen, but the ORDER is ~30 bytes a product -
+   * around 11KB gzipped for a thousand - so the whole ranking fits in one
+   * small request even though the cards never could.
+   *
+   * Without it the base ranking is DOM position, which only describes the
+   * cards currently on screen: a product the shopper wants cannot be placed
+   * against products that have not loaded.
+   */
+  var _orderRank = null;
+  function loadOrderRank(then) {
+    if (_orderRank) return then(_orderRank);
+    var KEY = "badgehq-order";
+    try {
+      var cached = JSON.parse(sessionStorage.getItem(KEY) || "null");
+      if (cached && cached.r) {
+        _orderRank = cached.r;
+        return then(_orderRank);
+      }
+    } catch (e) {
+      /* private mode - just fetch */
+    }
+    fetch(API_ORIGIN + "/api/order?shop=" + encodeURIComponent(SHOP))
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        var rank = {};
+        var list = (d && d.order) || [];
+        for (var i = 0; i < list.length; i++) rank[list[i]] = i;
+        _orderRank = rank;
+        try {
+          sessionStorage.setItem(KEY, JSON.stringify({ r: rank }));
+        } catch (e2) {
+          /* quota - it still works for this page */
+        }
+        then(rank);
+      })
+      .catch(function () {
+        // No order available: fall back to DOM position, which is what the
+        // grid already shows. Degrades to the previous behaviour rather than
+        // leaving the page unsorted.
+        _orderRank = {};
+        then(_orderRank);
+      });
+  }
+
   function reorderGridForShopper(page, weights) {
     if (page !== "collection" && page !== "home") return;
 
@@ -4835,11 +4883,13 @@
     // Runs once the grid exists rather than on a timer: on a normal load the
     // markup is already parsed by the time widget.js executes, so the move
     // happens before the shopper has read the first row.
-    var tries = 0;
-    (function attempt() {
-      if (applyShopperOrder(wanted)) return;
-      if (++tries < 20) setTimeout(attempt, 150);
-    })();
+    loadOrderRank(function () {
+      var tries = 0;
+      (function attempt() {
+        if (applyShopperOrder(wanted)) return;
+        if (++tries < 20) setTimeout(attempt, 150);
+      })();
+    });
   }
 
   /** Find the <li>/<article> wrapping a card, given any element inside it. */
@@ -4890,15 +4940,22 @@
     var byHandle = {};
     for (var wi = 0; wi < wanted.length; wi++) byHandle[wanted[wi].handle] = wanted[wi].score;
 
-    // The server order expressed as points, so the two scales can be added.
-    // One step between neighbours: a behaviour score of N moves a card up by
-    // roughly N positions, which keeps the shopper's weights meaning something
-    // concrete rather than being swamped by an arbitrary spread.
+    // Each card's standing as points, with the shopper's score added. One
+    // step between neighbours, so a behaviour score of N moves a card up by
+    // roughly N positions and the merchant's weights mean something concrete.
+    //
+    // Standing comes from the shop-wide ranking where the product appears in
+    // it, and from DOM position otherwise. The difference matters once more
+    // than one page is loaded: DOM position restarts at every batch, so a
+    // product at the top of page 2 would outrank one mid-page-1.
+    var rank = _orderRank || {};
     var ranked = cards.map(function (c, idx) {
+      var global = rank[c.handle];
+      var standing = typeof global === "number" ? -global : -(idx + 1);
       return {
         root: c.root,
         idx: idx,
-        total: (cards.length - idx) + (byHandle[c.handle] || 0),
+        total: standing + (byHandle[c.handle] || 0),
       };
     });
 

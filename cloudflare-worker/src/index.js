@@ -37,6 +37,7 @@ const ORIGIN = "https://badge-hq.vercel.app";
 // (hashes change → cache key changes → first request rebuilds cache).
 const CACHE_TTL_BY_PATH = {
   "/api/widgets": 3600,                 // 1 hour
+  "/api/order": 3600,                   // 1 hour - changes only when the engine runs
   "/api/products/inventory": 21600,     // 6 hours
   "/api/delivery-edd": 21600,           // 6 hours — TAT per shop+pincode barely changes intra-day
 };
@@ -306,7 +307,7 @@ export default {
           widget_hash: WIDGET_HASH,
           widget_built_at: WIDGET_BUILT_AT,
           widget_bytes: WIDGET_SOURCE.length,
-          routes: ["/widget.js", "/health", "/api/widgets", "/api/products/inventory", "/api/delivery-edd", "/api/back-in-stock", "/api/wishlist-event", "/api/behaviour", "/api/ai-reply", "/internal/bump"],
+          routes: ["/widget.js", "/health", "/api/widgets", "/api/products/inventory", "/api/delivery-edd", "/api/back-in-stock", "/api/wishlist-event", "/api/behaviour", "/api/order", "/api/ai-reply", "/internal/bump"],
           origin: ORIGIN,
           cache_ttl_by_path_seconds: CACHE_TTL_BY_PATH,
         }),
@@ -343,6 +344,12 @@ export default {
     if (request.method === "GET" || request.method === "HEAD") {
       if (url.pathname === "/api/widgets") {
         return proxyWithCache(request, "/api/widgets", env);
+      }
+      // The ranked order for a collection. Cached hard: it only changes when
+      // the hourly engine runs, and every shopper on a shop gets the same
+      // list, so a POP serves thousands of pageviews from one origin fetch.
+      if (url.pathname === "/api/order") {
+        return proxyWithCache(request, "/api/order", env);
       }
       if (url.pathname === "/api/products/inventory") {
         return proxyWithCache(request, "/api/products/inventory", env);
