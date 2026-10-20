@@ -5112,10 +5112,25 @@
     // high it scores. Capped: a handful is the point, not a second grid.
     var present = {};
     for (var pi = 0; pi < cards.length; pi++) present[cards[pi].handle] = true;
-    var missing = [];
-    for (var mi = 0; mi < wanted.length && missing.length < 3; mi++) {
-      if (!present[wanted[mi].handle]) missing.push(wanted[mi].handle);
+    // Candidates come from byHandle, not from wanted. wanted holds only what
+    // the shopper touched directly, so affinity could never pull in a
+    // neighbour: of five products similar to a wishlisted boot, the one
+    // already on page 1 moved up three places and the four sitting at 62,
+    // 109, 460 and 707 stayed invisible. byHandle carries the affinity
+    // boosts too, so a near match deep in the collection can be fetched.
+    //
+    // Ordered by score so the three slots go to the strongest candidates
+    // rather than whichever the bag happened to list first.
+    var candidates = [];
+    for (var ch in byHandle) {
+      if (!present[ch] && byHandle[ch] > 0) candidates.push({ h: ch, s: byHandle[ch] });
     }
+    candidates.sort(function (a2, b2) {
+      return b2.s - a2.s;
+    });
+    var missing = candidates.slice(0, 3).map(function (c) {
+      return c.h;
+    });
     // Injection is attempted ONCE per page. The re-sort that follows an
     // injection calls straight back into this function, and an injected card
     // is not always matched by the selector pass above - so "still missing"
