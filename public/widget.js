@@ -4801,12 +4801,19 @@
     // twenty points. sessionStorage survives a reload - only closing the tab
     // clears it - so a stale entry would have outlived the fix on every tab
     // that had already loaded the page. Bump this whenever the shape changes.
-    var KEY = "badgehq-order-v2";
+    // v3: v2 entries hold scores but no neighbours, so a tab that cached one
+    // would restore the order and silently lose affinity for the rest of the
+    // session - the boost worked on the first collection view and never
+    // again. Bumping the key is what retires those entries; the old names are
+    // cleared so they do not sit in storage forever.
+    var KEY = "badgehq-order-v3";
     try {
       sessionStorage.removeItem("badgehq-order");
+      sessionStorage.removeItem("badgehq-order-v2");
       var cached = JSON.parse(sessionStorage.getItem(KEY) || "null");
-      if (cached && cached.r) {
+      if (cached && cached.r && cached.n) {
         _orderRank = cached.r;
+        _neighbours = cached.n;
         return then(_orderRank);
       }
     } catch (e) {
@@ -4837,7 +4844,10 @@
         _orderRank = rank;
         try {
           // Only cache a payload worth reusing.
-          if (usable) sessionStorage.setItem(KEY, JSON.stringify({ r: rank }));
+          // Both halves, or the next load restores an order with no affinity.
+          if (usable) {
+            sessionStorage.setItem(KEY, JSON.stringify({ r: rank, n: _neighbours }));
+          }
         } catch (e2) {
           /* quota - it still works for this page */
         }
