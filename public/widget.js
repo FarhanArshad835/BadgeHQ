@@ -5159,6 +5159,78 @@
     });
   }
 
+  /** How fast an engagement loses weight, in MINUTES.
+   *
+   *  Minutes, not hours, because the bag lives in sessionStorage and dies with
+   *  the tab - everything being compared is from this visit, minutes apart. A
+   *  14-hour half-life, the natural choice for a persistent profile, leaves a
+   *  40-minute-old wishlist worth 96.8% of a fresh one: no useful ordering.
+   *
+   *  At 20 minutes, something touched a minute ago clearly leads something from
+   *  the start of a long session, while two things touched within a few minutes
+   *  stay effectively equal - which is right, since the shopper does not rank
+   *  those either. Floored at 0.25 so an early interest still counts. */
+  var DECAY_HALFLIFE_MIN = 20;
+
+  /**
+   * Read the behaviour bag and score it, fresh.
+   *
+   * Called again for every scroll batch rather than once per page load. The
+   * scoring was inlined and its result captured in a closure, so a product
+   * wishlisted after page 1 rendered could not influence page 2 - the most
+   * recent engagement, the one that should matter most, was the one guaranteed
+   * to be missed. Re-reading is cheap: sessionStorage is synchronous and the
+   * bag holds at most 60 products.
+   */
+  function scoreBehaviour(W) {
+    var bag = {};
+    try {
+      bag = JSON.parse(sessionStorage.getItem("badgehq-behaviour") || "{}") || {};
+    } catch (e) {
+      return [];
+    }
+    var now = Date.now();
+    var out = [];
+    for (var k in bag) {
+      var b = bag[k];
+      if (!b || !b.h) continue;
+      // Each component floors at zero independently. Without the floor a
+      // removal drags the whole score negative and a product with real cart
+      // interest could rank below one with none. Caps are twice the unit
+      // value, so a second action still counts and a tenth does not.
+      var cart = Math.max(Math.min((b.ca || 0) * W.cart, W.cart * 2) - (b.cr || 0) * Math.round(W.cart * 0.75), 0);
+      var wish = Math.max(Math.min((b.wa || 0) * W.wish, W.wish * 2) - (b.wr || 0) * Math.round(W.wish * 0.9), 0);
+      var views = Math.min(b.v || 0, 4) * W.views;
+      var sc = cart + wish + ((b.d || 0) > 0 ? W.dwell : 0) + views;
+      if (sc <= 0) continue;
+      // Recency. Without it every engagement carries equal weight, so a
+      // shopper with ten wishlists has ten products worth exactly the same
+      // and no ordering at all among their own interests.
+      var ageMin = b.t ? (now - b.t) / 60000 : 0;
+      var decay = ageMin > 0 ? Math.pow(0.5, ageMin / DECAY_HALFLIFE_MIN) : 1;
+      if (decay < 0.25) decay = 0.25;
+      out.push({ handle: b.h, score: sc * decay, seen: b.t || 0 });
+    }
+    out.sort(function (a, b2) {
+      if (b2.score !== a.score) return b2.score - a.score;
+      return b2.seen - a.seen;
+    });
+    return out;
+  }
+
+  /** Personalisation grows with engagement.
+   *
+   *  One touched product earns a light nudge; ten have told us enough to
+   *  reorder firmly. The pull-in limit matters most: with ten engagements
+   *  roughly 60 boosted products sit off page 1 competing for slots, so a fixed
+   *  3 discarded almost all of the signal. Each extra slot costs one card fetch
+   *  (~19KB), which is why this scales with evidence rather than starting high. */
+  function maturityFor(count) {
+    if (count <= 2) return { share: 0.4, pull: 4 };
+    if (count <= 5) return { share: 0.55, pull: 6 };
+    return { share: 0.7, pull: 8 };
+  }
+
   function reorderGridForShopper(page, weights) {
     // The veil is only ever raised once a change has been decided, so an
     // early exit has nothing to release - the grid was never hidden.
@@ -5184,38 +5256,10 @@
     var qs = window.location.search;
     if (/[?&](filter\.|sort_by=)/.test(qs)) return release();
 
-    var bag = {};
-    try {
-      bag = JSON.parse(sessionStorage.getItem("badgehq-behaviour") || "{}") || {};
-    } catch (e) {
-      return release();
-    }
-
-    // Same weighting the server applies, so a product that ranks highly here
-    // is the one that would rank highly there.
-    var wanted = [];
-    for (var k in bag) {
-      var b = bag[k];
-      if (!b || !b.h) continue; // no handle recorded: cannot act on it
-      // Weights come from the merchant's four sliders. They used to be
-      // constants here while the sliders fed the shared server ranking -
-      // which is the wrong place for them, since what a shopper did belongs
-      // to that shopper and not to everyone else's ordering.
-      //
-      // Each component floors at zero independently. Without the floor a
-      // removal drags the whole score negative and a product with real cart
-      // interest could rank below one with none. Caps are twice the unit
-      // value, so a second action still counts and a tenth does not.
-      var cart = Math.max(Math.min((b.ca || 0) * W.cart, W.cart * 2) - (b.cr || 0) * Math.round(W.cart * 0.75), 0);
-      var wish = Math.max(Math.min((b.wa || 0) * W.wish, W.wish * 2) - (b.wr || 0) * Math.round(W.wish * 0.9), 0);
-      var views = Math.min(b.v || 0, 4) * W.views;
-      var sc = cart + wish + ((b.d || 0) > 0 ? W.dwell : 0) + views;
-      // No threshold: a score simply adds to the product's standing and the
-      // grid re-sorts on the total. A small score moves a card a little, a
-      // large one moves it a lot, and nothing is pinned.
-      if (sc <= 0) continue;
-      wanted.push({ handle: b.h, score: sc, seen: b.t || 0 });
-    }
+    // Scored by the shared helper so a scroll batch can recompute it from
+    // whatever the shopper has done since this page loaded, and so the
+    // recency weighting is applied in one place.
+    var wanted = scoreBehaviour(W);
     // A first-time shopper has no behaviour yet, which is the common case on
     // a cold visit - and the case where holding the grid back buys nothing at
     // all, because there is no personalisation to wait for.
@@ -5234,10 +5278,8 @@
       return release();
     }
 
-    wanted.sort(function (a, b2) {
-      if (b2.score !== a.score) return b2.score - a.score;
-      return b2.seen - a.seen; // equal interest: most recently seen first
-    });
+    // Already sorted by scoreBehaviour, which applies the recency weighting
+    // and breaks ties on which engagement is most recent.
 
     // Runs once the grid exists rather than on a timer: on a normal load the
     // markup is already parsed by the time widget.js executes, so the move
@@ -5274,14 +5316,12 @@
         //
         // Left alone unless this shopper has behaviour that actually
         // changes which products belong at this depth.
-        var hasBehaviour = false;
-        for (var bk = 0; bk < wanted.length; bk++) {
-          if (wanted[bk].score > 0) {
-            hasBehaviour = true;
-            break;
-          }
-        }
-        if (!hasBehaviour) return finish(html);
+        // Re-scored per batch, not read from the closure. wanted was fixed
+        // when the page loaded, so a product wishlisted while the shopper
+        // read page 1 had no effect on page 2 - the most recent engagement
+        // was the one guaranteed to be ignored.
+        var live = scoreBehaviour(W);
+        if (!live.length) return finish(html);
 
         // Page 1 is rendered by Shopify and never passes through buildPage,
         // so its products were not in the shown record and page 2 could
@@ -5296,8 +5336,34 @@
 
         // What the shopper has earned so far, same scale the sort uses.
         var byHandle = {};
-        for (var wi = 0; wi < wanted.length; wi++) {
-          byHandle[wanted[wi].handle] = (byHandle[wanted[wi].handle] || 0) + wanted[wi].score;
+        for (var wi = 0; wi < live.length; wi++) {
+          byHandle[live[wi].handle] = (byHandle[live[wi].handle] || 0) + live[wi].score;
+        }
+        // Affinity on those fresh scores, so a near match of something just
+        // engaged with can reach this batch rather than waiting for a
+        // reload. Strength and reach grow with how much the shopper has
+        // told us - this is what makes each page better than the last.
+        var mat = maturityFor(live.length);
+        var aff = {};
+        for (var li2 = 0; li2 < live.length; li2++) {
+          var nr = _neighbours[live[li2].handle];
+          if (!nr) continue;
+          for (var nk = 0; nk < nr.length; nk++) {
+            aff[nr[nk]] = (aff[nr[nk]] || 0) + live[li2].score * mat.share * (1 - nk / nr.length);
+          }
+        }
+        // Same two ceilings as page 1: against the product's own
+        // engagement, and against the strongest single engagement, so
+        // accumulated affinity never outranks something actually touched.
+        var topLive = live.length ? live[0].score : 0;
+        for (var ak in aff) {
+          var ownLive = byHandle[ak] || 0;
+          byHandle[ak] =
+            ownLive +
+            Math.min(
+              aff[ak],
+              Math.min(ownLive > 0 ? ownLive * 0.8 : Infinity, topLive * 0.8),
+            );
         }
 
         rebuildScrollPage(html, (pageNo - 1) * PAGE_SIZE, byHandle, RANDOMNESS, finish);
@@ -5654,7 +5720,9 @@
     // product the shopper actually wishlisted must still outrank one merely
     // similar to it. Capped so a long tail of neighbours cannot add up to
     // more than the engagement that produced them.
-    var AFFINITY_SHARE = 0.4;
+    // Both scale with how much the shopper has told us.
+    var _mat = maturityFor(wanted.length);
+    var AFFINITY_SHARE = _mat.share;
     var AFFINITY_CAP = 0.8;
     var affinity = {};
     for (var ai = 0; ai < wanted.length; ai++) {
@@ -5738,7 +5806,10 @@
     candidates.sort(function (a2, b2) {
       return b2.s - a2.s;
     });
-    var missing = candidates.slice(0, 3).map(function (c) {
+    // Grows with engagement. At a fixed 3, a shopper with ten wishlists had
+    // ~60 boosted products off page 1 competing for the slots and 57 were
+    // never fetched at all.
+    var missing = candidates.slice(0, _mat.pull).map(function (c) {
       return c.h;
     });
     // Injection is attempted ONCE per page. The re-sort that follows an
