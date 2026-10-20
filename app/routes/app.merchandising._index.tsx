@@ -171,7 +171,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       s.useCart || s.useWish || s.useDwell || s.useViews
         ? await behaviourByProduct(session.shop, s.salesWindowDays)
         : new Map();
-    const scored = computeScores(facts, sales, behaviour, s);
+    // The preview has to see the same fallback the run applies, or the two
+    // disagree about the bottom sixth of the collection.
+    const lifetimeRows = await prisma.$queryRawUnsafe<Array<{ productId: string; units: number }>>(
+      `SELECT "productId", SUM(quantity)::int AS units
+         FROM "OrderLineFinancials"
+        WHERE shop = $1 AND "productId" <> ''
+        GROUP BY "productId"`,
+      session.shop,
+    );
+    const lifetime = new Map(lifetimeRows.map((r) => [r.productId, r.units]));
+    const scored = computeScores(facts, sales, behaviour, s, lifetime);
     let order = rankProducts(scored, s.sinkOutOfStock);
 
     // Sorting happens here, not in the table: the table only holds the twenty

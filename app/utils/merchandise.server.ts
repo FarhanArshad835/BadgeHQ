@@ -83,6 +83,26 @@ export async function getMerchSettings(shop: string): Promise<MerchSettings> {
  * later. (The P&L deliberately uses the opposite basis, for the opposite
  * reason.)
  */
+/**
+ * Units sold over a product's whole life, for the fallback below.
+ *
+ * Unwindowed deliberately: this only ever ranks products that have no recent
+ * signal at all, where the question is not "is this selling" but "has this
+ * ever been worth anything".
+ */
+async function lifetimeSalesByProduct(shop: string) {
+  const rows = await prisma.$queryRawUnsafe<Array<{ productId: string; units: number }>>(
+    `SELECT "productId", SUM(quantity)::int AS units
+       FROM "OrderLineFinancials"
+      WHERE shop = $1 AND "productId" <> ''
+      GROUP BY "productId"`,
+    shop,
+  );
+  const map = new Map<string, number>();
+  for (const r of rows) map.set(r.productId, r.units);
+  return map;
+}
+
 async function salesByProduct(shop: string, windowDays: number) {
   const rows = await prisma.$queryRawUnsafe<Array<{ productId: string; units: number }>>(
     `SELECT "productId", SUM(quantity)::int AS units
@@ -253,6 +273,7 @@ export function computeScores(
   sales: Map<string, number>,
   behaviour: Map<string, BehaviourCounts>,
   s: MerchSettings,
+  lifetime?: Map<string, number>,
 ): Array<{
   productId: string;
   score: number;
@@ -294,7 +315,7 @@ export function computeScores(
     (s.useDwell ? s.weightDwell : 0) +
     (s.useViews ? s.weightViews : 0) || 1;
 
-  return facts.map((p) => {
+  const scored = facts.map((p) => {
     const units = unitsOf(p);
     const b = behOf(p);
 
@@ -335,6 +356,55 @@ export function computeScores(
       parts,
     };
   });
+
+  /**
+   * Order the products that score nothing at all.
+   *
+   * On this catalogue 165 of 1,060 score exactly zero - no sales in the
+   * window, no reviews, published too long ago to count as new - so they
+   * tie and come out in whatever order the database returned. That is a
+   * sixth of the collection sitting in arbitrary order.
+   *
+   * Lifetime sales break the tie: a product that sold 27 over its life is a
+   * better bet than one that never sold at all, even if neither has moved
+   * recently. The band sits below zero, so a single point of recent sales
+   * still outranks the best dormant product - which is the point.
+   */
+  const zeros = scored.filter((x) => x.score === 0);
+  if (lifetime && zeros.length > 1) {
+    // Scored BELOW zero, not between zero and the lowest real score.
+    //
+    // A fixed ceiling of 99 overlapped: the lowest real score here is 2, so a
+    // dormant product would have outranked one with genuine recent sales.
+    // Deriving the ceiling from that lowest score instead left a band of 0-1,
+    // too narrow to separate 165 products.
+    //
+    // Negative scores sidestep both. The zero group keeps a meaningful
+    // internal order - best lifetime seller at -1, never-sold at -100 - and
+    // cannot reach a real product however the weights are set, because every
+    // real score is positive by construction.
+    const FALLBACK_FLOOR = -100;
+    const unitsOfLife = (id: string) => lifetime.get(id) ?? 0;
+    // Normalised within the zero group, not the whole catalogue: against a
+    // thousand-unit best seller every dormant product rounds to zero and the
+    // tie is not broken at all.
+    const maxLife = Math.max(...zeros.map((x) => Math.log1p(unitsOfLife(x.productId))), 1);
+    for (const z of zeros) {
+      const life = unitsOfLife(z.productId);
+      // Never sold sits at the floor; the best lifetime seller just under 0.
+      const share = life > 0 ? Math.log1p(life) / maxLife : 0;
+      // Offset by one so the best lifetime seller lands at -1 rather than 0,
+      // which would tie it with the never-sold products this is separating.
+      z.score = Math.round(FALLBACK_FLOOR * (1 - share)) - 1;
+      z.parts.push({
+        label: "Lifetime sales",
+        points: z.score,
+        detail: life > 0 ? `${life} ever, no recent signal` : "never sold",
+      });
+    }
+  }
+
+  return scored;
 }
 
 /**
@@ -513,6 +583,9 @@ export async function runMerchandising(
   }
 
   const sales = await salesByProduct(shop, s.salesWindowDays);
+  // Only ever used to order products that score nothing on the real signals,
+  // so it is read once per run alongside the windowed figures.
+  const lifetime = await lifetimeSalesByProduct(shop);
 
   const anyBehaviour = s.useCart || s.useWish || s.useDwell || s.useViews;
   const behaviour = anyBehaviour
@@ -529,7 +602,7 @@ export async function runMerchandising(
         continue;
       }
 
-      const scored = computeScores(facts, sales, behaviour, s);
+      const scored = computeScores(facts, sales, behaviour, s, lifetime);
       await saveScores(shop, facts, scored);
 
       if (opts.dryRun) {
