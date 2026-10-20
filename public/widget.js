@@ -186,6 +186,47 @@
    * AND they disagree with what Shopify sent - and it is released as soon as
    * the cards have been placed, not on a clock.
    */
+  /**
+   * Hide the grid before its first paint, for an engaged shopper only.
+   *
+   * A shopper with no behaviour gets the server order, which Shopify has
+   * already applied, so their grid is correct as it arrives and is never
+   * hidden - no veil, no delay, nothing to cover.
+   *
+   * A shopper who has engaged does get a different order, and that reorder
+   * has to be hidden while it happens. Raising the veil at the moment of the
+   * reorder was too late: the grid was already on screen, so hiding it then
+   * blinked it to blank and revealed it again, which looks worse than the
+   * movement it was covering.
+   *
+   * Behaviour lives in sessionStorage, so whether this shopper is in that
+   * minority is knowable synchronously, right now, with no network - which is
+   * what makes it possible to decide before the first paint instead of after.
+   */
+  var __bhqEngaged = false;
+  (function veilIfEngaged() {
+    try {
+      if (!/\/collections\//.test(location.pathname) && location.pathname !== "/") return;
+      var raw = sessionStorage.getItem("badgehq-behaviour");
+      if (!raw) return;
+      var bag = JSON.parse(raw);
+      var list = (bag && bag.b) || [];
+      for (var i = 0; i < list.length; i++) {
+        var b = list[i];
+        if (!b || !b.h) continue;
+        // Any recorded interaction at all; the scoring decides what it is
+        // worth later. This only answers "might the order differ?".
+        if (b.v || b.d || b.ca || b.cr || b.wa || b.wr) {
+          __bhqEngaged = true;
+          break;
+        }
+      }
+      if (__bhqEngaged) veilGridNow();
+    } catch (e) {
+      /* no storage, or malformed - treat as not engaged and never hide */
+    }
+  })();
+
   var __bhqVeiled = false;
   function veilGridNow() {
     if (__bhqVeiled) return;
@@ -197,9 +238,13 @@
         "#product-grid,[id^='main-collection-product-grid'] ul{opacity:0}" +
         ".badgehq-ready #product-grid,.badgehq-ready [id^='main-collection-product-grid'] ul{opacity:1;transition:opacity .18s ease}";
       (document.head || document.documentElement).appendChild(st);
-      // Still a hard ceiling, but a short one: the work it covers is a DOM
-      // reorder that has already been decided, not a network round trip.
-      setTimeout(__bhqUnveil, 400);
+      // A hard ceiling. This now goes up before the first paint, so it has
+      // to outlast fetching the ranked order - measured at ~480ms from the
+      // edge cache - without being long enough to be felt if that fetch
+      // fails. Only an engaged shopper is ever hidden at all, and every
+      // exit releases explicitly; this is the backstop for none of them
+      // being reached.
+      setTimeout(__bhqUnveil, 900);
     } catch (e) {
       /* never let this be why a grid stays blank */
     }
@@ -5714,13 +5759,16 @@
     // exempt, which is why scrolling still shuffled after the first screen
     // was fixed: each new batch arrived in the server order and was then
     // re-sorted into that same order, in view, on every scroll.
-    if (pageNeedsChange(cards, byHandle) === null) return true;
-    if (!batchOnly) {
-      // Something genuinely moves on this load, so cover it - and only
-      // now, with the decision already made, so the veil is up for the
-      // length of a DOM reorder rather than a network round trip.
-      veilGridNow();
+    // Nothing to do, so release whatever the parse-time check raised. An
+    // engaged shopper whose order happens to match is still hidden at this
+    // point and must not be left that way.
+    if (pageNeedsChange(cards, byHandle) === null) {
+      __bhqUnveil();
+      return true;
     }
+    // No veil is raised here: it went up before the first paint, because by
+    // this point the grid is already on screen and hiding it now would
+    // blink it to blank rather than cover anything.
 
     var ranked = cards.map(function (c, idx) {
       var base = rank[c.handle];
