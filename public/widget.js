@@ -5219,7 +5219,20 @@
     // A first-time shopper has no behaviour yet, which is the common case on
     // a cold visit - and the case where holding the grid back buys nothing at
     // all, because there is no personalisation to wait for.
-    if (!wanted.length) return release();
+    //
+    // The ranked order is still fetched and cached, though, which is the
+    // whole point of doing it here. The app embed reorders the grid before
+    // it paints using that cached order, so it has to be in storage BEFORE
+    // the shopper engages - and the load where they engage is, by
+    // definition, a load where they had no behaviour yet. Returning early
+    // without caching made that impossible: the embed found nothing, bailed
+    // out, and the reorder fell back to happening after first paint, in
+    // view. Caching costs nothing here - the request is already in flight
+    // from parse time.
+    if (!wanted.length) {
+      loadOrderRank(function () {});
+      return release();
+    }
 
     wanted.sort(function (a, b2) {
       if (b2.score !== a.score) return b2.score - a.score;
