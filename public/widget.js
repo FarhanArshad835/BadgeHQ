@@ -4789,8 +4789,9 @@
    * against products that have not loaded.
    */
   var _orderRank = null;
-  /** Guards the re-sort that follows an injection from injecting again. */
-  var _injecting = false;
+  /** Injection runs once per page load. The re-sort that follows one calls
+   *  back into the sort, and anything short of a latch lets that recurse. */
+  var _injectedOnce = false;
   function loadOrderRank(then) {
     if (_orderRank) return then(_orderRank);
     // Versioned. The first build of this cached POSITIONS under the same key;
@@ -5057,21 +5058,34 @@
     for (var mi = 0; mi < wanted.length && missing.length < 3; mi++) {
       if (!present[wanted[mi].handle]) missing.push(wanted[mi].handle);
     }
-    if (missing.length && !_injecting) {
-      _injecting = true;
-      var template = cards[0].root;
+    // Injection is attempted ONCE per page. The re-sort that follows an
+    // injection calls straight back into this function, and an injected card
+    // is not always matched by the selector pass above - so "still missing"
+    // stayed true, it injected again, and each pass appended another copy
+    // until the grid was one product repeated sixteen times.
+    //
+    // A latch rather than a guard: _injecting only covered the window while
+    // fetches were in flight, and the loop ran after it had been cleared.
+    if (missing.length && !_injectedOnce) {
+      _injectedOnce = true;
       var pending = missing.length;
       missing.forEach(function (h) {
-        fetchCardFor(h, template, function (card) {
+        // Belt and braces: a card for this handle may have landed from an
+        // earlier pass even if the selector did not pick it up.
+        if (document.querySelector('[data-badgehq-handle="' + h + '"]')) {
+          if (--pending === 0) applyShopperOrder(wanted);
+          return;
+        }
+        fetchCardFor(h, null, function (card) {
           if (card) {
+            // Tagged with its handle so a later pass can recognise it
+            // whatever the theme card selectors happen to match.
+            card.setAttribute("data-badgehq-handle", h);
             grid.appendChild(card);
           }
           // Re-sort once they have all answered: the new cards are appended at
           // the end, and the sort is what puts them where they belong.
-          if (--pending === 0) {
-            _injecting = false;
-            applyShopperOrder(wanted);
-          }
+          if (--pending === 0) applyShopperOrder(wanted);
         });
       });
       // Fall through and sort what is here now; the callback sorts again when
