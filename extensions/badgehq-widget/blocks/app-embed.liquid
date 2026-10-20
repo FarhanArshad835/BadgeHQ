@@ -1,9 +1,64 @@
+{%- comment -%}
+  Injected into <head>, not the end of <body>, and the veil is inline rather
+  than inside widget.js.
+
+  The grid markup arrives around byte 850,000 of a collection page; an embed
+  targeting "body" is placed about 230,000 bytes after it, and `async` means the
+  browser does not wait for it even then - it keeps painting and runs the script
+  whenever the 72KB download lands, roughly 700ms later.
+
+  So the cards were painted in Shopify's order, the shopper saw them, and only
+  then did our code load and reorder them. A veil inside that script could never
+  help: it was injected after the paint it was meant to cover. Any amount of
+  speeding the reorder up still reorders something already on screen.
+
+  The two lines below are the fix. Being in <head> and inline, they apply before
+  the grid is parsed, so the first paint of the grid is already hidden and the
+  reorder happens underneath it.
+
+  widget.js stays async - it must not block rendering - and still owns releasing
+  the veil, including a hard deadline so the grid cannot stay hidden if the
+  script fails to arrive at all. The deadline is restated here because the veil
+  now exists independently of the script: if widget.js never loads, nothing else
+  would ever remove it.
+{%- endcomment -%}
+<style id="badgehq-veil">
+  #product-grid,
+  [id^="main-collection-product-grid"] ul {
+    opacity: 0;
+  }
+  .badgehq-ready #product-grid,
+  .badgehq-ready [id^="main-collection-product-grid"] ul {
+    opacity: 1;
+    transition: opacity 0.18s ease;
+  }
+</style>
+<script>
+  // Only hide a grid on pages that have one, so the veil is never applied to a
+  // page the reorder will not touch.
+  (function () {
+    try {
+      var p = window.location.pathname;
+      if (!/\/collections\//.test(p) && p !== "/") {
+        document.documentElement.className += " badgehq-ready";
+        return;
+      }
+      // Independent of widget.js: if it is blocked, fails, or never arrives,
+      // the grid still appears. widget.js releases this sooner, once sorted.
+      setTimeout(function () {
+        document.documentElement.className += " badgehq-ready";
+      }, 2000);
+    } catch (e) {
+      document.documentElement.className += " badgehq-ready";
+    }
+  })();
+</script>
 <script src="https://badgehq-widget.badgehq.workers.dev/widget.js" async></script>
 
 {% schema %}
 {
   "name": "BadgeHQ Widget",
-  "target": "body",
+  "target": "head",
   "settings": []
 }
 {% endschema %}

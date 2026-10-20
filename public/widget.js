@@ -176,6 +176,23 @@
   (function veilGrid() {
     try {
       if (!/\/collections\//.test(location.pathname)) return;
+      // The app embed injects this veil inline in <head>, which is the only
+      // place it does any good: this script is async and sits ~230KB after
+      // the grid in the document, so anything it adds itself lands after the
+      // grid has already painted and cannot hide the reorder.
+      //
+      // Kept as a fallback for a merchant still on an older embed, where
+      // covering the tail of the reorder is better than covering none of it.
+      var existing = document.getElementById("badgehq-veil");
+      if (existing) {
+        var done = false;
+        __bhqUnveil = function () {
+          if (done) return;
+          done = true;
+          document.documentElement.className += " badgehq-ready";
+        };
+        return;
+      }
       var st = document.createElement("style");
       st.id = "badgehq-veil";
       st.textContent =
