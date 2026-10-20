@@ -4927,6 +4927,40 @@
         if (applyShopperOrder(wanted)) return;
         if (++tries < 20) setTimeout(attempt, 150);
       })();
+
+      // Infinite scroll appends the next batch in pure server order, so
+      // everything past the first screen ignored the shopper entirely. The
+      // theme fetches those pages from Shopify directly - our server never
+      // sees the request and cannot rank them - so the new cards are sorted
+      // here once they land.
+      //
+      // Only the new cards. Re-sorting the whole grid would move products the
+      // shopper is already looking at, which is worse than leaving a later
+      // batch unsorted: a page that rearranges under a scroll loses their
+      // place. applyShopperOrder is scoped to the batch by marking everything
+      // already placed as settled.
+      if (window.MutationObserver) {
+        var settle = null;
+        new MutationObserver(function (muts) {
+          var added = false;
+          for (var mi = 0; mi < muts.length; mi++) {
+            for (var ai = 0; ai < muts[mi].addedNodes.length; ai++) {
+              var n = muts[mi].addedNodes[ai];
+              if (n.nodeType !== 1) continue;
+              if (n.getAttribute && n.getAttribute("data-badgehq-pulled")) continue;
+              if (n.getAttribute && n.getAttribute("data-badgehq-settled")) continue;
+              added = true;
+            }
+          }
+          if (!added) return;
+          // Debounced: a batch arrives as many separate insertions, and
+          // sorting on each one would reflow the grid a dozen times.
+          clearTimeout(settle);
+          settle = setTimeout(function () {
+            applyShopperOrder(wanted, true);
+          }, 250);
+        }).observe(document.body, { childList: true, subtree: true });
+      }
     });
   }
 
@@ -5032,7 +5066,7 @@
     return el;
   }
 
-  function applyShopperOrder(wanted) {
+  function applyShopperOrder(wanted, batchOnly) {
     // Reuse the wishlist's card selectors: they already cover Dawn and the
     // other themes this app runs on, and they are maintained in one place.
     var cards = [];
@@ -5047,6 +5081,14 @@
     if (cards.length < 2) return false;
 
     var grid = cards[0].root.parentElement;
+    // A later batch sorts only its own cards. Everything placed by an earlier
+    // pass is marked settled and left exactly where the shopper last saw it.
+    if (batchOnly) {
+      cards = cards.filter(function (c) {
+        return !c.root.getAttribute("data-badgehq-settled");
+      });
+      if (cards.length < 2) return true;
+    }
     if (!grid) return false;
     cards = cards.filter(function (c) {
       return c.root.parentElement === grid;
@@ -5235,8 +5277,14 @@
     // Appended in order into a fragment, so the grid is touched once rather
     // than per card - a card at a time would force a reflow on each move.
     var frag = document.createDocumentFragment();
-    for (var k = 0; k < ranked.length; k++) frag.appendChild(ranked[k].root);
-    grid.insertBefore(frag, grid.firstElementChild);
+    for (var k = 0; k < ranked.length; k++) {
+      ranked[k].root.setAttribute("data-badgehq-settled", "1");
+      frag.appendChild(ranked[k].root);
+    }
+    // A later batch belongs after what is already on screen; only the first
+    // pass may touch the top of the grid.
+    if (batchOnly) grid.appendChild(frag);
+    else grid.insertBefore(frag, grid.firstElementChild);
     return true;
   }
 })();
