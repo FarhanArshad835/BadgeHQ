@@ -172,56 +172,49 @@
     }
   })();
 
-  var __bhqUnveil = null;
-  (function veilGrid() {
+  /**
+   * Hide the grid, but only when something is about to move.
+   *
+   * Previously this ran on every collection load, from <head>, and released
+   * on a 1.2s then 2s timer. That was wrong twice over: on a managed
+   * collection nothing moves, so the delay bought nothing, and the timer
+   * fired before the ranked order had arrived - so the grid was revealed
+   * unsorted and then reordered in front of the shopper, which is exactly the
+   * flash it was meant to prevent.
+   *
+   * Now it is applied only once the order and the behaviour are both in hand
+   * AND they disagree with what Shopify sent - and it is released as soon as
+   * the cards have been placed, not on a clock.
+   */
+  var __bhqVeiled = false;
+  function veilGridNow() {
+    if (__bhqVeiled) return;
+    __bhqVeiled = true;
     try {
-      if (!/\/collections\//.test(location.pathname)) return;
-      // The app embed injects this veil inline in <head>, which is the only
-      // place it does any good: this script is async and sits ~230KB after
-      // the grid in the document, so anything it adds itself lands after the
-      // grid has already painted and cannot hide the reorder.
-      //
-      // Kept as a fallback for a merchant still on an older embed, where
-      // covering the tail of the reorder is better than covering none of it.
-      var existing = document.getElementById("badgehq-veil");
-      if (existing) {
-        var done = false;
-        __bhqUnveil = function () {
-          if (done) return;
-          done = true;
-          document.documentElement.className += " badgehq-ready";
-        };
-        return;
-      }
       var st = document.createElement("style");
       st.id = "badgehq-veil";
       st.textContent =
         "#product-grid,[id^='main-collection-product-grid'] ul{opacity:0}" +
         ".badgehq-ready #product-grid,.badgehq-ready [id^='main-collection-product-grid'] ul{opacity:1;transition:opacity .18s ease}";
       (document.head || document.documentElement).appendChild(st);
-
-      var released = false;
-      __bhqUnveil = function () {
-        if (released) return;
-        released = true;
-        var root = document.documentElement;
-        if (root) root.className += " badgehq-ready";
-      };
-      // A hard deadline, not a fallback: whatever happens upstream, the grid
-      // is visible within this long of the page starting to load.
-      //
-      // 1200ms was below the time the data actually took to arrive - the two
-      // requests ran back to back and totalled 1250-1550ms - so the deadline
-      // won every time and the reorder landed after the grid was already
-      // visible. That is the shuffle it was added to prevent. The requests
-      // now overlap, which brings the data in well inside this, and the extra
-      // margin covers a slow connection instead of guaranteeing a flash on a
-      // normal one.
-      setTimeout(__bhqUnveil, 2000);
+      // Still a hard ceiling, but a short one: the work it covers is a DOM
+      // reorder that has already been decided, not a network round trip.
+      setTimeout(__bhqUnveil, 400);
     } catch (e) {
-      /* never let this be the reason a grid stays blank */
+      /* never let this be why a grid stays blank */
     }
-  })();
+  }
+  function __bhqUnveil() {
+    if (!__bhqVeiled) return;
+    try {
+      var root = document.documentElement;
+      if (root && root.className.indexOf("badgehq-ready") === -1) {
+        root.className += " badgehq-ready";
+      }
+    } catch (e) {
+      /* nothing to do */
+    }
+  }
 
   var __bhqCartDirty = false;
   var __bhqOnCartWrite = null;
@@ -5034,14 +5027,91 @@
         // grid already shows. Degrades to the previous behaviour rather than
         // leaving the page unsorted.
         _orderRank = {};
-        if (__bhqUnveil) __bhqUnveil();
+        __bhqUnveil();
         then(_orderRank);
       });
   }
 
+  /**
+   * Does this shopper need a different order from the one Shopify sent?
+   *
+   * The engine writes its ranking into the collection itself (sortOrder
+   * MANUAL), so on a managed collection Shopify already serves products in
+   * the right order and there is nothing to do. Re-sorting them anyway was
+   * what the shopper saw as a shuffle: cards painted in the correct order and
+   * then moved around the DOM to the same order.
+   *
+   * The only thing the server cannot know is this shopper's own behaviour,
+   * which lives in sessionStorage. So the question is narrow: does their
+   * behaviour change which products belong on this page? Usually it does not
+   * - page-1 products outscore any behaviour bonus - and then the grid is
+   * left exactly as it arrived.
+   *
+   * Returns the handles this page should show, or null to leave it alone.
+   */
+  function pageNeedsChange(cards, byHandle) {
+    var rank = _orderRank || {};
+    var onPage = {};
+    for (var i = 0; i < cards.length; i++) onPage[cards[i].handle] = true;
+
+    // The weakest card here sets the bar: a product only belongs on this page
+    // if the shopper's interest lifts it above something already on it.
+    var floor = Infinity;
+    for (var c = 0; c < cards.length; c++) {
+      var st = rank[cards[c].handle];
+      if (typeof st === "number" && st < floor) floor = st;
+    }
+    if (floor === Infinity) return null;
+
+    // Anything the shopper engaged with that now clears the bar but is not
+    // here. Only those need fetching - typically none, at most one or two.
+    var incoming = [];
+    for (var h in byHandle) {
+      if (onPage[h] || _outOfStock[h]) continue;
+      var total = (typeof rank[h] === "number" ? rank[h] : 0) + byHandle[h];
+      if (total > floor) incoming.push({ h: h, t: total });
+    }
+
+    // Nothing new wants in, so the only possible change is the order of what
+    // is already here. Check that against the order it is already in rather
+    // than assuming: if they match, the grid is left untouched.
+    var want = [];
+    for (var k = 0; k < cards.length; k++) {
+      want.push({
+        h: cards[k].handle,
+        t:
+          (typeof rank[cards[k].handle] === "number" ? rank[cards[k].handle] : -(k + 1)) +
+          (byHandle[cards[k].handle] || 0) -
+          (_outOfStock[cards[k].handle] ? OOS_PENALTY : 0),
+        idx: k,
+      });
+    }
+    for (var n = 0; n < incoming.length; n++) {
+      want.push({ h: incoming[n].h, t: incoming[n].t, idx: 1e6 + n });
+    }
+    want.sort(function (a, b) {
+      return b.t - a.t || a.idx - b.idx;
+    });
+    want = want.slice(0, cards.length);
+
+    var same = true;
+    for (var q = 0; q < want.length; q++) {
+      if (want[q].h !== cards[q].handle) {
+        same = false;
+        break;
+      }
+    }
+    if (same) return null;
+    return want.map(function (x) {
+      return x.h;
+    });
+  }
+
   function reorderGridForShopper(page, weights) {
+    // The veil is only ever raised once a change has been decided, so an
+    // early exit has nothing to release - the grid was never hidden.
     function release() {
-      if (__bhqUnveil) __bhqUnveil();
+      __bhqUnveil();
     }
     // Nothing to reorder on this page, so stop hiding it. Every exit below
     // does the same: the veil exists to cover a reorder, and a grid held back
@@ -5113,11 +5183,11 @@
         // Released on every path: a sorted grid, a grid that could not be
         // found, or a grid that was already in the right order.
         if (applyShopperOrder(wanted)) {
-          if (__bhqUnveil) __bhqUnveil();
+          __bhqUnveil();
           return;
         }
         if (++tries < 20) setTimeout(attempt, 150);
-        else if (__bhqUnveil) __bhqUnveil();
+        else __bhqUnveil();
       })();
 
       // Arm the page rewriter now the ranked order is loaded. Until this
@@ -5620,6 +5690,18 @@
     // Ranking by POSITION instead made 20 points mean 20 places regardless,
     // so a single wishlist leapt past products scoring hundreds higher.
     var rank = _orderRank || {};
+    // Decide the list before touching anything. On a collection the engine
+    // manages, Shopify has already applied this exact order, so this
+    // normally returns null and the grid is left as it was painted - which
+    // is the whole point: nothing moves, so there is nothing to see move.
+    if (!batchOnly) {
+      if (pageNeedsChange(cards, byHandle) === null) return true;
+      // Something genuinely moves on this load, so cover it - and only
+      // now, with the decision already made, so the veil is up for the
+      // length of a DOM reorder rather than a network round trip.
+      veilGridNow();
+    }
+
     var ranked = cards.map(function (c, idx) {
       var base = rank[c.handle];
       // Unranked products keep their place rather than sinking: a new
@@ -5687,6 +5769,9 @@
     // pass may touch the top of the grid.
     if (batchOnly) grid.appendChild(frag);
     else grid.insertBefore(frag, grid.firstElementChild);
+    // Released on the same frame the cards land, so the grid is revealed
+    // already in its final order.
+    __bhqUnveil();
     return true;
   }
 })();
