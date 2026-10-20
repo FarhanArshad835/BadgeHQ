@@ -172,7 +172,24 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         ? await behaviourByProduct(session.shop, s.salesWindowDays)
         : new Map();
     const scored = computeScores(facts, sales, behaviour, s);
-    const order = rankProducts(scored, s.sinkOutOfStock);
+    let order = rankProducts(scored, s.sinkOutOfStock);
+
+    // Sorting happens here, not in the table: the table only holds the twenty
+    // rows of the current page, so sorting there would shuffle one page rather
+    // than reach the product a merchant is looking for.
+    const sort = String(form.get("sort") || "");
+    if (sort) {
+      const [key, dir] = sort.split(":");
+      const sign = dir === "asc" ? 1 : -1;
+      const partOf = (id: string, label: string) =>
+        scored.find((x) => x.productId === id)?.parts.find((pt) => pt.label === label)?.points ?? 0;
+      order = [...order].sort((a1, b1) => {
+        if (key === "sales") return sign * (partOf(a1, "Best sellers") - partOf(b1, "Best sellers"));
+        if (key === "reviews") return sign * (partOf(a1, "Reviews") - partOf(b1, "Reviews"));
+        if (key === "new") return sign * (partOf(a1, "New arrival") - partOf(b1, "New arrival"));
+        return 0;
+      });
+    }
 
     // Titles only for the page being shown - a preview should not cost a full
     // catalogue read, and at a thousand products that is the difference between
@@ -195,6 +212,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     return json({
       offset,
+      sort,
       pageSize: PAGE,
       preview: top.map((id, i) => {
         const sc = byId.get(id);
@@ -287,42 +305,88 @@ const CollectionPicker = memo(function CollectionPicker({
  * the screen; memo() means a slider no longer touches it. It only changes when
  * a new preview is actually run.
  */
-const PreviewTable = memo(function PreviewTable({ preview }: { preview: any[] }) {
+/** One signal's contribution, with the raw figure behind it. */
+function PartCell({ part }: { part: any }) {
+  if (!part) return <Text as="span" variant="bodySm" tone="subdued">&mdash;</Text>;
+  return (
+    <Text as="span" variant="bodySm" tone={part.points === 0 ? "subdued" : undefined}>
+      <b>{part.points}</b>{" "}
+      <Text as="span" variant="bodySm" tone="subdued">
+        ({part.detail})
+      </Text>
+    </Text>
+  );
+}
+
+const PreviewTable = memo(function PreviewTable({
+  preview,
+  sort,
+  onSort,
+}: {
+  preview: any[];
+  sort: string;
+  onSort: (key: string) => void;
+}) {
+  // Each signal gets its own column, so a merchant can ask "which products
+  // are ranking on reviews rather than sales" by clicking one heading -
+  // impossible when all three were crammed into a sentence.
+  const SORTABLE: Array<[string, string]> = [
+    ["sales", "Best sellers"],
+    ["reviews", "Reviews"],
+    ["new", "New arrival"],
+  ];
+
   const rows = useMemo(
     () =>
-      preview.map((p: any) => [
-        p.rank,
-        p.title,
-        // The parts sum to the score, so this explains the number rather than
-        // restating it. Ordered by contribution: what actually decided the
-        // position reads first.
-        <InlineStack key={p.rank} gap="200" wrap>
-          {[...p.parts]
-            .sort((a: any, b: any) => b.points - a.points)
-            .map((part: any) => (
-              <Text
-                key={part.label}
-                as="span"
-                variant="bodySm"
-                tone={part.points === 0 ? "subdued" : undefined}
-              >
-                {part.label} <b>{part.points}</b>{" "}
-                <Text as="span" variant="bodySm" tone="subdued">
-                  ({part.detail})
-                </Text>
-              </Text>
-            ))}
-        </InlineStack>,
-        p.score,
-        p.inStock ? "In stock" : "Sold out",
-      ]),
+      preview.map((p: any) => {
+        const by = new Map((p.parts || []).map((pt: any) => [pt.label, pt]));
+        return [
+          p.rank,
+          p.title,
+          <PartCell key="s" part={by.get("Best sellers")} />,
+          <PartCell key="r" part={by.get("Reviews")} />,
+          <PartCell key="n" part={by.get("New arrival")} />,
+          p.score,
+          p.inStock ? "In stock" : "Sold out",
+        ];
+      }),
     [preview],
   );
 
+  // A plain button in the heading rather than DataTable's own sortable prop:
+  // that sorts the rows it was handed, which is only the current page.
+  const heading = (key: string, label: string) => {
+    const active = sort.split(":")[0] === key;
+    const dir = active && sort.endsWith(":asc") ? "↑" : "↓";
+    return (
+      <button
+        type="button"
+        onClick={() => onSort(key)}
+        style={{
+          background: "none",
+          border: 0,
+          padding: 0,
+          font: "inherit",
+          cursor: "pointer",
+          color: active ? "#141414" : "inherit",
+          fontWeight: active ? 600 : undefined,
+        }}
+      >
+        {label} {active ? dir : ""}
+      </button>
+    );
+  };
+
   return (
     <DataTable
-      columnContentTypes={["numeric", "text", "text", "numeric", "text"]}
-      headings={["#", "Product", "Why it ranks here", "Score", "Stock"]}
+      columnContentTypes={["numeric", "text", "numeric", "numeric", "numeric", "numeric", "text"]}
+      headings={[
+        "#",
+        "Product",
+        ...SORTABLE.map(([k, l]) => heading(k, l)),
+        "Score",
+        "Stock",
+      ]}
       rows={rows}
     />
   );
@@ -783,7 +847,21 @@ export default function Merchandising() {
                       {Math.min(actionData.offset + actionData.pageSize, actionData.total)} of{" "}
                       {actionData.total.toLocaleString("en-IN")} products
                     </Text>
-                    <PreviewTable preview={actionData.preview} />
+                    <PreviewTable
+                      preview={actionData.preview}
+                      sort={actionData.sort || ""}
+                      onSort={(key) => {
+                        // Clicking the active column flips direction; a new column
+                        // starts descending, since "most" is the usual question.
+                        const cur = actionData.sort || "";
+                        const next =
+                          cur === `${key}:desc` ? `${key}:asc` : `${key}:desc`;
+                        submit(
+                          { intent: "preview", collectionId: previewId, sort: next },
+                          { method: "POST" },
+                        );
+                      }}
+                    />
                     {/* Paged rather than "load more": a merchant checking why a
                         product ranks where it does wants to reach position 400
                         without loading the 399 above it. */}
@@ -797,6 +875,7 @@ export default function Merchandising() {
                               intent: "preview",
                               collectionId: previewId,
                               offset: String(Math.max(0, actionData.offset - actionData.pageSize)),
+                              sort: actionData.sort || "",
                             },
                             { method: "POST" },
                           )
@@ -815,6 +894,7 @@ export default function Merchandising() {
                               intent: "preview",
                               collectionId: previewId,
                               offset: String(actionData.offset + actionData.pageSize),
+                              sort: actionData.sort || "",
                             },
                             { method: "POST" },
                           )
