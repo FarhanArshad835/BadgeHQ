@@ -4995,6 +4995,14 @@
   var _orderRank = null;
   /** handle -> the handles most like it, best first. */
   var _neighbours = {};
+  /** How strongly each product resembles what this shopper engaged with.
+   *
+   *  Kept apart from the score boost on purpose. The boost competes with the
+   *  global ranking and loses - a bestselling tee outscores a wanted heel by
+   *  more than any boost can close. This is used instead to reserve the lead
+   *  slots of each new page, so similarity decides the ORDER products are
+   *  served in without altering what they are worth. */
+  var _affinityRank = null;
   /** Injection runs once per page load. The re-sort that follows one calls
    *  back into the sort, and anything short of a latch lets that recurse. */
   var _injectedOnce = false;
@@ -5355,6 +5363,18 @@
         // Same two ceilings as page 1: against the product's own
         // engagement, and against the strongest single engagement, so
         // accumulated affinity never outranks something actually touched.
+        // Similarity strength on its own, for the lead slots. Same falloff
+        // down each neighbour list, but not capped against the engagement
+        // and never added to the score.
+        _affinityRank = {};
+        for (var fi = 0; fi < live.length; fi++) {
+          var fnr = _neighbours[live[fi].handle];
+          if (!fnr) continue;
+          for (var fk = 0; fk < fnr.length; fk++) {
+            _affinityRank[fnr[fk]] =
+              (_affinityRank[fnr[fk]] || 0) + live[fi].score * (1 - fk / fnr.length);
+          }
+        }
         var topLive = live.length ? live[0].score : 0;
         for (var ak in aff) {
           var ownLive = byHandle[ak] || 0;
@@ -5595,8 +5615,48 @@
     // came back with four products instead of twenty-four. The record is
     // the position now.
     var out = [];
+
+    // The most similar products lead the page, by reservation rather than
+    // by score.
+    //
+    // Boosting could not do this. A shopper wishlisting five block heels
+    // leaves a bestselling tee on 404 while the heels they want sit on 330:
+    // measured on this catalogue, even a 180-point boost only moved apparel
+    // from four cards on page 1 to three, because the gap is in the global
+    // score and the boost is additive. Demoting the tee was the other way
+    // and is not wanted - it punishes a product for being popular.
+    //
+    // So the global score keeps deciding the page, and similarity decides
+    // only who goes FIRST on it. Nothing is pushed down the collection;
+    // what the shopper has shown interest in is simply served earlier.
+    var lead = [];
+    if (_affinityRank) {
+      var cands = [];
+      for (var ch in _affinityRank) {
+        if (_shown[ch] || _outOfStock[ch]) continue;
+        if (typeof rank[ch] !== "number") continue;
+        cands.push({ h: ch, s: _affinityRank[ch] });
+      }
+      // Strongest similarity first, not highest score: the point is which
+      // product is most like what they engaged with.
+      cands.sort(function (a, b) {
+        return b.s - a.s;
+      });
+      // A fraction of the page, never all of it. A page made entirely of
+      // near-matches stops being a collection and the shopper sees the same
+      // shoe twelve times; the rest of the page stays discovery.
+      var room = Math.min(cands.length, Math.ceil(count / 3));
+      for (var ci = 0; ci < room; ci++) {
+        lead.push(cands[ci].h);
+        out.push(cands[ci].h);
+      }
+    }
+
+    // Then the page as the global ranking would have it, skipping anything
+    // already led with.
     for (var i = 0; i < all.length && out.length < count; i++) {
       if (_shown[all[i].h]) continue;
+      if (lead.indexOf(all[i].h) !== -1) continue;
       out.push(all[i].h);
     }
     return out;
