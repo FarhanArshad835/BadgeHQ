@@ -5303,39 +5303,23 @@
         rebuildScrollPage(html, (pageNo - 1) * PAGE_SIZE, byHandle, RANDOMNESS, finish);
       };
 
-      // Infinite scroll appends the next batch in pure server order, so
-      // everything past the first screen ignored the shopper entirely. The
-      // theme fetches those pages from Shopify directly - our server never
-      // sees the request and cannot rank them - so the new cards are sorted
-      // here once they land.
+      // The batch is sorted before it is inserted, not after.
       //
-      // Only the new cards. Re-sorting the whole grid would move products the
-      // shopper is already looking at, which is worse than leaving a later
-      // batch unsorted: a page that rearranges under a scroll loses their
-      // place. applyShopperOrder is scoped to the batch by marking everything
-      // already placed as settled.
-      if (window.MutationObserver) {
-        var settle = null;
-        new MutationObserver(function (muts) {
-          var added = false;
-          for (var mi = 0; mi < muts.length; mi++) {
-            for (var ai = 0; ai < muts[mi].addedNodes.length; ai++) {
-              var n = muts[mi].addedNodes[ai];
-              if (n.nodeType !== 1) continue;
-              if (n.getAttribute && n.getAttribute("data-badgehq-pulled")) continue;
-              if (n.getAttribute && n.getAttribute("data-badgehq-settled")) continue;
-              added = true;
-            }
-          }
-          if (!added) return;
-          // Debounced: a batch arrives as many separate insertions, and
-          // sorting on each one would reflow the grid a dozen times.
-          clearTimeout(settle);
-          settle = setTimeout(function () {
-            applyShopperOrder(wanted, true);
-          }, 250);
-        }).observe(document.body, { childList: true, subtree: true });
-      }
+      // __bhqPageRewriter above intercepts the theme's own fetch for each
+      // scroll page and rebuilds it in this shopper's order, so the cards
+      // arrive correct and the browser paints them once.
+      //
+      // There used to be a MutationObserver here that re-sorted the same
+      // cards 250ms after they landed. It was doing the rewriter's job a
+      // second time, except in view: measured on the live site, every scroll
+      // appended 24 cards and then tore down and rebuilt that block 350-500ms
+      // later, moving 17-24 of the 24. That block is exactly where the
+      // shopper is looking, so it read as a shuffle - and it only appeared
+      // after a wishlist, because with no behaviour the re-sort produced the
+      // same order and moved nothing.
+      //
+      // Removed rather than hidden or debounced faster: the sort it performed
+      // had already happened.
     });
   }
 
@@ -5702,6 +5686,24 @@
     // high it scores. Capped: a handful is the point, not a second grid.
     var present = {};
     for (var pi = 0; pi < cards.length; pi++) present[cards[pi].handle] = true;
+    // Everything else on the page counts as present too, not just this
+    // batch. cards holds only what is being sorted, so a product sitting on
+    // page 1 was invisible to this check while page 2 was processed and got
+    // pulled in a second time - the wishlisted boot appeared at both slot 15
+    // and 16, pushing every card below it down one.
+    //
+    // Read from the links rather than our own data attribute: a card
+    // Shopify rendered does not carry one, which is exactly the case that
+    // slipped through.
+    try {
+      var links = document.querySelectorAll('#product-grid a[href*="/products/"]');
+      for (var li = 0; li < links.length; li++) {
+        var lm = (links[li].getAttribute("href") || "").match(/\/products\/([^/?#]+)/);
+        if (lm) present[decodeURIComponent(lm[1]).toLowerCase()] = true;
+      }
+    } catch (e) {
+      /* fall back to the batch-only view */
+    }
     // Candidates come from byHandle, not from wanted. wanted holds only what
     // the shopper touched directly, so affinity could never pull in a
     // neighbour: of five products similar to a wishlisted boot, the one
@@ -5735,7 +5737,12 @@
       missing.forEach(function (h) {
         // Belt and braces: a card for this handle may have landed from an
         // earlier pass even if the selector did not pick it up.
-        if (document.querySelector('[data-badgehq-handle="' + h + '"]')) {
+        // Matches a Shopify-rendered card as well as one of ours: the
+        // data attribute is only on cards this widget injected.
+        if (
+          document.querySelector('[data-badgehq-handle="' + h + '"]') ||
+          document.querySelector('#product-grid a[href*="/products/' + h + '"]')
+        ) {
           if (--pending === 0) applyShopperOrder(wanted);
           return;
         }
