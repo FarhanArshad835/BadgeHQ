@@ -4912,14 +4912,18 @@
     // session - the boost worked on the first collection view and never
     // again. Bumping the key is what retires those entries; the old names are
     // cleared so they do not sit in storage forever.
-    var KEY = "badgehq-order-v3";
+    // v4: v3 entries carry no stock data, so a cached one would keep putting
+    // sold-out products in prime slots for the rest of the session.
+    var KEY = "badgehq-order-v4";
     try {
       sessionStorage.removeItem("badgehq-order");
       sessionStorage.removeItem("badgehq-order-v2");
+      sessionStorage.removeItem("badgehq-order-v3");
       var cached = JSON.parse(sessionStorage.getItem(KEY) || "null");
       if (cached && cached.r && cached.n) {
         _orderRank = cached.r;
         _neighbours = cached.n;
+        _outOfStock = cached.o || {};
         return then(_orderRank);
       }
     } catch (e) {
@@ -4938,6 +4942,13 @@
         for (var ni = 0; ni < list.length; ni++) {
           if (nb[ni] && nb[ni].length) _neighbours[list[ni]] = nb[ni];
         }
+        // Sent as indexes into the same list, so resolve them to handles.
+        _outOfStock = {};
+        var oos = (d && d.outOfStock) || [];
+        for (var oi = 0; oi < oos.length; oi++) {
+          var oh = list[oos[oi]];
+          if (oh) _outOfStock[oh] = true;
+        }
         // A payload with no scores array is an older cached one. Positions
         // are NOT a substitute: the shopper's points get added to this, and on
         // a positional scale a 20-point wishlist means twenty places, which is
@@ -4952,7 +4963,7 @@
           // Only cache a payload worth reusing.
           // Both halves, or the next load restores an order with no affinity.
           if (usable) {
-            sessionStorage.setItem(KEY, JSON.stringify({ r: rank, n: _neighbours }));
+            sessionStorage.setItem(KEY, JSON.stringify({ r: rank, n: _neighbours, o: _outOfStock }));
           }
         } catch (e2) {
           /* quota - it still works for this page */
@@ -5245,6 +5256,17 @@
    *  within a single page. Tracking what has been shown is the only thing
    *  that holds across both. */
   var _shown = {};
+  /** Handles that cannot be bought right now.
+   *
+   *  The server orders in-stock first, but every sort here is on score so that
+   *  ordering is lost - a sold-out product with a strong score takes a prime
+   *  slot on page 1. Demoted rather than dropped: it still belongs in the
+   *  collection, just not above things a shopper can actually add to a cart. */
+  var _outOfStock = {};
+  /** Pushed below every buyable product, while keeping sold-out products in
+   *  score order among themselves. Larger than any real score (max observed
+   *  567) plus the widest behaviour bonus, so the two bands never interleave. */
+  var OOS_PENALTY = 100000;
 
   /** Per-load seed: the shuffle differs between reloads but is fixed within
    *  one load, so a card never moves while the shopper is reading it. */
@@ -5267,6 +5289,11 @@
       // products that are genuinely close and never lifts a weak one over a
       // strong one.
       if (randomness > 0) base += jitter(h) * Math.abs(base) * randomness;
+      // After the jitter, never before: the nudge is a fraction of the score's
+      // own size, so applying it to a penalised score would scale it against
+      // 100000 and hand out a swing big enough to lift a sold-out product
+      // back over the buyable ones it was just demoted below.
+      if (_outOfStock[h]) base -= OOS_PENALTY;
       all.push({ h: h, s: base });
     }
     all.sort(function (a, b) {
@@ -5534,7 +5561,12 @@
         root: c.root,
         idx: idx,
         handle: c.handle,
-        total: standing + (byHandle[c.handle] || 0),
+        // Sold-out products sink below every buyable one. Applied here rather
+        // than by filtering, so they keep their place among themselves.
+        total:
+          standing +
+          (byHandle[c.handle] || 0) -
+          (_outOfStock[c.handle] ? OOS_PENALTY : 0),
       };
     });
 

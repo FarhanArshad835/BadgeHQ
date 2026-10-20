@@ -59,7 +59,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const rows = await prisma.productScore.findMany({
     where: { shop, handle: { not: "" } },
     orderBy: [{ inStock: "desc" }, { score: "desc" }],
-    select: { handle: true, score: true, neighbours: true },
+    select: { handle: true, score: true, neighbours: true, inStock: true },
   });
 
   return json(
@@ -76,6 +76,18 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       // wishlist worth 20 places, when 20 points is a few places here and
       // nothing at all near the top, where products sit 250 points apart.
       scores: rows.map((r) => r.score),
+      // Which products are out of stock, same order, as a list of indexes.
+      //
+      // The rows above are ordered in-stock first, but the storefront re-sorts
+      // by score to add the shopper's own points, which drops that ordering on
+      // the floor: a sold-out product with a strong score lands in a prime slot
+      // on page 1. Sent as indexes rather than a parallel boolean array because
+      // only a few dozen of a thousand products are ever out of stock, so the
+      // list is a fraction of the size.
+      outOfStock: rows.reduce<number[]>((acc, r, i) => {
+        if (!r.inStock) acc.push(i);
+        return acc;
+      }, []),
       // The handles most similar to each product, same order, for affinity:
       // a shopper who engaged with one product should see its near matches
       // lifted too. Precomputed because similarity is pairwise and this
