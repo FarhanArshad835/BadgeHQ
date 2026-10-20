@@ -5154,6 +5154,13 @@
             // Tagged with its handle so a later pass can recognise it
             // whatever the theme card selectors happen to match.
             card.setAttribute("data-badgehq-handle", h);
+            // Marked as pulled-in so the sort leaves it where it is put.
+            // Re-ranking it defeats the fetch: these sit at 62, 109 and 707
+            // in the merchandised order, and a few points of affinity never
+            // closes a 35-point gap to the weakest card on the page - so they
+            // were landing at 25, 26 and 27, below everything, after being
+            // fetched precisely because they were worth showing.
+            card.setAttribute("data-badgehq-pulled", "1");
             grid.appendChild(card);
           }
           // Re-sort once they have all answered: the new cards are appended at
@@ -5182,6 +5189,7 @@
       return {
         root: c.root,
         idx: idx,
+        handle: c.handle,
         total: standing + (byHandle[c.handle] || 0),
       };
     });
@@ -5195,6 +5203,34 @@
       if (ranked[r].idx !== r) { changed = true; break; }
     }
     if (!changed) return true;
+
+    // Pulled-in cards are lifted out of the ranking and re-inserted directly
+    // after the product that earned them, which is the whole proposition:
+    // you wishlisted this, so here are ones like it.
+    var pulled = [];
+    var sorted = [];
+    for (var pk = 0; pk < ranked.length; pk++) {
+      if (ranked[pk].root.getAttribute("data-badgehq-pulled")) pulled.push(ranked[pk]);
+      else sorted.push(ranked[pk]);
+    }
+    if (pulled.length) {
+      // After the highest-scoring product the shopper actually engaged with.
+      var anchor = -1;
+      for (var si2 = 0; si2 < sorted.length; si2++) {
+        if (byHandle[sorted[si2].handle] > 0 && !sorted[si2].root.getAttribute("data-badgehq-pulled")) {
+          anchor = si2;
+          break;
+        }
+      }
+      // Trim from the end so the grid keeps its length and the last row of
+      // the theme's column layout stays full.
+      var trimmed = sorted.splice(Math.max(sorted.length - pulled.length, 0), pulled.length);
+      for (var tk = 0; tk < trimmed.length; tk++) {
+        if (trimmed[tk].root.parentNode) trimmed[tk].root.parentNode.removeChild(trimmed[tk].root);
+      }
+      sorted.splice(anchor >= 0 ? anchor + 1 : 0, 0, ...pulled);
+      ranked = sorted;
+    }
 
     // Appended in order into a fragment, so the grid is touched once rather
     // than per card - a card at a time would force a reflow on each move.
