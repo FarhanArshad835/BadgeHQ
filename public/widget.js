@@ -5323,6 +5323,24 @@
     });
   }
 
+  /** Is there a card for exactly this handle in the grid?
+   *
+   *  Parses each link rather than matching the handle as a substring: some
+   *  handles here are prefixes of others, so a substring test reports the
+   *  wrong product as present. */
+  function handleOnPage(handle) {
+    try {
+      var links = document.querySelectorAll('#product-grid a[href*="/products/"]');
+      for (var i = 0; i < links.length; i++) {
+        var m = (links[i].getAttribute("href") || "").match(/\/products\/([^/?#]+)/);
+        if (m && decodeURIComponent(m[1]).toLowerCase() === handle) return true;
+      }
+    } catch (e) {
+      /* treat as absent: a wrong "present" silently drops a pull-in */
+    }
+    return false;
+  }
+
   /** Find the <li>/<article> wrapping a card, given any element inside it. */
   function cardRootOf(el) {
     var n = el;
@@ -5739,9 +5757,15 @@
         // earlier pass even if the selector did not pick it up.
         // Matches a Shopify-rendered card as well as one of ours: the
         // data attribute is only on cards this widget injected.
+        //
+        // Compared on the WHOLE handle, not as a substring. This shop has
+        // handles that are prefixes of each other -
+        // "...block-heel-sandals" and "...block-heel-sandals-for-women" -
+        // so a href*= test found the second card and wrongly reported the
+        // first as already present, silently dropping its pull-in.
         if (
           document.querySelector('[data-badgehq-handle="' + h + '"]') ||
-          document.querySelector('#product-grid a[href*="/products/' + h + '"]')
+          handleOnPage(h)
         ) {
           if (--pending === 0) applyShopperOrder(wanted);
           return;
