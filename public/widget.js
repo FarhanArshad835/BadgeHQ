@@ -64,6 +64,68 @@
    * These only set a flag. Nothing is recorded until the beacon starts and
    * decides whether tracking is even enabled for this shop.
    */
+  /**
+   * Intercept the theme's scroll-page fetch so the page can be rebuilt.
+   *
+   * Installed here, at parse time, for the same reason the cart hooks are: the
+   * theme captures window.fetch when it loads, and wrapping it afterwards is
+   * too late - the call goes through the original reference and is never seen.
+   *
+   * Set up now, armed later. __bhqPageRewriter stays null until the behaviour
+   * beacon has the ranked order, so a page is only ever rewritten when there is
+   * something to rewrite it with; until then the response passes straight
+   * through untouched.
+   */
+  var __bhqPageRewriter = null;
+  (function installPageHook() {
+    var PAGE_FETCH = /[?&]section_id=/;
+    try {
+      var of = window.fetch;
+      if (!of) return;
+      window.fetch = function (input) {
+        var u = typeof input === "string" ? input : (input && input.url) || "";
+        var r = of.apply(this, arguments);
+        if (!__bhqPageRewriter || !PAGE_FETCH.test(u) || u.indexOf("page=") === -1) return r;
+        // The response is read once here and handed back as a fresh one, so
+        // the theme still sees an ordinary Response it can call text() on.
+        return r
+          .then(function (res) {
+            if (!res.ok) return res;
+            return res.text().then(function (html) {
+              return new Promise(function (resolve) {
+                var done = false;
+                var finish = function (out) {
+                  if (done) return;
+                  done = true;
+                  resolve(
+                    new Response(out, {
+                      status: res.status,
+                      headers: { "Content-Type": "text/html" },
+                    }),
+                  );
+                };
+                // A rewrite that stalls must not strand the shopper mid-scroll:
+                // past this the original page is used unchanged.
+                setTimeout(function () {
+                  finish(html);
+                }, 2500);
+                try {
+                  __bhqPageRewriter(u, html, finish);
+                } catch (e) {
+                  finish(html);
+                }
+              });
+            });
+          })
+          .catch(function () {
+            return r;
+          });
+      };
+    } catch (e) {
+      /* a theme that froze fetch is not worth breaking the widget over */
+    }
+  })();
+
   var __bhqCartDirty = false;
   var __bhqOnCartWrite = null;
   (function installCartHooks() {
@@ -4928,6 +4990,27 @@
         if (++tries < 20) setTimeout(attempt, 150);
       })();
 
+      // Arm the page rewriter now the ranked order is loaded. Until this
+      // point the hook installed at parse time passes every response straight
+      // through, because there is nothing to rebuild a page with.
+      //
+      // This is what lifts the Shopify limit: a page is no longer ranks 25-48
+      // of one fixed order, it is whichever 24 products this shopper should
+      // see at that depth - including ones Shopify would have put on page 30.
+      __bhqPageRewriter = function (url, html, finish) {
+        var m = url.match(/[?&]page=(\d+)/);
+        var pageNo = m ? parseInt(m[1], 10) : 1;
+        if (!(pageNo > 1)) return finish(html);
+
+        // What the shopper has earned so far, same scale the sort uses.
+        var byHandle = {};
+        for (var wi = 0; wi < wanted.length; wi++) {
+          byHandle[wanted[wi].handle] = (byHandle[wanted[wi].handle] || 0) + wanted[wi].score;
+        }
+
+        rebuildScrollPage(html, (pageNo - 1) * PAGE_SIZE, byHandle, RANDOMNESS, finish);
+      };
+
       // Infinite scroll appends the next batch in pure server order, so
       // everything past the first screen ignored the shopper entirely. The
       // theme fetches those pages from Shopify directly - our server never
@@ -5064,6 +5147,141 @@
     if (!el.querySelector('a[href*="/products/"]')) return null;
     el.setAttribute("data-badgehq-injected", "1");
     return el;
+  }
+
+  /**
+   * Decide which products a scroll page shows, instead of accepting Shopify's.
+   *
+   * Shopify paginates the manual order it was given: page 2 is ranks 25-48, and
+   * nothing can change that per shopper. A product at rank 700 could never
+   * reach page 2 however well it matched, and the order was identical on every
+   * reload for everyone.
+   *
+   * The theme fetches each page itself, so that fetch is intercepted and the
+   * response treated as a supply of rendered cards rather than as the answer.
+   * Whatever belongs in this slice is kept, the rest is fetched, and the page
+   * is rebuilt in the order this shopper should see.
+   *
+   * Reusing what Shopify sent is the economy of it: a fully custom page is 24
+   * card fetches at ~20KB each against one 150KB response, which on a phone is
+   * a visible stall. In practice only a handful of slots differ.
+   */
+  var PAGE_SIZE = 24;
+  /** Cap on how many slots a page may swap, so it stays mostly discovery
+   *  rather than becoming an echo of what the shopper already saw. */
+  var MAX_SWAPS = 8;
+  /** How much the order is shuffled per load, as a fraction of a product's
+   *  own score. 0 is deterministic; 0.06 reshuffles products that are
+   *  genuinely close without letting a weak one overtake a strong one. */
+  var RANDOMNESS = 0.06;
+
+  /** Per-load seed: the shuffle differs between reloads but is fixed within
+   *  one load, so a card never moves while the shopper is reading it. */
+  var _seed = Math.floor(Math.random() * 1e9);
+  function jitter(handle) {
+    var h = _seed;
+    for (var i = 0; i < handle.length; i++) {
+      h = (h * 31 + handle.charCodeAt(i)) & 0x7fffffff;
+    }
+    return (h % 1000) / 1000;
+  }
+
+  /** The products this shopper should see at a given depth, best first. */
+  function pageSliceFor(offset, count, byHandle, randomness) {
+    var rank = _orderRank || {};
+    var all = [];
+    for (var h in rank) {
+      var base = rank[h] + (byHandle[h] || 0);
+      // Scaled to the score, so the nudge is proportionate: it reshuffles
+      // products that are genuinely close and never lifts a weak one over a
+      // strong one.
+      if (randomness > 0) base += jitter(h) * Math.abs(base) * randomness;
+      all.push({ h: h, s: base });
+    }
+    all.sort(function (a, b) {
+      return b.s - a.s;
+    });
+    return all.slice(offset, offset + count).map(function (x) {
+      return x.h;
+    });
+  }
+
+  /** Rewrite a scroll page so it holds the products this shopper should see. */
+  function rebuildScrollPage(html, offset, byHandle, randomness, then) {
+    var tpl = document.createElement("template");
+    tpl.innerHTML = html;
+    var cards = tpl.content.querySelectorAll("li");
+    if (cards.length < 2 || !_orderRank) return then(html);
+
+    // What Shopify sent, indexed by handle: a supply of rendered cards.
+    var supply = {};
+    for (var i = 0; i < cards.length; i++) {
+      var a = cards[i].querySelector('a[href*="/products/"]');
+      if (!a) continue;
+      var m = a.getAttribute("href").match(/\/products\/([^/?#]+)/);
+      if (m) supply[decodeURIComponent(m[1]).toLowerCase()] = cards[i];
+    }
+
+    var want = pageSliceFor(offset, PAGE_SIZE, byHandle, randomness);
+    var keep = [];
+    var fetchList = [];
+    for (var w = 0; w < want.length; w++) {
+      if (supply[want[w]]) keep.push({ h: want[w], el: supply[want[w]] });
+      else if (fetchList.length < MAX_SWAPS) fetchList.push(want[w]);
+    }
+    // Anything Shopify sent that this shopper does not want, kept as filler so
+    // a page never comes back short.
+    var filler = [];
+    for (var sh in supply) {
+      if (want.indexOf(sh) === -1) filler.push({ h: sh, el: supply[sh] });
+    }
+
+    if (!fetchList.length) return then(buildPage(keep, filler, tpl));
+
+    var pending = fetchList.length;
+    var fetched = [];
+    fetchList.forEach(function (h) {
+      fetchCardFor(h, null, function (card) {
+        if (card) fetched.push({ h: h, el: card });
+        if (--pending !== 0) return;
+        // Assembled in the order the shopper should see them.
+        var merged = [];
+        for (var k = 0; k < want.length; k++) {
+          var hit = null;
+          for (var f = 0; f < fetched.length && !hit; f++) {
+            if (fetched[f].h === want[k]) hit = fetched[f];
+          }
+          for (var kk = 0; kk < keep.length && !hit; kk++) {
+            if (keep[kk].h === want[k]) hit = keep[kk];
+          }
+          if (hit) merged.push(hit);
+        }
+        then(buildPage(merged, filler, tpl));
+      });
+    });
+  }
+
+  /** Put the chosen cards back into the response the theme expects. */
+  function buildPage(chosen, filler, tpl) {
+    var grid = tpl.content.querySelector("ul");
+    if (!grid) return tpl.innerHTML;
+    while (grid.firstChild) grid.removeChild(grid.firstChild);
+    var used = {};
+    var n = 0;
+    for (var i = 0; i < chosen.length && n < PAGE_SIZE; i++) {
+      if (used[chosen[i].h]) continue;
+      used[chosen[i].h] = true;
+      grid.appendChild(chosen[i].el);
+      n++;
+    }
+    // Topped up from what Shopify sent, so a page is never short.
+    for (var j = 0; j < filler.length && n < PAGE_SIZE; j++) {
+      if (used[filler[j].h]) continue;
+      used[filler[j].h] = true;
+      grid.appendChild(filler[j].el);
+      n++;
+    }
+    return tpl.innerHTML;
   }
 
   function applyShopperOrder(wanted, batchOnly) {
