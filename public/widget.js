@@ -144,6 +144,34 @@
    * already correct underneath, so releasing it mid-flight shows the page as
    * it would otherwise have looked, with nothing jumping.
    */
+  /** The ranked order, fetched the moment the script runs.
+   *
+   *  The reorder used to start this only after the config had arrived, which
+   *  chained two requests that have nothing to do with each other: ~450ms for
+   *  the config and then ~900ms for this, so the grid could not be sorted for
+   *  about 1.4s. The veil could not outlast that without holding the page
+   *  blank, so it lifted first and the shopper watched the cards rearrange.
+   *
+   *  Nothing here depends on the config, so it runs alongside it instead and
+   *  the order is usually in hand before the config has finished. */
+  var __bhqOrderPromise = null;
+  (function prefetchOrder() {
+    try {
+      if (!SHOP) return;
+      if (!/\/collections\//.test(location.pathname) && location.pathname !== "/") return;
+      __bhqOrderPromise = fetch(
+        API_ORIGIN + "/api/order?shop=" + encodeURIComponent(SHOP),
+      ).then(function (r) {
+        return r.json();
+      });
+      // A rejection here must not surface as an unhandled promise; the
+      // consumer re-attaches its own handlers and falls back to fetching.
+      __bhqOrderPromise.catch(function () {});
+    } catch (e) {
+      __bhqOrderPromise = null;
+    }
+  })();
+
   var __bhqUnveil = null;
   (function veilGrid() {
     try {
@@ -163,8 +191,16 @@
         if (root) root.className += " badgehq-ready";
       };
       // A hard deadline, not a fallback: whatever happens upstream, the grid
-      // is visible within 1.2s of the page starting to load.
-      setTimeout(__bhqUnveil, 1200);
+      // is visible within this long of the page starting to load.
+      //
+      // 1200ms was below the time the data actually took to arrive - the two
+      // requests ran back to back and totalled 1250-1550ms - so the deadline
+      // won every time and the reorder landed after the grid was already
+      // visible. That is the shuffle it was added to prevent. The requests
+      // now overlap, which brings the data in well inside this, and the extra
+      // margin covers a slow connection instead of guaranteeing a flash on a
+      // normal one.
+      setTimeout(__bhqUnveil, 2000);
     } catch (e) {
       /* never let this be the reason a grid stays blank */
     }
@@ -4929,8 +4965,14 @@
     } catch (e) {
       /* private mode - just fetch */
     }
-    fetch(API_ORIGIN + "/api/order?shop=" + encodeURIComponent(SHOP))
-      .then(function (r) { return r.json(); })
+    // Reuse the request started at parse time where there is one, so this
+    // does not pay for a round trip that is already in flight.
+    (__bhqOrderPromise ||
+      fetch(API_ORIGIN + "/api/order?shop=" + encodeURIComponent(SHOP)).then(
+        function (r) {
+          return r.json();
+        },
+      ))
       .then(function (d) {
         // handle -> the engine's own score, so the shopper's points are added
         // on the same scale the merchant's weights produced.
@@ -4981,7 +5023,13 @@
   }
 
   function reorderGridForShopper(page, weights) {
-    if (page !== "collection" && page !== "home") return;
+    function release() {
+      if (__bhqUnveil) __bhqUnveil();
+    }
+    // Nothing to reorder on this page, so stop hiding it. Every exit below
+    // does the same: the veil exists to cover a reorder, and a grid held back
+    // for a reorder that is not coming is just a blank grid.
+    if (page !== "collection" && page !== "home") return release();
 
     // Defaults match the old constants, so a shop that has never touched the
     // sliders behaves exactly as before.
@@ -4995,13 +5043,13 @@
     // A filtered or explicitly sorted view is the shopper asking for a
     // specific order. Overriding it would be wrong.
     var qs = window.location.search;
-    if (/[?&](filter\.|sort_by=)/.test(qs)) return;
+    if (/[?&](filter\.|sort_by=)/.test(qs)) return release();
 
     var bag = {};
     try {
       bag = JSON.parse(sessionStorage.getItem("badgehq-behaviour") || "{}") || {};
     } catch (e) {
-      return;
+      return release();
     }
 
     // Same weighting the server applies, so a product that ranks highly here
@@ -5029,7 +5077,10 @@
       if (sc <= 0) continue;
       wanted.push({ handle: b.h, score: sc, seen: b.t || 0 });
     }
-    if (!wanted.length) return;
+    // A first-time shopper has no behaviour yet, which is the common case on
+    // a cold visit - and the case where holding the grid back buys nothing at
+    // all, because there is no personalisation to wait for.
+    if (!wanted.length) return release();
 
     wanted.sort(function (a, b2) {
       if (b2.score !== a.score) return b2.score - a.score;
