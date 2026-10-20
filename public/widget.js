@@ -4949,111 +4949,69 @@
    * ~40KB per product against ~45KB for a single rendered card, and only for
    * the handful a shopper has actually touched.
    */
+  /**
+   * Bring in a product the shopper wants that this page did not load.
+   *
+   * Asks the THEME to render the card rather than building one. An earlier
+   * version cloned a card already on the page and swapped its title, image and
+   * price - but a card here is assembled by several apps after load (sale
+   * badges, offer pills, the wishlist heart, an EMI widget), none of it in the
+   * server HTML, so the clone wore the template product's offers. A shopper
+   * reading "2 FOR 999" on a product not in that offer has been misled.
+   *
+   * A rendered card arrives without those either - they are added client-side -
+   * but this storefront already runs several MutationObservers watching the
+   * grid, so the apps decorate it themselves once it is inserted. The card ends
+   * up identical to its neighbours instead of a stripped-down imitation.
+   */
+  var CARD_SECTIONS = ["pinned-card", "card-product", "product-card"];
+
   function fetchCardFor(handle, template, then) {
     var CK = "badgehq-card-" + handle;
-    var cached = null;
     try {
-      cached = JSON.parse(sessionStorage.getItem(CK) || "null");
+      var cached = sessionStorage.getItem(CK);
+      if (cached) return then(cardFromHtml(cached));
     } catch (e) {
-      /* private mode */
+      /* private mode - just fetch */
     }
-    if (cached) return then(buildCard(cached, template));
 
-    fetch("/products/" + encodeURIComponent(handle) + ".js", { credentials: "same-origin" })
-      .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
-      .then(function (d) {
-        var lean = {
-          t: d.title,
-          u: d.url,
-          i: d.featured_image || (d.images && d.images[0]) || "",
-          p: d.price,
-          c: d.compare_at_price || 0,
-          a: d.available,
-        };
-        try {
-          sessionStorage.setItem(CK, JSON.stringify(lean));
-        } catch (e2) {
-          /* quota - it still works for this page */
-        }
-        then(buildCard(lean, template));
-      })
-      .catch(function () { then(null); });
+    // Section names are a theme convention, not a Shopify guarantee, so each
+    // candidate is tried until one returns something card-shaped.
+    var idx = 0;
+    (function attempt() {
+      if (idx >= CARD_SECTIONS.length) return then(null);
+      var section = CARD_SECTIONS[idx++];
+      fetch(
+        "/products/" + encodeURIComponent(handle) + "?section_id=" + section,
+        { credentials: "same-origin" },
+      )
+        .then(function (r) { return r.ok ? r.text() : Promise.reject(); })
+        .then(function (html) {
+          var card = cardFromHtml(html);
+          if (!card) return attempt();
+          try {
+            sessionStorage.setItem(CK, html);
+          } catch (e2) {
+            /* quota - it still works for this page */
+          }
+          then(card);
+        })
+        .catch(attempt);
+    })();
   }
 
-  /** Money in the shop's own format, from a card the theme already rendered. */
-  function formatMoneyLike(sample, cents) {
-    var m = String(sample || "").match(/^([^\d]*)([\d.,]+)/);
-    var symbol = m ? m[1] : "";
-    // Follow the sample on decimals as well as the symbol: this store shows
-    // no paise, but a shop pricing in dollars shows 12.00 and rendering that
-    // as 12 on one card out of twenty looks like a bug.
-    var showsDecimals = m ? /[.,]\d{2}$/.test(m[2]) : false;
-    var whole = showsDecimals ? Math.floor(cents / 100) : Math.round(cents / 100);
-    // Grouped the way the sample is, so a shop showing 1,099 does not get 1099.
-    var grouped = String(whole).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-    if (showsDecimals) {
-      var sep = m[2].indexOf(",") > m[2].indexOf(".") ? "," : ".";
-      var cent = String(cents % 100);
-      grouped += sep + (cent.length < 2 ? "0" + cent : cent);
-    }
-    return symbol + grouped;
-  }
-
-  function buildCard(d, template) {
-    if (!template) return null;
-    var card = template.cloneNode(true);
-    card.setAttribute("data-badgehq-injected", "1");
-
-    // Every link points at the new product.
-    var links = card.querySelectorAll('a[href*="/products/"]');
-    for (var i = 0; i < links.length; i++) links[i].setAttribute("href", d.u);
-
-    // The image: srcset has to go, or the browser keeps the old one.
-    var imgs = card.querySelectorAll("img");
-    for (var j = 0; j < imgs.length; j++) {
-      if (!d.i) break;
-      imgs[j].removeAttribute("srcset");
-      imgs[j].removeAttribute("data-srcset");
-      imgs[j].setAttribute("src", d.i + (d.i.indexOf("?") > -1 ? "&" : "?") + "width=533");
-      imgs[j].setAttribute("alt", d.t);
-      imgs[j].setAttribute("loading", "eager");
-    }
-
-    // The title, wherever the theme puts it.
-    var title = card.querySelector('.card__heading a, .card__heading, [class*="title"] a, [class*="title"]');
-    if (title) title.textContent = d.t;
-
-    // Price, keeping whatever currency format the theme already shows.
-    var price = card.querySelector('.price-item--regular, [class*="price-item"], [class*="price"]');
-    if (price) price.textContent = formatMoneyLike(price.textContent, d.p);
-
-    // Everything other apps added to the template card has to go.
-    //
-    // A card on a storefront is assembled by several apps after load - sale
-    // badges, offer pills, a wishlist heart, an EMI widget - none of which is
-    // in the server HTML. Cloning copies whatever they had already put there,
-    // and they never run again for a card we create, so the clone would wear
-    // the TEMPLATE product's badges and offers. Wrong information is worse
-    // than none: a shopper reading "2 FOR 999" on a product that is not in
-    // that offer has been misled, so these are removed rather than left.
-    var injected = card.querySelectorAll(
-      "[class*='badge'], [class*='Badge'], [class*='wishlist'], [class*='Wishlist'], " +
-        "[class*='snapmint'], [class*='emi'], [class*='offer'], [class*='sp-'], " +
-        "[data-shinetrust], [class*='trust']",
-    );
-    for (var x = 0; x < injected.length; x++) {
-      if (injected[x].parentNode) injected[x].parentNode.removeChild(injected[x]);
-    }
-
-    // Any identifier left on the clone still names the product it was copied
-    // from, so a heart re-attached later would toggle the wrong product.
-    var stale = card.querySelectorAll("[data-wlh-handle], [data-wlh-id], [data-product-id]");
-    for (var k = 0; k < stale.length; k++) {
-      stale[k].removeAttribute("data-wlh-handle");
-      stale[k].removeAttribute("data-wlh-id");
-      stale[k].removeAttribute("data-product-id");
-    }
-    return card;
+  /** The first product card in a section response, if it holds one. */
+  function cardFromHtml(html) {
+    var tpl = document.createElement("template");
+    tpl.innerHTML = html;
+    var el =
+      tpl.content.querySelector("li.grid__item") ||
+      tpl.content.querySelector("li, article, .card-wrapper, [class*='product-card']");
+    if (!el) return null;
+    // Must carry a product link, or it is a wrapper rather than a card.
+    if (!el.querySelector('a[href*="/products/"]')) return null;
+    el.setAttribute("data-badgehq-injected", "1");
+    return el;
   }
 
   function applyShopperOrder(wanted) {
