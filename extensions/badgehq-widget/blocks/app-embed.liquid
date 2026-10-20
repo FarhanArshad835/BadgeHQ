@@ -1,23 +1,112 @@
 {%- comment -%}
-  In <head> so anything here applies before the grid is parsed.
+  Two scripts, deliberately.
 
-  The engine writes its ranking into the collection itself (sortOrder MANUAL),
-  so Shopify already serves products in the right order and the storefront has
-  nothing to rearrange. That is the architecture: decide the order on the
-  server, let the page load it, and the browser only renders.
+  The grid's first 24 cards are in this document, server-rendered, and the
+  engine has already written our ranking into the collection - so for almost
+  every shopper they arrive in the right order and nothing needs to happen.
 
-  The grid is therefore NOT hidden by default. A veil only earns its delay when
-  something is actually going to move, and on a managed collection nothing does
-  - every shopper gets the server's order, which is already on screen. Hiding
-  the grid for 2s to cover a reorder that will not happen is a slower page for
-  no benefit, and was itself the thing that made the reorder visible: the veil
-  released on a timer, before the data it was waiting for had arrived.
+  A shopper who has engaged is the exception: their behaviour (which lives only
+  in their own sessionStorage) can change which products belong on the page. We
+  used to let the grid paint, then reorder it, then hide the movement behind a
+  veil. Hiding movement is still showing it late - the grid has to ARRIVE in
+  our order instead.
 
-  widget.js hides the grid itself, for as long as it needs, only in the case
-  that remains: when this shopper's own behaviour (which the server cannot
-  know, as it lives in their sessionStorage) changes which products belong on
-  the page. That is a small minority of loads.
+  So the small blocking script below reorders the cards in place, before the
+  browser paints them. It can, because for an engaged shopper both inputs are
+  already local: the ranked order was cached on the page view where they
+  engaged, and their behaviour is in sessionStorage. No network, nothing to
+  wait for.
+
+  It is deliberately tiny and it runs on a DOMContentLoaded listener rather
+  than blocking the parser, so it costs nothing on the loads where it does
+  nothing - which is most of them. It also bails out the moment anything is
+  missing, leaving the server order exactly as it came.
+
+  widget.js stays async and keeps doing everything else, including the case
+  this cannot cover: a first-ever visit, where the order is not cached yet.
 {%- endcomment -%}
+<script>
+  (function () {
+    try {
+      var p = location.pathname;
+      if (!/\/collections\//.test(p) && p !== "/") return;
+
+      var ord = sessionStorage.getItem("badgehq-order-v4");
+      var beh = sessionStorage.getItem("badgehq-behaviour");
+      if (!ord || !beh) return; // first visit: nothing cached, leave it alone
+
+      var rank = (JSON.parse(ord) || {}).r;
+      var bag = JSON.parse(beh);
+      if (!rank || !bag || !bag.b || !bag.b.length) return;
+
+      // Default weights, matching the engine's own. Deliberately not fetched:
+      // this has to be synchronous, and a shop that has retuned its sliders
+      // gets the exact order from widget.js a moment later anyway.
+      var W = { ca: 12, cr: -9, wa: 10, wr: -9, d: 5, v: 1 };
+      var pts = {};
+      for (var i = 0; i < bag.b.length; i++) {
+        var b = bag.b[i];
+        if (!b || !b.h) continue;
+        var s = 0;
+        if (b.ca) s += Math.min(b.ca * W.ca, 24);
+        if (b.cr) s += b.cr * W.cr;
+        if (b.wa) s += Math.min(b.wa * W.wa, 10);
+        if (b.wr) s += b.wr * W.wr;
+        if (b.d) s += W.d;
+        if (b.v) s += Math.min(b.v * W.v, 4);
+        if (s !== 0) pts[b.h] = (pts[b.h] || 0) + s;
+      }
+
+      var apply = function () {
+        var grid = document.querySelector("#product-grid");
+        if (!grid) return;
+        var items = grid.children;
+        if (!items || items.length < 2) return;
+
+        var rows = [];
+        for (var k = 0; k < items.length; k++) {
+          var a = items[k].querySelector('a[href*="/products/"]');
+          var h = "";
+          if (a) {
+            var m = (a.getAttribute("href") || "").match(/\/products\/([^/?#]+)/);
+            if (m) h = decodeURIComponent(m[1]).toLowerCase();
+          }
+          var base = typeof rank[h] === "number" ? rank[h] : -(k + 1);
+          rows.push({ el: items[k], t: base + (pts[h] || 0), i: k });
+        }
+
+        rows.sort(function (x, y) {
+          return y.t - x.t || x.i - y.i;
+        });
+
+        // Already right - and it usually is - so the DOM is not touched at all.
+        var same = true;
+        for (var q = 0; q < rows.length; q++) {
+          if (rows[q].i !== q) {
+            same = false;
+            break;
+          }
+        }
+        if (same) return;
+
+        var frag = document.createDocumentFragment();
+        for (var z = 0; z < rows.length; z++) frag.appendChild(rows[z].el);
+        grid.appendChild(frag);
+      };
+
+      // The grid is far below this point in the document, so wait for the
+      // parser to reach the end of it - still before first paint of the cards
+      // in practice, and without blocking the parser on our behalf.
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", apply);
+      } else {
+        apply();
+      }
+    } catch (e) {
+      /* any problem at all: the server order stands */
+    }
+  })();
+</script>
 <script src="https://badgehq-widget.badgehq.workers.dev/widget.js" async></script>
 
 {% schema %}

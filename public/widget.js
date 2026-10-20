@@ -221,7 +221,14 @@
           break;
         }
       }
-      if (__bhqEngaged) veilGridNow();
+      // Not veiled any more. The app embed reorders the cards in place
+      // before the browser paints them, using the order cached on the page
+      // view where this shopper engaged - so the grid arrives correct and
+      // there is no movement left to cover. Hiding it here would only
+      // delay a grid that is already in the right order.
+      //
+      // __bhqEngaged is still tracked: the first-ever visit has no cached
+      // order for the embed to use, and that load is handled below.
     } catch (e) {
       /* no storage, or malformed - treat as not engaged and never hide */
     }
