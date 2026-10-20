@@ -5027,7 +5027,26 @@
     var price = card.querySelector('.price-item--regular, [class*="price-item"], [class*="price"]');
     if (price) price.textContent = formatMoneyLike(price.textContent, d.p);
 
-    // Anything stateful on the clone belongs to the product it came from.
+    // Everything other apps added to the template card has to go.
+    //
+    // A card on a storefront is assembled by several apps after load - sale
+    // badges, offer pills, a wishlist heart, an EMI widget - none of which is
+    // in the server HTML. Cloning copies whatever they had already put there,
+    // and they never run again for a card we create, so the clone would wear
+    // the TEMPLATE product's badges and offers. Wrong information is worse
+    // than none: a shopper reading "2 FOR 999" on a product that is not in
+    // that offer has been misled, so these are removed rather than left.
+    var injected = card.querySelectorAll(
+      "[class*='badge'], [class*='Badge'], [class*='wishlist'], [class*='Wishlist'], " +
+        "[class*='snapmint'], [class*='emi'], [class*='offer'], [class*='sp-'], " +
+        "[data-shinetrust], [class*='trust']",
+    );
+    for (var x = 0; x < injected.length; x++) {
+      if (injected[x].parentNode) injected[x].parentNode.removeChild(injected[x]);
+    }
+
+    // Any identifier left on the clone still names the product it was copied
+    // from, so a heart re-attached later would toggle the wrong product.
     var stale = card.querySelectorAll("[data-wlh-handle], [data-wlh-id], [data-product-id]");
     for (var k = 0; k < stale.length; k++) {
       stale[k].removeAttribute("data-wlh-handle");
