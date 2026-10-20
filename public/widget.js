@@ -5202,6 +5202,22 @@
         var pageNo = m ? parseInt(m[1], 10) : 1;
         if (!(pageNo > 1)) return finish(html);
 
+        // Shopify paginates the order the engine already wrote, so page N
+        // of a managed collection is page N of our own ranking. Rebuilding
+        // it only reshuffles it into the order it arrived in - visibly, on
+        // every scroll - and costs a card fetch per swapped slot.
+        //
+        // Left alone unless this shopper has behaviour that actually
+        // changes which products belong at this depth.
+        var hasBehaviour = false;
+        for (var bk = 0; bk < wanted.length; bk++) {
+          if (wanted[bk].score > 0) {
+            hasBehaviour = true;
+            break;
+          }
+        }
+        if (!hasBehaviour) return finish(html);
+
         // Page 1 is rendered by Shopify and never passes through buildPage,
         // so its products were not in the shown record and page 2 could
         // repeat any of them - which is what put the same crop top twice in
@@ -5694,8 +5710,12 @@
     // manages, Shopify has already applied this exact order, so this
     // normally returns null and the grid is left as it was painted - which
     // is the whole point: nothing moves, so there is nothing to see move.
+    // Appended batches get the same treatment as the first page. They were
+    // exempt, which is why scrolling still shuffled after the first screen
+    // was fixed: each new batch arrived in the server order and was then
+    // re-sorted into that same order, in view, on every scroll.
+    if (pageNeedsChange(cards, byHandle) === null) return true;
     if (!batchOnly) {
-      if (pageNeedsChange(cards, byHandle) === null) return true;
       // Something genuinely moves on this load, so cover it - and only
       // now, with the decision already made, so the veil is up for the
       // length of a DOM reorder rather than a network round trip.
