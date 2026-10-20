@@ -126,6 +126,50 @@
     }
   })();
 
+  /**
+   * Hold the grid back until its order is settled.
+   *
+   * The reorder waits on two network calls - the config, then the ranked order
+   * - so the cards Shopify sent have been on screen for roughly half a second
+   * by the time they move. The shopper watches the grid rearrange under them,
+   * which reads as a glitch rather than as personalisation.
+   *
+   * The grid is faded out for that window instead. Done with a stylesheet
+   * injected at parse time, before the first paint: a style applied later
+   * would itself be a visible change.
+   *
+   * Every exit releases it - success, failure, or a 1.2s deadline - because a
+   * grid that stays hidden is far worse than one that visibly reorders. The
+   * deadline is also why this is opacity rather than display: the layout is
+   * already correct underneath, so releasing it mid-flight shows the page as
+   * it would otherwise have looked, with nothing jumping.
+   */
+  var __bhqUnveil = null;
+  (function veilGrid() {
+    try {
+      if (!/\/collections\//.test(location.pathname)) return;
+      var st = document.createElement("style");
+      st.id = "badgehq-veil";
+      st.textContent =
+        "#product-grid,[id^='main-collection-product-grid'] ul{opacity:0}" +
+        ".badgehq-ready #product-grid,.badgehq-ready [id^='main-collection-product-grid'] ul{opacity:1;transition:opacity .18s ease}";
+      (document.head || document.documentElement).appendChild(st);
+
+      var released = false;
+      __bhqUnveil = function () {
+        if (released) return;
+        released = true;
+        var root = document.documentElement;
+        if (root) root.className += " badgehq-ready";
+      };
+      // A hard deadline, not a fallback: whatever happens upstream, the grid
+      // is visible within 1.2s of the page starting to load.
+      setTimeout(__bhqUnveil, 1200);
+    } catch (e) {
+      /* never let this be the reason a grid stays blank */
+    }
+  })();
+
   var __bhqCartDirty = false;
   var __bhqOnCartWrite = null;
   (function installCartHooks() {
@@ -4920,6 +4964,7 @@
         // grid already shows. Degrades to the previous behaviour rather than
         // leaving the page unsorted.
         _orderRank = {};
+        if (__bhqUnveil) __bhqUnveil();
         then(_orderRank);
       });
   }
@@ -4986,8 +5031,14 @@
     loadOrderRank(function () {
       var tries = 0;
       (function attempt() {
-        if (applyShopperOrder(wanted)) return;
+        // Released on every path: a sorted grid, a grid that could not be
+        // found, or a grid that was already in the right order.
+        if (applyShopperOrder(wanted)) {
+          if (__bhqUnveil) __bhqUnveil();
+          return;
+        }
         if (++tries < 20) setTimeout(attempt, 150);
+        else if (__bhqUnveil) __bhqUnveil();
       })();
 
       // Arm the page rewriter now the ranked order is loaded. Until this
@@ -5001,6 +5052,17 @@
         var m = url.match(/[?&]page=(\d+)/);
         var pageNo = m ? parseInt(m[1], 10) : 1;
         if (!(pageNo > 1)) return finish(html);
+
+        // Page 1 is rendered by Shopify and never passes through buildPage,
+        // so its products were not in the shown record and page 2 could
+        // repeat any of them - which is what put the same crop top twice in
+        // one row. Read off the live grid, because by now the client-side
+        // reorder may have changed which products are on it.
+        var onPage = document.querySelectorAll('a[href*="/products/"]');
+        for (var oi = 0; oi < onPage.length; oi++) {
+          var hm = onPage[oi].getAttribute("href").match(/\/products\/([^/?#]+)/);
+          if (hm) _shown[decodeURIComponent(hm[1]).toLowerCase()] = true;
+        }
 
         // What the shopper has earned so far, same scale the sort uses.
         var byHandle = {};
@@ -5174,6 +5236,15 @@
    *  own score. 0 is deterministic; 0.06 reshuffles products that are
    *  genuinely close without letting a weak one overtake a strong one. */
   var RANDOMNESS = 0.06;
+  /** Handles already placed on this page load, across every scroll page.
+   *
+   *  Each page takes a fresh slice of the ordering, and the ordering shifts
+   *  as the shopper browses - a product that sat at rank 50 when page 3 was
+   *  built can be at rank 30 by the time page 4 is, putting it in two slices.
+   *  Shopify's own filler can repeat one too, since that is only deduped
+   *  within a single page. Tracking what has been shown is the only thing
+   *  that holds across both. */
+  var _shown = {};
 
   /** Per-load seed: the shuffle differs between reloads but is fixed within
    *  one load, so a card never moves while the shopper is reading it. */
@@ -5201,9 +5272,20 @@
     all.sort(function (a, b) {
       return b.s - a.s;
     });
-    return all.slice(offset, offset + count).map(function (x) {
-      return x.h;
-    });
+    // Skip what is already on the page rather than slicing blindly: the
+    // ordering shifts between pages, so a fixed offset can hand back a
+    // product an earlier page already used. Walking past them also keeps
+    // the page full instead of leaving gaps where duplicates were dropped.
+    // No offset. Skipping what is shown ALREADY advances past every earlier
+    // page, so also skipping `offset` entries skipped them twice - page 3
+    // came back with four products instead of twenty-four. The record is
+    // the position now.
+    var out = [];
+    for (var i = 0; i < all.length && out.length < count; i++) {
+      if (_shown[all[i].h]) continue;
+      out.push(all[i].h);
+    }
+    return out;
   }
 
   /** Rewrite a scroll page so it holds the products this shopper should see. */
@@ -5266,18 +5348,20 @@
     var grid = tpl.content.querySelector("ul");
     if (!grid) return tpl.innerHTML;
     while (grid.firstChild) grid.removeChild(grid.firstChild);
-    var used = {};
     var n = 0;
     for (var i = 0; i < chosen.length && n < PAGE_SIZE; i++) {
-      if (used[chosen[i].h]) continue;
-      used[chosen[i].h] = true;
+      if (_shown[chosen[i].h]) continue;
+      _shown[chosen[i].h] = true;
       grid.appendChild(chosen[i].el);
       n++;
     }
-    // Topped up from what Shopify sent, so a page is never short.
+    // Topped up from what Shopify sent, so a page is never short. Checked
+    // against the same record: filler was the other way a product could
+    // appear twice, since Shopify's page 3 can contain what its page 2 did
+    // once we have reordered them.
     for (var j = 0; j < filler.length && n < PAGE_SIZE; j++) {
-      if (used[filler[j].h]) continue;
-      used[filler[j].h] = true;
+      if (_shown[filler[j].h]) continue;
+      _shown[filler[j].h] = true;
       grid.appendChild(filler[j].el);
       n++;
     }
