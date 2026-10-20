@@ -174,8 +174,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const scored = computeScores(facts, sales, behaviour, s);
     const order = rankProducts(scored, s.sinkOutOfStock);
 
-    // Titles only for what is shown — a preview should not cost a full catalogue read.
-    const top = order.slice(0, 20);
+    // Titles only for the page being shown - a preview should not cost a full
+    // catalogue read, and at a thousand products that is the difference between
+    // one small query and twenty.
+    const PAGE = 20;
+    const offset = Math.max(0, Number(form.get("offset")) || 0);
+    const top = order.slice(offset, offset + PAGE);
     const tRes = await admin.graphql(
       `#graphql
       query Titles($ids: [ID!]!) { nodes(ids: $ids) { ... on Product { id title totalInventory } } }`,
@@ -190,11 +194,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const byId = new Map(scored.map((x) => [x.productId, x]));
 
     return json({
+      offset,
+      pageSize: PAGE,
       preview: top.map((id, i) => {
         const sc = byId.get(id);
         const t = titleBy.get(id) as any;
         return {
-          rank: i + 1,
+          rank: offset + i + 1,
           title: t?.title ?? id.split("/").pop(),
           score: sc?.score ?? 0,
           units: sc?.unitsSold ?? 0,
@@ -773,9 +779,54 @@ export default function Merchandising() {
                 {actionData?.preview && (
                   <BlockStack gap="200">
                     <Text as="p" variant="bodySm" tone="subdued">
-                      Top 20 of {actionData.total} products
+                      {actionData.offset + 1}&ndash;
+                      {Math.min(actionData.offset + actionData.pageSize, actionData.total)} of{" "}
+                      {actionData.total.toLocaleString("en-IN")} products
                     </Text>
                     <PreviewTable preview={actionData.preview} />
+                    {/* Paged rather than "load more": a merchant checking why a
+                        product ranks where it does wants to reach position 400
+                        without loading the 399 above it. */}
+                    <InlineStack gap="300" blockAlign="center">
+                      <button
+                        className="Polaris-Button"
+                        disabled={actionData.offset === 0 || busy}
+                        onClick={() =>
+                          submit(
+                            {
+                              intent: "preview",
+                              collectionId: previewId,
+                              offset: String(Math.max(0, actionData.offset - actionData.pageSize)),
+                            },
+                            { method: "POST" },
+                          )
+                        }
+                      >
+                        Previous
+                      </button>
+                      <button
+                        className="Polaris-Button"
+                        disabled={
+                          actionData.offset + actionData.pageSize >= actionData.total || busy
+                        }
+                        onClick={() =>
+                          submit(
+                            {
+                              intent: "preview",
+                              collectionId: previewId,
+                              offset: String(actionData.offset + actionData.pageSize),
+                            },
+                            { method: "POST" },
+                          )
+                        }
+                      >
+                        {busy ? "Loading…" : "Next"}
+                      </button>
+                      <Text as="span" variant="bodySm" tone="subdued">
+                        Page {Math.floor(actionData.offset / actionData.pageSize) + 1} of{" "}
+                        {Math.ceil(actionData.total / actionData.pageSize)}
+                      </Text>
+                    </InlineStack>
                   </BlockStack>
                 )}
               </BlockStack>
