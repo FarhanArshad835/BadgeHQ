@@ -1136,6 +1136,12 @@ model ProductScore {
   /// GIDs cannot be applied client-side.
   handle    String @default("")
 
+  /// The handles most similar to this one, best first, as JSON.
+  /// Precomputed because similarity is pairwise: a thousand products is half
+  /// a million comparisons, far too many to do in a browser or ship whole.
+  /// Top-8 per product is ~55KB gzipped for the catalogue.
+  neighbours String @default("[]")
+
   unitsSold      Int       @default(0)
   reviewCount    Int       @default(0)
   publishedAt    DateTime?

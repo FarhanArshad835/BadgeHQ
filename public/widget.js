@@ -4789,6 +4789,8 @@
    * against products that have not loaded.
    */
   var _orderRank = null;
+  /** handle -> the handles most like it, best first. */
+  var _neighbours = {};
   /** Injection runs once per page load. The re-sort that follows one calls
    *  back into the sort, and anything short of a latch lets that recurse. */
   var _injectedOnce = false;
@@ -4818,6 +4820,11 @@
         var rank = {};
         var list = (d && d.order) || [];
         var sc = (d && d.scores) || [];
+        var nb = (d && d.neighbours) || [];
+        _neighbours = {};
+        for (var ni = 0; ni < list.length; ni++) {
+          if (nb[ni] && nb[ni].length) _neighbours[list[ni]] = nb[ni];
+        }
         // A payload with no scores array is an older cached one. Positions
         // are NOT a substitute: the shopper's points get added to this, and on
         // a positional scale a 20-point wishlist means twenty places, which is
@@ -5037,6 +5044,28 @@
     if (cards.length < 2) return false;
 
     var byHandle = {};
+    // Affinity: a shopper who engaged with one product is interested in the
+    // ones like it, even if they never saw them. Each engaged product passes
+    // a share of its own score to its precomputed near matches.
+    //
+    // Only a share - a neighbour is evidence of taste, not of intent, and a
+    // product the shopper actually wishlisted must still outrank one merely
+    // similar to it. Capped so a long tail of neighbours cannot add up to
+    // more than the engagement that produced them.
+    var AFFINITY_SHARE = 0.4;
+    var AFFINITY_CAP = 0.8;
+    var affinity = {};
+    for (var ai = 0; ai < wanted.length; ai++) {
+      var near = _neighbours[wanted[ai].handle];
+      if (!near) continue;
+      for (var nj = 0; nj < near.length; nj++) {
+        var h2 = near[nj];
+        // Decays down the list: the closest match earns the most.
+        var falloff = 1 - nj / near.length;
+        affinity[h2] = (affinity[h2] || 0) + wanted[ai].score * AFFINITY_SHARE * falloff;
+      }
+    }
+
     // Summed, not assigned. One product can hold two entries in the bag: a
     // product-page view keys by id where the theme exposes one, while a
     // wishlist click on a card keys by handle. Both carry the same handle, so
@@ -5045,6 +5074,25 @@
     for (var wi = 0; wi < wanted.length; wi++) {
       var wh = wanted[wi].handle;
       byHandle[wh] = (byHandle[wh] || 0) + wanted[wi].score;
+    }
+    // Added after, and capped against the product's own engagement, so a
+    // product the shopper touched is never overtaken by one merely like it.
+    // Two ceilings. Against the product's own engagement, so something the
+    // shopper touched is never overtaken by something merely like it. And
+    // against the STRONGEST single engagement, because affinity accumulates:
+    // a product that happens to be the near match of five engaged products
+    // would otherwise out-score a cart add it has nothing to do with.
+    var strongest = 0;
+    for (var si = 0; si < wanted.length; si++) {
+      if (wanted[si].score > strongest) strongest = wanted[si].score;
+    }
+    for (var ah in affinity) {
+      var own = byHandle[ah] || 0;
+      var ceiling = Math.min(
+        own > 0 ? own * AFFINITY_CAP : Infinity,
+        strongest * AFFINITY_CAP,
+      );
+      byHandle[ah] = own + Math.min(affinity[ah], ceiling);
     }
 
 

@@ -22,6 +22,7 @@
  */
 import prisma from "../db.server";
 import { bumpConfigVersion } from "./config-version.server";
+import { similarity, type SimProduct } from "./similarity.server";
 
 /** Shopify caps a single reorder mutation's move list. Batched below it. */
 const REORDER_BATCH = 250;
@@ -195,6 +196,10 @@ export async function behaviourByProduct(shop: string, windowDays: number) {
 type ProductFacts = {
   productId: string;
   handle: string;
+  title: string;
+  tags: string[];
+  productType: string;
+  colors: string[];
   reviewCount: number;
   publishedAt: Date | null;
   inStock: boolean;
@@ -225,6 +230,10 @@ export async function fetchCollectionProducts(
             nodes {
               id
               handle
+              title
+              tags
+              productType
+              options { name values }
               publishedAt
               totalInventory
               reviews: metafield(namespace: "doran", key: "prReviewCount") { value }
@@ -242,6 +251,12 @@ export async function fetchCollectionProducts(
       out.push({
         productId: String(n.id),
         handle: String(n.handle || ""),
+        title: String(n.title || ""),
+        tags: Array.isArray(n.tags) ? n.tags.map(String) : [],
+        productType: String(n.productType || ""),
+        colors:
+          ((n.options || []).find((o: any) => /colou?r/i.test(o?.name || "")) || { values: [] })
+            .values.map(String),
         reviewCount: Math.max(0, Number(n.reviews?.value) || 0),
         publishedAt: n.publishedAt ? new Date(n.publishedAt) : null,
         // totalInventory is null for products that do not track inventory;
@@ -533,10 +548,51 @@ async function waitForJob(
 }
 
 /** Persist the inputs behind each rank, so the admin screen can explain them. */
+/**
+ * The handles most similar to each product, best first.
+ *
+ * Computed here rather than in the browser because similarity is pairwise:
+ * this catalogue is 566,580 comparisons, which no storefront should do and no
+ * payload should carry. The nearest few per product is ~55KB gzipped instead.
+ *
+ * O(n^2) over about a thousand products is a second or so once an hour, which
+ * is the right place to spend it.
+ */
+const NEIGHBOURS_PER_PRODUCT = 8;
+/** Below this two products are not alike enough to be worth suggesting. */
+const MIN_SIMILARITY = 0.45;
+
+function computeNeighbours(facts: ProductFacts[]): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  const sims: SimProduct[] = facts.map((f) => ({
+    productId: f.productId,
+    title: f.title,
+    tags: f.tags,
+    productType: f.productType,
+    colors: f.colors,
+  }));
+
+  for (let i = 0; i < sims.length; i++) {
+    const scoredPairs: Array<{ handle: string; s: number }> = [];
+    for (let j = 0; j < sims.length; j++) {
+      if (i === j) continue;
+      const s = similarity(sims[i], sims[j]);
+      if (s >= MIN_SIMILARITY) scoredPairs.push({ handle: facts[j].handle, s });
+    }
+    scoredPairs.sort((x, y) => y.s - x.s);
+    out.set(
+      facts[i].productId,
+      scoredPairs.slice(0, NEIGHBOURS_PER_PRODUCT).map((x) => x.handle).filter(Boolean),
+    );
+  }
+  return out;
+}
+
 async function saveScores(
   shop: string,
   facts: ProductFacts[],
   scored: Array<{ productId: string; score: number; unitsSold: number }>,
+  neighbours?: Map<string, string[]>,
 ) {
   const factBy = new Map(facts.map((f) => [f.productId, f]));
   // Chunked: a single transaction over 1,000+ upserts holds a connection far
@@ -547,6 +603,7 @@ async function saveScores(
         const f = factBy.get(s.productId);
         const data = {
           handle: f?.handle ?? "",
+          neighbours: JSON.stringify(neighbours?.get(s.productId) ?? []),
           unitsSold: s.unitsSold,
           reviewCount: f?.reviewCount ?? 0,
           publishedAt: f?.publishedAt ?? null,
@@ -603,7 +660,7 @@ export async function runMerchandising(
       }
 
       const scored = computeScores(facts, sales, behaviour, s, lifetime);
-      await saveScores(shop, facts, scored);
+      await saveScores(shop, facts, scored, computeNeighbours(facts));
 
       if (opts.dryRun) {
         results.push({ id: collectionId, products: facts.length, reordered: false });
