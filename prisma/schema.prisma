@@ -91,6 +91,10 @@ model ProductBadge {
   padRight  Int @default(8)
   padBottom Int @default(4)
   padLeft   Int @default(8)
+  // Empty means inherit: the global setting, or failing that the theme.
+  fontFamily String @default("")
+  // 700 was hardcoded on every badge.
+  fontWeight Int    @default(700)
   customCSS      String @default("")
 
   createdAt DateTime @default(now())

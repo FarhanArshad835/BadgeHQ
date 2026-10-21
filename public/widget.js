@@ -2170,7 +2170,9 @@
                 "padding:" + (badgePadding(badge) || "4px 8px") + ";" +
                 bg +
                 "color:" + badge.textColor + ";" +
-                "font-size:" + (badge.fontSize || 11) + "px;font-weight:700;line-height:1;" +
+                "font-size:" + (badge.fontSize || 11) + "px;" +
+                "font-weight:" + (badge.fontWeight || 700) + ";line-height:1;" +
+                (badge.fontFamily ? "font-family:" + badge.fontFamily + ";" : "") +
                 "width:auto;height:auto;max-width:max-content;white-space:nowrap;box-sizing:border-box;pointer-events:none;" +
                 "opacity:" + (badge.opacity || 1) + ";" +
                 (badge.rotation ? "transform:rotate(" + badge.rotation + "deg);" : "") +
@@ -2261,7 +2263,9 @@
             "display:flex;align-items:center;justify-content:center;" +
             bgStyle +
             "color:" + badge.textColor + ";" +
-            "font-size:" + (badge.fontSize || 11) + "px;font-weight:700;line-height:1;" +
+            "font-size:" + (badge.fontSize || 11) + "px;" +
+            "font-weight:" + (badge.fontWeight || 700) + ";line-height:1;" +
+            (badge.fontFamily ? "font-family:" + badge.fontFamily + ";" : "") +
             "width:auto;height:auto;max-width:max-content;white-space:nowrap;box-sizing:border-box;pointer-events:none;" +
             "opacity:" + (badge.opacity || 1) + ";" +
             (badge.rotation ? "transform:rotate(" + badge.rotation + "deg);" : "") +

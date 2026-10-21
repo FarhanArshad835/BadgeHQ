@@ -121,6 +121,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       padRight: (b as any).padRight ?? 8,
       padBottom: (b as any).padBottom ?? 4,
       padLeft: (b as any).padLeft ?? 8,
+      fontFamily: (b as any).fontFamily || "",
+      fontWeight: (b as any).fontWeight ?? 700,
       priceRule: (() => {
         try {
           return JSON.parse((b as any).priceRule || "{}");

@@ -159,6 +159,7 @@ export default function GlobalSettings() {
                   label="Default Font Family"
                   options={[
                     { label: "Inherit from theme", value: "inherit" },
+                    { label: "System (matches the shopper's device)", value: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji'" },
                     { label: "Arial", value: "Arial, sans-serif" },
                     { label: "Helvetica", value: "Helvetica, sans-serif" },
                     { label: "Georgia", value: "Georgia, serif" },

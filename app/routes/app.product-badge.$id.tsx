@@ -82,6 +82,8 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         padRight: Number(data.padRight ?? 8),
         padBottom: Number(data.padBottom ?? 4),
         padLeft: Number(data.padLeft ?? 8),
+        fontFamily: data.fontFamily || "",
+        fontWeight: Number(data.fontWeight ?? 700),
         priceRule: data.priceRule || '{"mode":"hide"}',
         targeting: JSON.stringify(data.targeting),
         isActive: data.isActive,
@@ -134,6 +136,8 @@ function EditProductBadgeForm() {
   const [infoPosition, setInfoPosition] = useState<string>((badge as any).infoPosition || "above-price");
   const [hideComparePrice, setHideComparePrice] = useState<boolean>(!!(badge as any).hideComparePrice);
   const [padTop, setPadTop] = useState<number>((badge as any).padTop ?? 4);
+  const [fontFamily, setFontFamily] = useState<string>((badge as any).fontFamily || "");
+  const [fontWeight, setFontWeight] = useState<number>((badge as any).fontWeight ?? 700);
   const [padRight, setPadRight] = useState<number>((badge as any).padRight ?? 8);
   const [padBottom, setPadBottom] = useState<number>((badge as any).padBottom ?? 4);
   const [padLeft, setPadLeft] = useState<number>((badge as any).padLeft ?? 8);
@@ -245,7 +249,7 @@ function EditProductBadgeForm() {
   const handleSave = () => {
     const data = {
       text, badgeType, shape, badgeColor, textColor, position, placement, infoPosition, hideComparePrice,
-      padTop, padRight, padBottom, padLeft,
+      padTop, padRight, padBottom, padLeft, fontFamily, fontWeight,
       priceRule: JSON.stringify({ mode: priceMode, discountType, discountValue }),
       targeting: {
         type: targetType,
@@ -279,7 +283,8 @@ function EditProductBadgeForm() {
     ...(position.includes("left") ? { left: 8 } : { right: 8 }),
     background: previewBg, color: textColor,
     display: "flex", alignItems: "center", justifyContent: "center",
-    fontSize: `${fontSize}px`, fontWeight: 700, opacity,
+    fontSize: `${fontSize}px`, fontWeight, opacity,
+    fontFamily: fontFamily || undefined,
     transform: rotation ? `rotate(${rotation}deg)` : undefined,
     border: borderWidth ? `${borderWidth}px solid ${borderColor || "#000"}` : undefined,
     ...shapeStyles[shape],
@@ -525,6 +530,26 @@ function EditProductBadgeForm() {
                     { label: "Bottom Left", value: "bottom-left" }, { label: "Bottom Right", value: "bottom-right" },
                   ]} value={position} onChange={setPosition} />
                 )}
+                <InlineGrid columns={2} gap="400">
+                  <Select label="Font" options={[
+                    { label: "Inherit from theme", value: "" },
+                    { label: "System (matches the shopper's device)", value: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji'" },
+                    { label: "Arial", value: "Arial, sans-serif" },
+                    { label: "Helvetica", value: "Helvetica, sans-serif" },
+                    { label: "Georgia", value: "Georgia, serif" },
+                    { label: "Times New Roman", value: "'Times New Roman', serif" },
+                    { label: "Courier New", value: "'Courier New', monospace" },
+                    { label: "Verdana", value: "Verdana, sans-serif" },
+                  ]} value={fontFamily} onChange={setFontFamily}
+                    helpText="Inherit uses the theme's own font." />
+                  <Select label="Font weight" options={[
+                    { label: "Regular (400)", value: "400" },
+                    { label: "Medium (500)", value: "500" },
+                    { label: "Semibold (600)", value: "600" },
+                    { label: "Bold (700)", value: "700" },
+                    { label: "Extrabold (800)", value: "800" },
+                  ]} value={String(fontWeight)} onChange={(v) => setFontWeight(Number(v) || 700)} />
+                </InlineGrid>
                 <BlockStack gap="200">
                   <Text as="h3" variant="headingSm">Badge Padding (px)</Text>
                   <InlineGrid columns={4} gap="300">
