@@ -1114,7 +1114,18 @@
       var cached = sessionStorage.getItem(key);
       if (cached) {
         var parsed = JSON.parse(cached);
-        if (parsed && parsed.t && Date.now() - parsed.t < 5 * 60 * 1000 && parsed.p) {
+        // Twenty minutes, not five. A collection's membership is a
+        // merchandising decision that changes rarely, and each miss costs
+        // a products.json page - 129KB gzipped and 1.8MB decoded for a
+        // mid-sized one - so a five-minute window meant refetching all of
+        // it several times in a single browsing session.
+        //
+        // Not longer, because nothing here can be invalidated early: the
+        // config version that busts the edge cache on an admin save is not
+        // sent to the client, so this window is also how long a merchant
+        // waits to see a collection change. Twenty minutes is past a
+        // typical session without being past a merchant's patience.
+        if (parsed && parsed.t && Date.now() - parsed.t < 20 * 60 * 1000 && parsed.p) {
           _collectionMembers[collectionHandle] = { products: parsed.p, loaded: true };
           var cbs1 = _collectionLoading[collectionHandle];
           delete _collectionLoading[collectionHandle];
@@ -2143,6 +2154,19 @@
    */
   function renderBundleOffers(offers, page, currencySymbol) {
     if (!offers || !offers.length) return;
+
+    // Filtered by page BEFORE anything is loaded.
+    //
+    // page was only consulted at the end, in renderBundleOffer, so an
+    // offer scoped to product pages still prefetched its collection and
+    // fetched the cart on every collection page and then rendered
+    // nothing. Measured on this shop: two product-only offers pulled
+    // ~950KB gzipped and ~11MB decoded of collection membership per
+    // collection page view, all of it discarded.
+    offers = offers.filter(function (o) {
+      return !o.pages || !o.pages.length || o.pages.indexOf(page) !== -1;
+    });
+    if (!offers.length) return;
 
     // A collection-scoped offer cannot be evaluated until its product list is
     // known: /cart.js reports handles but never collection membership. Load
