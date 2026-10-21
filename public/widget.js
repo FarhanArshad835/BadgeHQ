@@ -1011,9 +1011,15 @@
         // the switch, so a badge can arrive here with value "849" and
         // operator "less_than" - which this read as min=849, max=Infinity
         // and matched everything AT OR ABOVE the number instead.
-        // "between" means a range even if only one number was typed; any
-        // other operator means the value is a bound.
-        if ((c.operator && c.operator !== "between") || range.length < 2 || range[1] === "") {
+        // The VALUE decides, not the operator.
+        //
+        // Two numbers are a range whatever the operator says - a badge
+        // saved as "848-850" with a stale less_than is asking for the
+        // range, and reading it as a bound of 848 silently stopped it
+        // matching anything. One number is a bound, and then the operator
+        // is the only thing that can tell us which side.
+        var looksLikeRange = range.length >= 2 && range[1] !== "" && !isNaN(parseFloat(range[1]));
+        if (!looksLikeRange) {
           var bound = parseFloat(range[0]);
           if (isNaN(bound)) return false;
           var pop = c.operator || "less_than";
@@ -1817,13 +1823,54 @@
         block.insertBefore(was, block.firstChild);
       }
 
+      /** Re-run attachBadges once a zero-width image is laid out.
+       *
+       *  One observer per image, installed once, disconnected on first hit.
+       *  An image that never becomes visible costs a dormant observer and
+       *  nothing else. rootMargin starts the work slightly before the card
+       *  reaches the viewport, so it is ready when it arrives. */
+      function watchForLayout(img) {
+        if (img.__badgehqLayoutWatch || !window.IntersectionObserver) return;
+        img.__badgehqLayoutWatch = true;
+        try {
+          var io = new IntersectionObserver(
+            function (entries) {
+              for (var i = 0; i < entries.length; i++) {
+                if (!entries[i].isIntersecting) continue;
+                io.disconnect();
+                img.__badgehqLayoutWatch = false;
+                attachBadges(img);
+                return;
+              }
+            },
+            { rootMargin: "400px" },
+          );
+          io.observe(img);
+        } catch (e) {
+          img.__badgehqLayoutWatch = false;
+        }
+      }
+
       function attachBadges(img) {
         // Skip images inside navigation/header — they flash briefly then nav JS hides them
         if (img.closest("header, nav, .site-header, .site-nav, [role='navigation'], #site-nav, #header")) return;
 
         // Skip hidden images (display:none parent). offsetWidth is reliable for Dawn theme
         // which uses position:absolute + padding-bottom aspect ratio (offsetHeight is 0 there).
-        if (img.offsetWidth === 0) return;
+        //
+        // Zero width is not always permanent. A card far down a long grid
+        // measures zero until its lazy image loads, so badges and price
+        // rules were applied only to the cards near the top and never
+        // revisited. Measured on this shop: 11 of 32 cards rewritten on
+        // load, 26 after scrolling through the grid.
+        //
+        // Watched rather than retried on a timer: the observer fires when
+        // the card is actually laid out, which is also the first moment
+        // anything applied to it could be seen.
+        if (img.offsetWidth === 0) {
+          watchForLayout(img);
+          return;
+        }
 
         // Lazy-load handling: Dawn (and most themes) use loading="lazy" on product
         // card images. Below-the-fold imgs aren't img.complete during the 1s/2.5s/6s
