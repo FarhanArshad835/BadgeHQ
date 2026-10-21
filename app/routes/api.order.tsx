@@ -37,11 +37,26 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
 
   const url = new URL(request.url);
-  const shop = String(url.searchParams.get("shop") || "").trim().toLowerCase();
-  const collection = String(url.searchParams.get("collection") || "").trim().toLowerCase();
+  const shop = String(url.searchParams.get("shop") || "")
+    .trim()
+    .toLowerCase();
+  const collection = String(url.searchParams.get("collection") || "")
+    .trim()
+    .toLowerCase();
+  // The ranking without the neighbour lists.
+  //
+  // Neighbours are 342KB of a 391KB payload - 87% of it - and the storefront
+  // does not need them to order a page; only to pull in near matches, which
+  // happens later. Asking for just the ranking is 10.8KB gzipped against
+  // 49.6KB, which is the difference between arriving before the grid paints
+  // and arriving after it.
+  const slim = url.searchParams.get("slim") === "1";
 
   if (!/^[a-z0-9][a-z0-9.-]*\.myshopify\.com$/.test(shop)) {
-    return json({ ok: false, error: "bad-shop" }, { status: 400, headers: CORS });
+    return json(
+      { ok: false, error: "bad-shop" },
+      { status: 400, headers: CORS },
+    );
   }
 
   const settings = await prisma.merchandiseSettings.findUnique({
@@ -102,14 +117,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       // a shopper who engaged with one product should see its near matches
       // lifted too. Precomputed because similarity is pairwise and this
       // catalogue is over half a million comparisons.
-      neighbours: rows.map((r) => {
-        try {
-          const n = JSON.parse(r.neighbours);
-          return Array.isArray(n) ? n : [];
-        } catch {
-          return [];
-        }
-      }),
+      neighbours: slim
+        ? []
+        : rows.map((r) => {
+            try {
+              const n = JSON.parse(r.neighbours);
+              return Array.isArray(n) ? n : [];
+            } catch {
+              return [];
+            }
+          }),
     },
     { headers: { ...CORS, ...CACHE } },
   );

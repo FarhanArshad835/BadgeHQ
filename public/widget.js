@@ -5003,103 +5003,32 @@
    *  slots of each new page, so similarity decides the ORDER products are
    *  served in without altering what they are worth. */
   var _affinityRank = null;
-  /** Engine run the cached ranking came from, so a stale one can be spotted. */
-  var _cachedStamp = 0;
   /** Injection runs once per page load. The re-sort that follows one calls
    *  back into the sort, and anything short of a latch lets that recurse. */
   var _injectedOnce = false;
-  /**
-   * Replace a cached ranking that the engine has since rebuilt.
-   *
-   * The cached copy is used immediately - waiting on the network to show a
-   * grid would be worse than showing a slightly old order - and this corrects
-   * it a moment later if the stamps disagree. Nothing is re-sorted on screen:
-   * the fresh data lands in _orderRank and _neighbours and takes effect on the
-   * next scroll page, which is where it matters.
-   */
-  function revalidateOrder(KEY) {
-    var req =
-      __bhqOrderPromise ||
-      fetch(API_ORIGIN + "/api/order?shop=" + encodeURIComponent(SHOP)).then(function (r) {
-        return r.json();
-      });
-    req
-      .then(function (d) {
-        if (!d || !d.order || !d.scores) return;
-        if ((d.runAt || 0) === _cachedStamp) return; // unchanged
-        var list = d.order;
-        var sc = d.scores;
-        if (sc.length !== list.length) return;
-        var rank = {};
-        for (var i = 0; i < list.length; i++) rank[list[i]] = sc[i];
-        var nb = d.neighbours || [];
-        var nbs = {};
-        for (var j = 0; j < list.length; j++) {
-          if (nb[j] && nb[j].length) nbs[list[j]] = nb[j];
-        }
-        var oosMap = {};
-        var oo = d.outOfStock || [];
-        for (var k = 0; k < oo.length; k++) {
-          var oh = list[oo[k]];
-          if (oh) oosMap[oh] = true;
-        }
-        _orderRank = rank;
-        _neighbours = nbs;
-        _outOfStock = oosMap;
-        _cachedStamp = d.runAt || 0;
-        try {
-          sessionStorage.setItem(
-            KEY,
-            JSON.stringify({ r: rank, n: nbs, o: oosMap, t: _cachedStamp }),
-          );
-        } catch (e) {
-          /* quota - it still works for this page */
-        }
-      })
-      .catch(function () {
-        /* the cached copy stands */
-      });
-  }
-
   function loadOrderRank(then) {
     if (_orderRank) return then(_orderRank);
-    // Versioned. The first build of this cached POSITIONS under the same key;
-    // read back as scores they make a wishlist worth twenty places instead of
-    // twenty points. sessionStorage survives a reload - only closing the tab
-    // clears it - so a stale entry would have outlived the fix on every tab
-    // that had already loaded the page. Bump this whenever the shape changes.
-    // v3: v2 entries hold scores but no neighbours, so a tab that cached one
-    // would restore the order and silently lose affinity for the rest of the
-    // session - the boost worked on the first collection view and never
-    // again. Bumping the key is what retires those entries; the old names are
-    // cleared so they do not sit in storage forever.
-    // v4: v3 entries carry no stock data, so a cached one would keep putting
-    // sold-out products in prime slots for the rest of the session.
-    var KEY = "badgehq-order-v4";
+    // Fetched on every page load. Nothing is read back from storage.
+    //
+    // This was cached in sessionStorage for the whole session, which made it
+    // fast and made it wrong: sessionStorage belongs to the TAB, not the page,
+    // so a reload reuses the same copy and only closing the tab clears it.
+    // A tab opened before the merchandising engine ran kept serving the
+    // pre-run order indefinitely - after a run that gave 76 products
+    // neighbours for the first time, those tabs saw none of them, and
+    // refreshing did not help because refreshing is not what clears it.
+    //
+    // There is no expiry that would have been right either: too short loses
+    // the point, too long still serves a stale ranking. The edge caches this
+    // response, so a request per page load is one warm round trip rather than
+    // a saved copy of unknown age.
     try {
       sessionStorage.removeItem("badgehq-order");
       sessionStorage.removeItem("badgehq-order-v2");
       sessionStorage.removeItem("badgehq-order-v3");
-      var cached = JSON.parse(sessionStorage.getItem(KEY) || "null");
-      // Only reused while the engine has not run since it was stored. The
-      // cache had no expiry at all, so a tab opened before a run kept the
-      // old scores and neighbours for the whole session - after a run that
-      // gave 76 products neighbours for the first time, those tabs behaved
-      // as though nothing had changed. The stamp is checked against the
-      // live payload below, which costs nothing: that request is already
-      // in flight from parse time.
-      if (cached && cached.r && cached.n) {
-        _cachedStamp = cached.t || 0;
-        _orderRank = cached.r;
-        _neighbours = cached.n;
-        _outOfStock = cached.o || {};
-        then(_orderRank);
-        // Still verify, and rebuild in place if the engine has since run.
-        revalidateOrder(KEY);
-        return;
-      }
+      sessionStorage.removeItem("badgehq-order-v4");
     } catch (e) {
-      /* private mode - just fetch */
+      /* private mode - nothing to clear */
     }
     // Reuse the request started at parse time where there is one, so this
     // does not pay for a round trip that is already in flight.

@@ -1,51 +1,61 @@
 {%- comment -%}
   Two scripts, deliberately.
 
-  The grid's first 24 cards are in this document, server-rendered, and the
-  engine has already written our ranking into the collection - so for almost
-  every shopper they arrive in the right order and nothing needs to happen.
+  The first fetches the ranking and reorders the grid's cards before the browser
+  paints them. It starts the request immediately, at the top of <head>, and the
+  grid sits ~800KB further down the document - so the request is in flight for
+  the whole time the parser is working through the page and the data is normally
+  in hand before there is a grid to reorder.
 
-  A shopper who has engaged is the exception: their behaviour (which lives only
-  in their own sessionStorage) can change which products belong on the page. We
-  used to let the grid paint, then reorder it, then hide the movement behind a
-  veil. Hiding movement is still showing it late - the grid has to ARRIVE in
-  our order instead.
+  It asks for slim=1, which omits the neighbour lists: those are 87% of the
+  payload and are not needed to order a page, only to pull in near matches,
+  which happens later in widget.js. That is 10.8KB gzipped instead of 49.6KB,
+  which is the difference between arriving before the paint and after it.
 
-  So the small blocking script below reorders the cards in place, before the
-  browser paints them. It can, because for an engaged shopper both inputs are
-  already local: the ranked order was cached on the page view where they
-  engaged, and their behaviour is in sessionStorage. No network, nothing to
-  wait for.
+  Nothing is read from a cache. An earlier version stored the ranking in
+  sessionStorage and reused it for the whole session, which meant a tab opened
+  before the merchandising engine ran kept serving the old order - and since
+  sessionStorage survives reloads, refreshing did not clear it. The ranking is
+  fetched on every page load instead; the edge serves it from cache, so it costs
+  a request that is already warm.
 
-  It is deliberately tiny and it runs on a DOMContentLoaded listener rather
-  than blocking the parser, so it costs nothing on the loads where it does
-  nothing - which is most of them. It also bails out the moment anything is
-  missing, leaving the server order exactly as it came.
-
-  widget.js stays async and keeps doing everything else, including the case
-  this cannot cover: a first-ever visit, where the order is not cached yet.
+  widget.js stays async and does everything else, including the affinity
+  pull-ins that need the full payload.
 {%- endcomment -%}
 <script>
   (function () {
+    var SHOP = (window.Shopify && window.Shopify.shop) || "";
+    var API = "https://badgehq-widget.badgehq.workers.dev";
     try {
       var p = location.pathname;
+      if (!SHOP) return;
       if (!/\/collections\//.test(p) && p !== "/") return;
 
-      var ord = sessionStorage.getItem("badgehq-order-v4");
-      var beh = sessionStorage.getItem("badgehq-behaviour");
-      if (!ord || !beh) return; // first visit: nothing cached, leave it alone
+      // Started now, used when the grid exists. Shared with widget.js so the
+      // ranking is fetched once per page load, not twice.
+      var req = fetch(API + "/api/order?slim=1&shop=" + encodeURIComponent(SHOP))
+        .then(function (r) {
+          return r.json();
+        });
+      window.__bhqRankPromise = req;
 
-      var rank = (JSON.parse(ord) || {}).r;
-      var bag = JSON.parse(beh);
-      if (!rank || !bag || !bag.b || !bag.b.length) return;
+      var beh = null;
+      try {
+        beh = JSON.parse(sessionStorage.getItem("badgehq-behaviour") || "null");
+      } catch (e) {
+        beh = null;
+      }
+      // No engagement yet means the server order already is this shopper's
+      // order, so there is nothing to reorder and nothing to wait for.
+      if (!beh || !beh.b || !beh.b.length) return;
 
-      // Default weights, matching the engine's own. Deliberately not fetched:
-      // this has to be synchronous, and a shop that has retuned its sliders
-      // gets the exact order from widget.js a moment later anyway.
+      // Default weights, matching the engine's. Deliberately not fetched: this
+      // has to be ready the moment the grid is, and a shop that has retuned its
+      // sliders gets the exact order from widget.js a moment later anyway.
       var W = { ca: 12, cr: -9, wa: 10, wr: -9, d: 5, v: 1 };
       var pts = {};
-      for (var i = 0; i < bag.b.length; i++) {
-        var b = bag.b[i];
+      for (var i = 0; i < beh.b.length; i++) {
+        var b = beh.b[i];
         if (!b || !b.h) continue;
         var s = 0;
         if (b.ca) s += Math.min(b.ca * W.ca, 24);
@@ -57,7 +67,7 @@
         if (s !== 0) pts[b.h] = (pts[b.h] || 0) + s;
       }
 
-      var apply = function () {
+      var apply = function (rank, oos) {
         var grid = document.querySelector("#product-grid");
         if (!grid) return;
         var items = grid.children;
@@ -72,6 +82,7 @@
             if (m) h = decodeURIComponent(m[1]).toLowerCase();
           }
           var base = typeof rank[h] === "number" ? rank[h] : -(k + 1);
+          if (oos[h]) base -= 100000;
           rows.push({ el: items[k], t: base + (pts[h] || 0), i: k });
         }
 
@@ -79,7 +90,7 @@
           return y.t - x.t || x.i - y.i;
         });
 
-        // Already right - and it usually is - so the DOM is not touched at all.
+        // Already right - and usually it is - so the DOM is not touched.
         var same = true;
         for (var q = 0; q < rows.length; q++) {
           if (rows[q].i !== q) {
@@ -94,14 +105,29 @@
         grid.appendChild(frag);
       };
 
-      // The grid is far below this point in the document, so wait for the
-      // parser to reach the end of it - still before first paint of the cards
-      // in practice, and without blocking the parser on our behalf.
-      if (document.readyState === "loading") {
-        document.addEventListener("DOMContentLoaded", apply);
-      } else {
-        apply();
-      }
+      // Whichever is ready last: the data, or the grid being parsed.
+      var ready = function (d) {
+        if (!d || !d.order || !d.scores) return;
+        if (d.scores.length !== d.order.length) return;
+        var rank = {};
+        for (var i2 = 0; i2 < d.order.length; i2++) rank[d.order[i2]] = d.scores[i2];
+        var oos = {};
+        var oo = d.outOfStock || [];
+        for (var j = 0; j < oo.length; j++) {
+          var oh = d.order[oo[j]];
+          if (oh) oos[oh] = true;
+        }
+        if (document.readyState === "loading") {
+          document.addEventListener("DOMContentLoaded", function () {
+            apply(rank, oos);
+          });
+        } else {
+          apply(rank, oos);
+        }
+      };
+      req.then(ready).catch(function () {
+        /* the server order stands */
+      });
     } catch (e) {
       /* any problem at all: the server order stands */
     }
