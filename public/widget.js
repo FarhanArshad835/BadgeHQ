@@ -1006,6 +1006,19 @@
         return false;
       case "price_range":
         var range = String(c.value).split("-");
+        // A single number is not a range. The admin asks for min-max, but
+        // the operator from a previously selected condition type survives
+        // the switch, so a badge can arrive here with value "849" and
+        // operator "less_than" - which this read as min=849, max=Infinity
+        // and matched everything AT OR ABOVE the number instead.
+        if (range.length < 2 || range[1] === "") {
+          var bound = parseFloat(range[0]);
+          if (isNaN(bound)) return false;
+          var pop = c.operator || "less_than";
+          if (pop === "greater_than") return price > bound;
+          if (pop === "equal_to") return price === bound;
+          return price < bound;
+        }
         var min = parseFloat(range[0]) || 0;
         var max = parseFloat(range[1]) || Infinity;
         return price >= min && price <= max;
