@@ -5746,35 +5746,29 @@
       // here is one the shopper simply does not get - the cap is now what
       // personalisation is worth, not just what leads the page.
       var want = cands.slice(0, Math.ceil(PAGE_SIZE / 3) + MAX_SWAPS);
-      var idx = 0;
-      // Two at a time rather than one. Serially, seven cards took ~1.2s on
-      // a fast connection and about four seconds at 300ms latency - long
-      // enough that a shopper scrolling sooner makes the rewrite fetch the
-      // rest itself. Two keeps the latency cost down without crowding out
-      // the images on the page being read.
-      var inFlight = 0;
-      var step = function () {
-        // Checked on entry, so two requests are in flight at most. Testing
-        // it after incrementing allowed a third through.
-        if (inFlight >= 2) return;
-        // A newer engagement has superseded this queue - unwishlisting,
-        // say - so stop fetching cards for what the shopper no longer
-        // wants.
+      // All at once, at low priority.
+      //
+      // A card is 1.8KB on the wire - the decoded 17KB was the wrong number
+      // to budget against - so sixteen of them are ~28KB, less than one
+      // product image. The cost was never the bytes, it was the round trips:
+      // measured, the same eight cards take 1151ms two at a time and 229ms
+      // together, and at 300ms latency that gap is seconds. Serialising them
+      // was what let a shopper scroll before the prefetch finished, which is
+      // the only way a slot falls back to Shopify's card now that serve time
+      // never fetches.
+      //
+      // They share one HTTP/3 connection, and each is a fraction of the size
+      // of the images they are queued behind.
+      idle(function () {
         if (gen !== undefined && gen !== _engageGen) return;
-        if (idx >= want.length) return;
-        var h2 = want[idx++].h;
-        var isFirstRow = idx <= EAGER_ROW_COUNT;
-        inFlight++;
-        fetchCardFor(h2, null, function (card) {
-          inFlight--;
-          // The cards that will lead the next page are the ones whose
-          // images the shopper sees first, so warm those too.
-          if (card && isFirstRow) warmCardImage(card);
-          idle(step);
-        });
-        step();
-      };
-      idle(step);
+        for (var q = 0; q < want.length; q++) {
+          (function (h2, isFirstRow) {
+            fetchCardFor(h2, null, function (card) {
+              if (card && isFirstRow) warmCardImage(card);
+            });
+          })(want[q].h, q < EAGER_ROW_COUNT);
+        }
+      });
     }
 
     function armPageRewriter() {
@@ -6022,10 +6016,11 @@
    */
   var CARD_SECTIONS = ["pinned-card", "card-product", "product-card"];
 
-  /** Cards kept in storage at once. At ~17KB each this caps the cache near
-   *  700KB, well inside the ~5MB sessionStorage quota that the theme and
-   *  every other app on the page also draw from. */
-  var CARD_CACHE_MAX = 40;
+  /** Cards kept in storage at once. Only the <li> is stored, ~5.5KB
+   *  rather than the 17KB section around it, so three times as many fit
+   *  in the same space - about 660KB, well inside the ~5MB sessionStorage
+   *  quota the theme and every other app also draw from. */
+  var CARD_CACHE_MAX = 120;
 
   /**
    * Store a rendered card, evicting the oldest once the cache is full.
@@ -6099,7 +6094,13 @@
           var card = cardFromHtml(html);
           if (!card) return attempt();
           try {
-            cacheCard(CK, html);
+            // The card, not the section that wrapped it. A section is
+            // 17KB of which the <li> is 5.5KB; the rest is six repeated
+            // stylesheet links and section scaffolding that is already on
+            // the page. Storing the whole thing is what pushed
+            // sessionStorage towards its limit, and the limit is shared
+            // with the theme and every other app.
+            cacheCard(CK, card.outerHTML || html);
           } catch (e2) {
             /* quota - it still works for this page */
           }
