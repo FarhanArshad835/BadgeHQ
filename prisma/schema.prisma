@@ -56,6 +56,11 @@ model ProductBadge {
   // Defaults to above-price, which is where info badges rendered before
   // this was configurable.
   infoPosition String @default("above-price")
+  // Hide the struck-through compare-at price on cards this badge applies
+  // to. A badge already carries targeting, conditions, pages and a
+  // schedule, so expressing this as a badge property gives the price rule
+  // all of that for free rather than inventing a second rule system.
+  hideComparePrice Boolean @default(false)
   targeting  String  @default("{\"type\":\"all\"}")
   isActive   Boolean @default(false)
 

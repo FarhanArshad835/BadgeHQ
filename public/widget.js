@@ -1656,6 +1656,36 @@
         'a[href*="/products/"] img',
       ].join(",");
 
+      /**
+       * Hide the struck-through compare-at price on the card this image is in.
+       *
+       * Scoped to one card rather than the page: the badge that asked for it
+       * has already been matched against this product, and a neighbouring
+       * card the badge does not apply to must keep its MRP.
+       *
+       * Display only - the cart and checkout charge whatever Shopify charges.
+       */
+      function hideCardComparePrice(img) {
+        try {
+          var card = img.closest("li, .card-wrapper, [class*='product-card'], [class*='card']");
+          if (!card) return;
+          var blocks = card.querySelectorAll(".price, [class*='product-price'], [class*='card__price']");
+          for (var i = 0; i < blocks.length; i++) {
+            var block = blocks[i];
+            if (block.__bhqPriceHidden) continue;
+            var struck = block.querySelector("s, .price-item--regular, [class*='compare']");
+            if (!struck) continue;
+            block.__bhqPriceHidden = true;
+            struck.style.display = "none";
+            // Dawn lays the two numbers out side by side through this class;
+            // with one hidden it leaves a gap where the other was.
+            block.classList.remove("price--on-sale");
+          }
+        } catch (e) {
+          /* a card that does not match the expected shape keeps its price */
+        }
+      }
+
       function attachBadges(img) {
         // Skip images inside navigation/header — they flash briefly then nav JS hides them
         if (img.closest("header, nav, .site-header, .site-nav, [role='navigation'], #site-nav, #header")) return;
@@ -1861,6 +1891,11 @@
           // pass fires after the data lands.
           if (!badgeTargetMatch(badge, img, productData)) return;
           if (!badgeConditionMet(badge, productData)) return;
+
+          // This badge applies to this card, so its price rule does too.
+          // Hanging the rule off a badge is what gives it targeting,
+          // conditions, pages and a schedule without a second rule system.
+          if (badge.hideComparePrice) hideCardComparePrice(img);
 
           // Info-area placement: render in the product info area, NOT on the image.
           // Respects merchant choice — does not fall through to image placement on failure.

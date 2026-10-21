@@ -77,6 +77,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         position: data.position,
         placement: data.placement,
         infoPosition: data.infoPosition || "above-price",
+        hideComparePrice: !!data.hideComparePrice,
         targeting: JSON.stringify(data.targeting),
         isActive: data.isActive,
         condition: JSON.stringify(data.condition),
@@ -126,6 +127,7 @@ function EditProductBadgeForm() {
   const [position, setPosition] = useState(badge.position);
   const [placement, setPlacement] = useState<"image" | "info">((badge as any).placement || "image");
   const [infoPosition, setInfoPosition] = useState<string>((badge as any).infoPosition || "above-price");
+  const [hideComparePrice, setHideComparePrice] = useState<boolean>(!!(badge as any).hideComparePrice);
   const [isActive, setIsActive] = useState(badge.isActive);
   const [targetType, setTargetType] = useState(badge.targeting.type);
   const [targetValue, setTargetValue] = useState(badge.targeting.value || "");
@@ -190,6 +192,7 @@ function EditProductBadgeForm() {
     position !== badge.position ||
     placement !== ((badge as any).placement || "image") ||
     infoPosition !== ((badge as any).infoPosition || "above-price") ||
+    hideComparePrice !== !!(badge as any).hideComparePrice ||
     isActive !== badge.isActive ||
     targetType !== badge.targeting.type ||
     targetValue !== (badge.targeting.value || "") ||
@@ -224,7 +227,7 @@ function EditProductBadgeForm() {
 
   const handleSave = () => {
     const data = {
-      text, badgeType, shape, badgeColor, textColor, position, placement, infoPosition,
+      text, badgeType, shape, badgeColor, textColor, position, placement, infoPosition, hideComparePrice,
       targeting: {
         type: targetType,
         value: targetValue,
@@ -433,6 +436,12 @@ function EditProductBadgeForm() {
                   ]} value={infoPosition} onChange={setInfoPosition}
                     helpText="Where the badge sits inside the card's text area." />
                 )}
+                <Checkbox
+                  label="Hide the struck-through MRP on matching cards"
+                  helpText="Cards this badge applies to show only the selling price. Uses this badge's targeting, conditions, pages and schedule."
+                  checked={hideComparePrice}
+                  onChange={setHideComparePrice}
+                />
                 {placement === "image" && (
                   <Select label="Position on Image" options={[
                     { label: "Top Left", value: "top-left" }, { label: "Top Right", value: "top-right" },

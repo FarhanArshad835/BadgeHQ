@@ -62,6 +62,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         position: data.position,
         placement: data.placement,
         infoPosition: data.infoPosition || "above-price",
+        hideComparePrice: !!data.hideComparePrice,
         targeting: JSON.stringify(data.targeting),
         isActive: data.isActive,
         condition: JSON.stringify(data.condition),
@@ -102,6 +103,7 @@ export default function NewProductBadge() {
   const [position, setPosition] = useState("top-left");
   const [placement, setPlacement] = useState<"image" | "info">("image");
   const [infoPosition, setInfoPosition] = useState<string>("above-price");
+  const [hideComparePrice, setHideComparePrice] = useState<boolean>(false);
   const [isActive, setIsActive] = useState(false);
 
   // Targeting
@@ -176,7 +178,7 @@ export default function NewProductBadge() {
       badgeColor,
       textColor,
       position,
-      placement, infoPosition,
+      placement, infoPosition, hideComparePrice,
       targeting: {
         type: targetType,
         value: targetValue,
@@ -494,6 +496,12 @@ export default function NewProductBadge() {
                   ]} value={infoPosition} onChange={setInfoPosition}
                     helpText="Where the badge sits inside the card's text area." />
                 )}
+                <Checkbox
+                  label="Hide the struck-through MRP on matching cards"
+                  helpText="Cards this badge applies to show only the selling price. Uses this badge's targeting, conditions, pages and schedule."
+                  checked={hideComparePrice}
+                  onChange={setHideComparePrice}
+                />
                 {placement === "image" && (
                   <Select
                     label="Position on Image"
