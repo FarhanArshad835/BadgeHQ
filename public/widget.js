@@ -84,6 +84,20 @@
    *  a slow one, and at 2.5s it was tight enough that a page could be served
    *  without the products the shopper had just asked for, silently. */
   var REWRITE_BUDGET_MS = 4000;
+  /** Images warmed for the next page: the first two rows of a 2-up phone
+   *  grid plus a little margin. All 24 would be ~1.4MB the shopper may never
+   *  scroll to. */
+  var IMG_PREFETCH_COUNT = 6;
+  /** Cards on an appended page whose image loads eagerly: one row on a 2-up
+   *  phone grid, which is what is on screen the instant the page lands. */
+  var EAGER_ROW_COUNT = 2;
+
+  /** Run when the browser is not busy, so prefetching never competes with the
+   *  page the shopper is actually looking at. */
+  function idle(fn) {
+    if (window.requestIdleCallback) window.requestIdleCallback(fn, { timeout: 2000 });
+    else setTimeout(fn, 200);
+  }
   var __bhqPageRewriter = null;
   /** Scroll pages fetched before the shopper asked for them, by URL.
    *
@@ -108,14 +122,26 @@
         // Already fetched while the shopper was reading: hand it straight
         // back rather than asking Shopify again.
         var pre = __bhqPagePrefetch[u];
+        var self = this;
+        var args = arguments;
         var r = pre
-          ? pre.then(function (html) {
-              return new Response(html, {
-                status: 200,
-                headers: { "Content-Type": "text/html" },
-              });
-            })
-          : of.apply(this, arguments);
+          ? pre.then(
+              function (html) {
+                return new Response(html, {
+                  status: 200,
+                  headers: { "Content-Type": "text/html" },
+                });
+              },
+              function () {
+                // A prefetch that failed MID-FLIGHT, which on a slow
+                // connection is the common way for it to fail. Without this
+                // the theme is handed the rejection and the shopper sees
+                // nothing until they scroll again.
+                delete __bhqPagePrefetch[u];
+                return of.apply(self, args);
+              },
+            )
+          : of.apply(self, args);
         // Armed only once the ranked order has loaded. A shopper who
         // scrolls before that lands gets the page unrewritten, which is
         // correct but worth being able to see.
@@ -5357,44 +5383,103 @@
      * One page ahead only. Two would mean fetching ~150KB the shopper may
      * never scroll to, which on a metered connection is their money.
      */
-    function prefetchNextPage() {
-      var link = document.querySelector('link[rel="next"], a[rel="next"]');
-      var nextUrl = link && link.getAttribute("href");
-      if (!nextUrl) {
-        // Themes differ; derive it from the current page instead.
-        var cur = parseInt((location.search.match(/[?&]page=(\d+)/) || [])[1] || "1", 10);
-        nextUrl = location.pathname + "?page=" + (cur + 1);
+    /**
+     * Warm the images the next page will show first.
+     *
+     * The HTML was the smaller half of the problem. A scroll page is ~10KB
+     * gzipped but carries 24 product images at ~58KB each - around 1.4MB, or
+     * seven seconds on the connection most of these shoppers have. Every one
+     * is loading="lazy", so none of them even starts until the card is on
+     * screen, and the shopper watches grey boxes fill in.
+     *
+     * Only the first two rows are warmed. Those are what they see when the
+     * page appears; the rest arrive while they scroll past the first. Warming
+     * all 24 would be 1.4MB the shopper may never look at, which on a metered
+     * connection is their money.
+     *
+     * The browser is doing the caching here: an Image() for a URL the page
+     * will later request means the second request is served from the HTTP
+     * cache. Images, unlike the section HTML, are cacheable.
+     */
+    function prefetchPageImages(html) {
+      try {
+        if (!html) return;
+        var srcs = [];
+        var re = /<img[^>]+src="([^"]+)"/gi;
+        var m;
+        while ((m = re.exec(html)) && srcs.length < IMG_PREFETCH_COUNT) {
+          var src = m[1];
+          if (src.indexOf("/cdn/shop/") === -1) continue;
+          srcs.push(src.indexOf("//") === 0 ? location.protocol + src : src);
+        }
+        if (!srcs.length) return;
+
+        var i = 0;
+        var next = function () {
+          if (i >= srcs.length) return;
+          var im = new Image();
+          // Lowest priority: these are for a page the shopper has not asked
+          // for yet and must not compete with the one they are reading.
+          if ("fetchPriority" in im) im.fetchPriority = "low";
+          im.onload = im.onerror = function () {
+            idle(next);
+          };
+          im.src = srcs[i++];
+        };
+        idle(next);
+      } catch (e) {
+        /* a warm cache is a bonus, never a requirement */
       }
+    }
+
+    function prefetchNextPage() {
+      // The theme carries the next URL on its own scroll trigger, and every
+      // appended page brings an updated one. rel="next" does not: it is the
+      // document's own head and always says page 2, so prefetching from it
+      // worked once and then handed back a stale page for every later
+      // scroll - the shopper got the full wait back from page 3 onward.
+      var trigger = document.querySelector('[id^="infinite-scroll-trigger"]');
+      var nextUrl =
+        (trigger && (trigger.getAttribute("data-next-page") || trigger.getAttribute("data-next-url"))) ||
+        (document.querySelector('link[rel="next"], a[rel="next"]') || {}).href ||
+        "";
+      if (!nextUrl) return;
+
       var grid = document.querySelector("#product-grid");
-      var sectionId =
-        (grid && grid.closest("[id^='shopify-section-']") || {}).id || "";
-      sectionId = sectionId.replace("shopify-section-", "");
+      var section = grid && grid.closest('[id^="shopify-section-"]');
+      var sectionId = section ? section.id.replace("shopify-section-", "") : "";
       if (!sectionId) return;
       var full =
         nextUrl + (nextUrl.indexOf("?") === -1 ? "?" : "&") + "section_id=" + sectionId;
+      if (__bhqPagePrefetch[full]) return;
 
       var fired = false;
       var maybe = function () {
         if (fired) return;
-        var scrolled = window.pageYOffset + window.innerHeight;
-        var total = document.documentElement.scrollHeight;
-        if (total <= 0 || scrolled / total < 0.6) return;
+        // Measured against the GRID, not the document. Once four pages are
+        // appended the document is long enough that 60% of it still leaves
+        // the shopper far from the end, and the prefetch fires too late to
+        // have finished.
+        var g = document.querySelector("#product-grid");
+        if (!g) return;
+        var rect = g.getBoundingClientRect();
+        var remaining = rect.bottom - window.innerHeight;
+        // Roughly two screens of grid left to read.
+        if (remaining > window.innerHeight * 2) return;
         fired = true;
         window.removeEventListener("scroll", maybe);
-        if (__bhqPagePrefetch[full]) return;
         __bhqPagePrefetch[full] = fetch(full, { credentials: "same-origin" })
           .then(function (res) {
             if (!res.ok) throw new Error("bad status");
             return res.text();
           })
-          .catch(function () {
-            // Forget it, so the theme falls through to its own fetch.
-            delete __bhqPagePrefetch[full];
-            return Promise.reject();
+          .then(function (html) {
+            prefetchPageImages(html);
+            return html;
           });
-        // A rejection here must not surface as unhandled; the hook only
-        // reads this when it exists.
-        __bhqPagePrefetch[full].catch(function () {});
+        __bhqPagePrefetch[full].catch(function () {
+          delete __bhqPagePrefetch[full];
+        });
       };
       window.addEventListener("scroll", maybe, { passive: true });
       maybe();
@@ -5441,22 +5526,16 @@
       // Only as many as a page can actually lead with.
       var want = cands.slice(0, Math.ceil(PAGE_SIZE / 3));
       var idx = 0;
-      // Declared before step, which calls it: a var function expression is
-      // not hoisted, so the other order throws on the first callback.
-      var schedule = function (fn) {
-        if (window.requestIdleCallback) window.requestIdleCallback(fn, { timeout: 2000 });
-        else setTimeout(fn, 200);
-      };
       var step = function () {
         if (idx >= want.length) return;
         var h2 = want[idx++].h;
         fetchCardFor(h2, null, function () {
           // One at a time: eight parallel requests would contend with the
           // images on the page the shopper is reading.
-          schedule(step);
+          idle(step);
         });
       };
-      schedule(step);
+      idle(step);
     }
 
     function armPageRewriter() {
@@ -5993,6 +6072,26 @@
       _shown[filler[j].h] = true;
       grid.appendChild(filler[j].el);
       n++;
+    }
+
+    // The first row loads immediately rather than lazily.
+    //
+    // Every card Shopify renders carries loading="lazy", so nothing on an
+    // appended page starts loading until it scrolls into view - and the
+    // top of a new page is in view the moment it is appended. The shopper
+    // watches the first row fill in when it could have started already.
+    //
+    // Only the first row: lazy loading is right for the other twenty.
+    try {
+      var firstRow = grid.querySelectorAll("li");
+      for (var e = 0; e < Math.min(firstRow.length, EAGER_ROW_COUNT); e++) {
+        var im = firstRow[e].querySelector("img");
+        if (!im) continue;
+        im.setAttribute("loading", "eager");
+        im.setAttribute("fetchpriority", "high");
+      }
+    } catch (e2) {
+      /* the page still works, just lazily */
     }
     return tpl.innerHTML;
   }
