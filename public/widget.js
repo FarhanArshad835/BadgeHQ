@@ -1367,10 +1367,30 @@
 
   // Fetch product data for a given img element (works on all page types)
   function fetchProductDataForImg(img, callback) {
-    // On product pages use the already-fetched global (avoids redundant fetches)
-    if (window.__BADGEHQ_PRODUCT_DATA__) { callback(window.__BADGEHQ_PRODUCT_DATA__); return; }
+    // The image's OWN product, before anything about the page.
+    //
+    // A product page is not only the product it is about: related products,
+    // recently viewed and cross-sell blocks render ordinary cards too. This
+    // used to answer from the page path, and from a single global cached
+    // under __BADGEHQ_PRODUCT_DATA__, so every one of those cards was
+    // handed the page product's data - and every badge decision made from
+    // it was about the wrong product. Measured here: 23 related cards all
+    // carrying the viewed product's three badges, including "749 On 1 Pair"
+    // on a shirt that is not in that collection at all.
+    //
+    // getHandleFromImg walks up to the card's own product link and stops at
+    // section boundaries, so it returns the card's handle on a card and the
+    // page's handle for the main gallery.
+    var own = getHandleFromImg(img);
+    var pageHandle = productHandleFromPage();
+    if (own && own !== pageHandle) {
+      fetchProductDataByHandle(own, callback);
+      return;
+    }
 
-    // On product pages, seed from current path
+    // The product this page is about: reuse the one fetch for every image
+    // in its gallery.
+    if (window.__BADGEHQ_PRODUCT_DATA__) { callback(window.__BADGEHQ_PRODUCT_DATA__); return; }
     var pathMatch = window.location.pathname.match(/\/products\/([^/?#]+)/);
     if (pathMatch) {
       fetchProductDataByHandle(pathMatch[1], function (data) {
@@ -1380,9 +1400,7 @@
       return;
     }
 
-    // On collection/home pages, find the handle from the card's link
-    var handle = getHandleFromImg(img);
-    if (handle) { fetchProductDataByHandle(handle, callback); return; }
+    if (own) { fetchProductDataByHandle(own, callback); return; }
 
     callback(null);
   }
