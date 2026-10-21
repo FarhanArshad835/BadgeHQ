@@ -420,6 +420,7 @@ function EditProductBadgeForm() {
                       onSelect={() => setPlacement("info")}
                       label="In Product Info Area"
                       preview="info"
+                      infoPosition={infoPosition}
                     />
                   </InlineGrid>
                 </BlockStack>
@@ -643,12 +644,32 @@ function PlacementCard({
   onSelect,
   label,
   preview,
+  infoPosition,
 }: {
   selected: boolean;
   onSelect: () => void;
   label: string;
   preview: "image" | "info";
+  infoPosition?: string;
 }) {
+  // Mirrors the storefront: the chip sits wherever the dropdown says.
+  const pos = infoPosition || "above-price";
+  const infoChip = (
+    <span
+      style={{
+        display: "inline-block",
+        marginTop: 6,
+        background: "#e02424",
+        color: "#fff",
+        fontSize: 10,
+        fontWeight: 700,
+        padding: "4px 8px",
+        borderRadius: 2,
+      }}
+    >
+      BADGE HERE
+    </span>
+  );
   return (
     <button
       type="button"
@@ -725,27 +746,15 @@ function PlacementCard({
           </span>
         )}
       </div>
+      {preview === "info" && pos === "above-title" && infoChip}
       <div style={{ marginTop: 12, fontSize: 12, color: "#6b7280" }}>Product Name Example</div>
-      {preview === "info" && (
-        <span
-          style={{
-            display: "inline-block",
-            marginTop: 6,
-            background: "#dc2626",
-            color: "#fff",
-            fontSize: 10,
-            fontWeight: 700,
-            padding: "4px 8px",
-            borderRadius: 2,
-          }}
-        >
-          BADGE HERE
-        </span>
-      )}
+      {preview === "info" && pos === "below-title" && infoChip}
+      {preview === "info" && pos === "above-price" && infoChip}
       <div style={{ marginTop: 6, fontSize: 12 }}>
         <span style={{ fontWeight: 600 }}>$40.00</span>{" "}
         <span style={{ color: "#9ca3af", textDecoration: "line-through" }}>$80.00</span>
       </div>
+      {preview === "info" && pos === "below-price" && infoChip}
     </button>
   );
 }
