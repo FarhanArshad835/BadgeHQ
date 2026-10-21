@@ -448,8 +448,58 @@
       console.warn("BadgeHQ: Failed to load config", e);
     });
 
+  /**
+   * Hide the struck-through compare-at price on product cards.
+   *
+   * Shopify renders two numbers on a discounted card: the compare-at price
+   * struck through, and the selling price beside it. A merchant may want only
+   * the selling price shown.
+   *
+   * Display only. The cart and checkout charge whatever Shopify charges, and
+   * nothing here changes a price - it only decides which of the real prices
+   * a card shows.
+   */
+  function applyPriceDisplay(gs) {
+    var cfg = gs && gs.priceDisplay;
+    if (!cfg || !cfg.enabled || !cfg.hideCompare) return;
+
+    var SEL = ".price, [class*='product-price'], [class*='card__price']";
+
+    function rewriteOne(block) {
+      if (block.__bhqPriced) return;
+      block.__bhqPriced = true;
+      try {
+        var struck = block.querySelector("s, .price-item--regular, [class*='compare']");
+        if (!struck) return;
+        struck.style.display = "none";
+        // Dawn marks the block on-sale to lay the two numbers out side by
+        // side; with one hidden that class leaves a gap where it was.
+        block.classList.remove("price--on-sale");
+      } catch (e) {
+        /* a card that does not match the expected shape is left alone */
+      }
+    }
+
+    function sweep() {
+      var blocks = document.querySelectorAll(SEL);
+      for (var i = 0; i < blocks.length; i++) rewriteOne(blocks[i]);
+    }
+
+    sweep();
+    // Cards arrive after first paint on this theme - infinite scroll, quick
+    // view, section swaps - so the sweep repeats as the DOM changes.
+    if (window.MutationObserver) {
+      var pending = null;
+      new MutationObserver(function () {
+        clearTimeout(pending);
+        pending = setTimeout(sweep, 150);
+      }).observe(document.body, { childList: true, subtree: true });
+    }
+  }
+
   function initBadgeHQ(data) {
     var gs = data.globalSettings || {};
+    applyPriceDisplay(gs);
     var w = data.widgets || {};
     var currencySymbol = data.currencySymbol || "$";
     var page = detectPage();

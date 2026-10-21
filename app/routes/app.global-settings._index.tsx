@@ -70,17 +70,22 @@ export default function GlobalSettings() {
     enabled: isEnabled,
     fontFamily: settings.fontFamily || "inherit",
     colorScheme: settings.colorScheme || "light",
+    hideCompare: !!(settings as any).priceDisplay?.hideCompare,
   };
 
   const [enabled, setEnabled] = useState(initial.enabled);
   const [fontFamily, setFontFamily] = useState(initial.fontFamily);
   const [colorScheme, setColorScheme] = useState(initial.colorScheme);
+  const [hideCompare, setHideCompare] = useState<boolean>(
+    !!(initial as any).hideCompare,
+  );
   const [showSuccess, setShowSuccess] = useState(false);
 
   const isDirty =
     enabled !== initial.enabled ||
     fontFamily !== initial.fontFamily ||
-    colorScheme !== initial.colorScheme;
+    colorScheme !== initial.colorScheme ||
+    hideCompare !== (initial as any).hideCompare;
 
   useEffect(() => {
     if (actionData?.success) {
@@ -94,12 +99,19 @@ export default function GlobalSettings() {
     setEnabled(initial.enabled);
     setFontFamily(initial.fontFamily);
     setColorScheme(initial.colorScheme);
+    setHideCompare(!!(initial as any).hideCompare);
   };
 
   const handleSave = () => {
     const data = {
       isEnabled: enabled,
-      settings: { fontFamily, colorScheme },
+      settings: {
+        fontFamily,
+        colorScheme,
+        // Nested so the widget can tell "not configured" from "configured
+        // off" without the two looking the same.
+        priceDisplay: { enabled: hideCompare, hideCompare },
+      },
     };
     submit({ data: JSON.stringify(data) }, { method: "POST" });
   };
@@ -124,6 +136,18 @@ export default function GlobalSettings() {
                   helpText="When disabled, no widgets will render on your storefront"
                   checked={enabled}
                   onChange={setEnabled}
+                />
+              </BlockStack>
+            </Card>
+
+            <Card>
+              <BlockStack gap="400">
+                <Text as="h2" variant="headingMd">Product Card Prices</Text>
+                <Checkbox
+                  label="Hide the struck-through MRP on product cards"
+                  helpText="Shows only your selling price. The MRP still appears on the product page and nothing about what a customer is charged changes."
+                  checked={hideCompare}
+                  onChange={setHideCompare}
                 />
               </BlockStack>
             </Card>
