@@ -78,6 +78,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         placement: data.placement,
         infoPosition: data.infoPosition || "above-price",
         hideComparePrice: !!data.hideComparePrice,
+        priceRule: data.priceRule || '{"mode":"hide"}',
         targeting: JSON.stringify(data.targeting),
         isActive: data.isActive,
         condition: JSON.stringify(data.condition),
@@ -128,6 +129,10 @@ function EditProductBadgeForm() {
   const [placement, setPlacement] = useState<"image" | "info">((badge as any).placement || "image");
   const [infoPosition, setInfoPosition] = useState<string>((badge as any).infoPosition || "above-price");
   const [hideComparePrice, setHideComparePrice] = useState<boolean>(!!(badge as any).hideComparePrice);
+  const _pr: any = JSON.parse((badge as any).priceRule || '{"mode":"hide","markupPct":0,"roundTo":0}');
+  const [priceMode, setPriceMode] = useState<string>(_pr.mode || "hide");
+  const [markupPct, setMarkupPct] = useState<number>(Number(_pr.markupPct) || 0);
+  const [roundTo, setRoundTo] = useState<number>(Number(_pr.roundTo) || 0);
   const [isActive, setIsActive] = useState(badge.isActive);
   const [targetType, setTargetType] = useState(badge.targeting.type);
   const [targetValue, setTargetValue] = useState(badge.targeting.value || "");
@@ -228,6 +233,7 @@ function EditProductBadgeForm() {
   const handleSave = () => {
     const data = {
       text, badgeType, shape, badgeColor, textColor, position, placement, infoPosition, hideComparePrice,
+      priceRule: JSON.stringify({ mode: priceMode, markupPct, roundTo }),
       targeting: {
         type: targetType,
         value: targetValue,
@@ -302,6 +308,7 @@ function EditProductBadgeForm() {
                     { label: "Text Badge", value: "text" },
                     { label: "Image Badge", value: "image" },
                     { label: "Dynamic Badge (auto-generated)", value: "dynamic" },
+                    { label: "Price Rule (no visible badge)", value: "price" },
                   ]}
                   value={badgeType}
                   onChange={setBadgeType}
@@ -442,6 +449,48 @@ function EditProductBadgeForm() {
                   checked={hideComparePrice}
                   onChange={setHideComparePrice}
                 />
+                {badgeType === "price" && (
+                  <BlockStack gap="300">
+                    <Select
+                      label="Price rule"
+                      options={[
+                        { label: "Hide the struck-through MRP", value: "hide" },
+                        { label: "Show a struck-through MRP above the price", value: "markup" },
+                      ]}
+                      value={priceMode}
+                      onChange={setPriceMode}
+                      helpText="Applies to every card this badge targets. Nothing here changes what a customer is charged."
+                    />
+                    {priceMode === "markup" && (
+                      <InlineGrid columns={2} gap="400">
+                        <TextField
+                          label="Percent above selling price"
+                          type="number"
+                          suffix="%"
+                          value={String(markupPct)}
+                          onChange={(v) => setMarkupPct(Number(v) || 0)}
+                          autoComplete="off"
+                          helpText="A product selling at 699 with 40% shows 979 struck through."
+                        />
+                        <TextField
+                          label="Round to nearest"
+                          type="number"
+                          value={String(roundTo)}
+                          onChange={(v) => setRoundTo(Number(v) || 0)}
+                          autoComplete="off"
+                          helpText="0 for no rounding. 10 turns 979 into 980."
+                        />
+                      </InlineGrid>
+                    )}
+                    {priceMode === "markup" && (
+                      <Banner tone="warning">
+                        Only applied where Shopify has no compare-at price of its own. A real
+                        MRP is never overwritten, and the figure shown must be a price the
+                        product genuinely sold at.
+                      </Banner>
+                    )}
+                  </BlockStack>
+                )}
                 {placement === "image" && (
                   <Select label="Position on Image" options={[
                     { label: "Top Left", value: "top-left" }, { label: "Top Right", value: "top-right" },

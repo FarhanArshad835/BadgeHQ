@@ -61,6 +61,14 @@ model ProductBadge {
   // schedule, so expressing this as a badge property gives the price rule
   // all of that for free rather than inventing a second rule system.
   hideComparePrice Boolean @default(false)
+  // How the card price is rewritten when badgeType is "price".
+  //   mode:        hide | markup
+  //   markupPct:   for markup, the percentage above the selling price to
+  //                show struck through - so a product with no compare-at
+  //                price still shows a saving.
+  //   roundTo:     round the shown figure to the nearest N, so it reads as
+  //                a price rather than an arithmetic result.
+  priceRule String @default("{\"mode\":\"hide\",\"markupPct\":0,\"roundTo\":0}")
   targeting  String  @default("{\"type\":\"all\"}")
   isActive   Boolean @default(false)
 

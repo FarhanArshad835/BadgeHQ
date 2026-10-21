@@ -117,6 +117,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       placement: (b as any).placement || "image",
       infoPosition: (b as any).infoPosition || "above-price",
       hideComparePrice: !!(b as any).hideComparePrice,
+      priceRule: (() => {
+        try {
+          return JSON.parse((b as any).priceRule || "{}");
+        } catch {
+          return { mode: "hide" };
+        }
+      })(),
       targeting: JSON.parse(b.targeting),
       condition: JSON.parse(b.condition),
       pages: JSON.parse(b.pages),

@@ -1657,25 +1657,46 @@
       ].join(",");
 
       /**
-       * Hide the struck-through compare-at price on the card this image is in.
+       * Rewrite one card's price according to a badge's rule.
        *
-       * Scoped to one card rather than the page: the badge that asked for it
-       * has already been matched against this product, and a neighbouring
-       * card the badge does not apply to must keep its MRP.
+       * Scoped to the card the badge matched, never the page: a neighbouring
+       * product the badge does not apply to keeps its own price.
        *
        * Display only - the cart and checkout charge whatever Shopify charges.
+       * "markup" exists for the products that have no compare-at price of
+       * their own, and never overwrites a real one: a struck-through figure
+       * is a claim about what the product used to cost, so inventing one over
+       * the top of a genuine price would be a false claim rather than a
+       * display choice.
        */
-      function hideCardComparePrice(img) {
+      function applyCardPriceRule(img, rule, productData) {
         try {
           var card = img.closest("li, .card-wrapper, [class*='product-card'], [class*='card']");
           if (!card) return;
           var blocks = card.querySelectorAll(".price, [class*='product-price'], [class*='card__price']");
           for (var i = 0; i < blocks.length; i++) {
             var block = blocks[i];
-            if (block.__bhqPriceHidden) continue;
+            if (block.__bhqPriceRule) continue;
             var struck = block.querySelector("s, .price-item--regular, [class*='compare']");
+
+            if (rule.mode === "markup") {
+              // Only where Shopify has none of its own.
+              var existing = productData && productData.compare_at_price;
+              if (existing > 0) continue;
+              var sell = (productData && productData.price) || 0;
+              var pct = Number(rule.markupPct) || 0;
+              if (!sell || pct <= 0) continue;
+              var shown = sell * (1 + pct / 100);
+              var round = Number(rule.roundTo) || 0;
+              if (round > 0) shown = Math.round(shown / round) * round;
+              if (shown <= sell) continue;
+              block.__bhqPriceRule = true;
+              injectStruckPrice(block, shown);
+              continue;
+            }
+
             if (!struck) continue;
-            block.__bhqPriceHidden = true;
+            block.__bhqPriceRule = true;
             struck.style.display = "none";
             // Dawn lays the two numbers out side by side through this class;
             // with one hidden it leaves a gap where the other was.
@@ -1684,6 +1705,30 @@
         } catch (e) {
           /* a card that does not match the expected shape keeps its price */
         }
+      }
+
+      /** Put a struck-through figure in front of the card's price.
+       *
+       *  Formatted by copying the card's own price text and swapping the
+       *  digits, so the currency symbol, separators and decimal convention
+       *  are whatever the theme already uses rather than something guessed
+       *  here. A shop showing Rs 1,299.00 gets Rs 1,819.00, not $1819. */
+      function injectStruckPrice(block, amount) {
+        if (block.querySelector("[data-badgehq-struck]")) return;
+        var sample = block.querySelector(".price-item--sale, .price-item--last, .price-item");
+        var text = sample ? (sample.textContent || "").trim() : "";
+        if (!text) return;
+        var decimals = /[.,]\d{2}(\D|$)/.test(text) ? 2 : 0;
+        var shown = amount.toFixed(decimals);
+        // Keep everything that is not a digit group - symbol, spacing - and
+        // replace the number itself.
+        var out = text.replace(/[\d][\d.,]*/, shown);
+        var el = document.createElement("s");
+        el.setAttribute("data-badgehq-struck", "1");
+        el.className = "price-item price-item--regular";
+        el.style.cssText = "opacity:.6;margin-right:6px;";
+        el.textContent = out;
+        block.insertBefore(el, block.firstChild);
       }
 
       function attachBadges(img) {
@@ -1895,7 +1940,14 @@
           // This badge applies to this card, so its price rule does too.
           // Hanging the rule off a badge is what gives it targeting,
           // conditions, pages and a schedule without a second rule system.
-          if (badge.hideComparePrice) hideCardComparePrice(img);
+          if (badge.badgeType === "price") {
+            applyCardPriceRule(img, badge.priceRule || {}, productData);
+            // A price rule draws nothing: the card price IS the output.
+            return;
+          }
+          if (badge.hideComparePrice) {
+            applyCardPriceRule(img, { mode: "hide" }, productData);
+          }
 
           // Info-area placement: render in the product info area, NOT on the image.
           // Respects merchant choice — does not fall through to image placement on failure.
