@@ -1792,7 +1792,17 @@
           return text.replace(/[\d][\d.,]*/, n.toFixed(decimals));
         };
 
-        if (existingStruck) existingStruck.style.display = "none";
+        // Hide EVERY struck price the theme rendered, not just the first.
+        //
+        // Dawn shows the compare-at MRP struck through, so leaving it in
+        // place put three numbers on the card - 849 struck, 1,995 struck,
+        // 749 - which reads as a mistake. The listed price is the thing
+        // being discounted, so that is the only struck figure that belongs.
+        var old = block.querySelectorAll("s, .price-item--regular, [class*='compare']");
+        for (var oi = 0; oi < old.length; oi++) {
+          if (old[oi].hasAttribute("data-badgehq-struck")) continue;
+          old[oi].style.display = "none";
+        }
 
         var was = document.createElement("s");
         was.setAttribute("data-badgehq-struck", "1");
