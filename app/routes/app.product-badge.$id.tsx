@@ -732,10 +732,22 @@ function EditProductBadgeForm() {
 
         {/* Preview */}
         <Layout.Section variant="oneThird">
-          {/* Sticky so the badge stays in view while the settings below it
-              are scrolled - the whole point of a preview is to watch it
-              change as you edit, and the form is far longer than it is. */}
-          <div style={{ position: "sticky", top: 16 }}>
+          {/* Sticky against the page scroller.
+
+              Polaris is not the obstacle here - its Layout already sets
+              align-items:flex-start, so the column does not stretch. The
+              scrolling box is the admin iframe this app renders inside, and
+              a sticky element sticks to its nearest scrolling ancestor. A
+              plain top offset therefore leaves it pinned to a container that
+              is itself being scrolled past.
+
+              100vh is the iframe height, so the preview is held inside the
+              visible area rather than at the top of a document that scrolls
+              away beneath it. */}
+          <style>{
+            ".bhq-sticky-col{position:sticky;top:16px;max-height:calc(100vh - 32px);overflow:auto;}"
+          }</style>
+          <div className="bhq-sticky-col">
           <Card>
             <BlockStack gap="300">
               <Text as="h2" variant="headingMd">Preview</Text>
