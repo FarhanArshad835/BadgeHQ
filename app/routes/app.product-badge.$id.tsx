@@ -131,8 +131,8 @@ function EditProductBadgeForm() {
   const [hideComparePrice, setHideComparePrice] = useState<boolean>(!!(badge as any).hideComparePrice);
   const _pr: any = JSON.parse((badge as any).priceRule || '{"mode":"hide","markupPct":0,"roundTo":0}');
   const [priceMode, setPriceMode] = useState<string>(_pr.mode || "hide");
-  const [markupPct, setMarkupPct] = useState<number>(Number(_pr.markupPct) || 0);
-  const [roundTo, setRoundTo] = useState<number>(Number(_pr.roundTo) || 0);
+  const [discountType, setDiscountType] = useState<string>(_pr.discountType || "amount");
+  const [discountValue, setDiscountValue] = useState<number>(Number(_pr.discountValue) || 0);
   const [isActive, setIsActive] = useState(badge.isActive);
   const [targetType, setTargetType] = useState(badge.targeting.type);
   const [targetValue, setTargetValue] = useState(badge.targeting.value || "");
@@ -233,7 +233,7 @@ function EditProductBadgeForm() {
   const handleSave = () => {
     const data = {
       text, badgeType, shape, badgeColor, textColor, position, placement, infoPosition, hideComparePrice,
-      priceRule: JSON.stringify({ mode: priceMode, markupPct, roundTo }),
+      priceRule: JSON.stringify({ mode: priceMode, discountType, discountValue }),
       targeting: {
         type: targetType,
         value: targetValue,
@@ -455,39 +455,40 @@ function EditProductBadgeForm() {
                       label="Price rule"
                       options={[
                         { label: "Hide the struck-through MRP", value: "hide" },
-                        { label: "Show a struck-through MRP above the price", value: "markup" },
+                        { label: "Show the discounted price customers will pay", value: "discount" },
                       ]}
                       value={priceMode}
                       onChange={setPriceMode}
-                      helpText="Applies to every card this badge targets. Nothing here changes what a customer is charged."
+                      helpText="Applies to every card this badge targets."
                     />
-                    {priceMode === "markup" && (
-                      <InlineGrid columns={2} gap="400">
-                        <TextField
-                          label="Percent above selling price"
-                          type="number"
-                          suffix="%"
-                          value={String(markupPct)}
-                          onChange={(v) => setMarkupPct(Number(v) || 0)}
-                          autoComplete="off"
-                          helpText="A product selling at 699 with 40% shows 979 struck through."
-                        />
-                        <TextField
-                          label="Round to nearest"
-                          type="number"
-                          value={String(roundTo)}
-                          onChange={(v) => setRoundTo(Number(v) || 0)}
-                          autoComplete="off"
-                          helpText="0 for no rounding. 10 turns 979 into 980."
-                        />
-                      </InlineGrid>
-                    )}
-                    {priceMode === "markup" && (
-                      <Banner tone="warning">
-                        Only applied where Shopify has no compare-at price of its own. A real
-                        MRP is never overwritten, and the figure shown must be a price the
-                        product genuinely sold at.
-                      </Banner>
+                    {priceMode === "discount" && (
+                      <>
+                        <InlineGrid columns={2} gap="400">
+                          <Select
+                            label="Discount type"
+                            options={[
+                              { label: "Fixed amount off", value: "amount" },
+                              { label: "Percent off", value: "percent" },
+                            ]}
+                            value={discountType}
+                            onChange={setDiscountType}
+                          />
+                          <TextField
+                            label={discountType === "percent" ? "Percent off" : "Amount off"}
+                            type="number"
+                            suffix={discountType === "percent" ? "%" : undefined}
+                            value={String(discountValue)}
+                            onChange={(v) => setDiscountValue(Number(v) || 0)}
+                            autoComplete="off"
+                            helpText="A product listed at 849 with 100 off shows 849 struck and 749 as the price."
+                          />
+                        </InlineGrid>
+                        <Banner tone="warning">
+                          This only changes what the card shows. Create the matching
+                          discount in Shopify so checkout actually charges it — a card
+                          promising a price checkout does not honour is a false claim.
+                        </Banner>
+                      </>
                     )}
                   </BlockStack>
                 )}

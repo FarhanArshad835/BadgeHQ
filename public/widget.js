@@ -1679,19 +1679,30 @@
             if (block.__bhqPriceRule) continue;
             var struck = block.querySelector("s, .price-item--regular, [class*='compare']");
 
-            if (rule.mode === "markup") {
-              // Only where Shopify has none of its own.
-              var existing = productData && productData.compare_at_price;
-              if (existing > 0) continue;
-              var sell = (productData && productData.price) || 0;
-              var pct = Number(rule.markupPct) || 0;
-              if (!sell || pct <= 0) continue;
-              var shown = sell * (1 + pct / 100);
-              var round = Number(rule.roundTo) || 0;
-              if (round > 0) shown = Math.round(shown / round) * round;
-              if (shown <= sell) continue;
+            if (rule.mode === "discount") {
+              // Show what the shopper will actually pay.
+              //
+              // A cart-level discount is invisible on a card: the product
+              // sells at 849, an automatic discount takes 100 off, and the
+              // shopper only discovers 749 at checkout. This strikes the
+              // listed price and shows the discounted one beside it, which
+              // is what they will be charged.
+              //
+              // The discount has to be real. Nothing here creates one - the
+              // amount is the merchant telling us what their own Shopify
+              // discount already does, and a card that promises a price
+              // checkout does not honour is a false claim, not a display
+              // choice.
+              var listed = (productData && productData.price) || 0;
+              if (!listed) continue;
+              var off =
+                rule.discountType === "percent"
+                  ? listed * ((Number(rule.discountValue) || 0) / 100)
+                  : Number(rule.discountValue) || 0;
+              if (off <= 0 || off >= listed) continue;
+              var pay = listed - off;
               block.__bhqPriceRule = true;
-              injectStruckPrice(block, shown);
+              showDiscountedPrice(block, listed, pay, struck);
               continue;
             }
 
@@ -1707,28 +1718,41 @@
         }
       }
 
-      /** Put a struck-through figure in front of the card's price.
+      /**
+       * Show the listed price struck through and the payable price beside it.
        *
-       *  Formatted by copying the card's own price text and swapping the
-       *  digits, so the currency symbol, separators and decimal convention
-       *  are whatever the theme already uses rather than something guessed
-       *  here. A shop showing Rs 1,299.00 gets Rs 1,819.00, not $1819. */
-      function injectStruckPrice(block, amount) {
-        if (block.querySelector("[data-badgehq-struck]")) return;
+       * Formatted by copying the card's own price text and swapping the
+       * digits, so the currency symbol, separators and decimal convention are
+       * whatever the theme already uses rather than something guessed here.
+       * A shop showing Rs 1,299.00 gets Rs 749.00, not $749.
+       *
+       * Any MRP Shopify was already striking is hidden: two struck-through
+       * numbers on one card reads as a mistake.
+       */
+      function showDiscountedPrice(block, listed, pay, existingStruck) {
+        if (block.querySelector("[data-badgehq-pay]")) return;
         var sample = block.querySelector(".price-item--sale, .price-item--last, .price-item");
-        var text = sample ? (sample.textContent || "").trim() : "";
+        if (!sample) return;
+        var text = (sample.textContent || "").trim();
         if (!text) return;
         var decimals = /[.,]\d{2}(\D|$)/.test(text) ? 2 : 0;
-        var shown = amount.toFixed(decimals);
-        // Keep everything that is not a digit group - symbol, spacing - and
-        // replace the number itself.
-        var out = text.replace(/[\d][\d.,]*/, shown);
-        var el = document.createElement("s");
-        el.setAttribute("data-badgehq-struck", "1");
-        el.className = "price-item price-item--regular";
-        el.style.cssText = "opacity:.6;margin-right:6px;";
-        el.textContent = out;
-        block.insertBefore(el, block.firstChild);
+        var money = function (n) {
+          return text.replace(/[\d][\d.,]*/, n.toFixed(decimals));
+        };
+
+        if (existingStruck) existingStruck.style.display = "none";
+
+        var was = document.createElement("s");
+        was.setAttribute("data-badgehq-struck", "1");
+        was.className = "price-item price-item--regular";
+        was.style.cssText = "opacity:.6;margin-right:6px;";
+        was.textContent = money(listed);
+
+        // The theme is showing the listed price; this becomes the discounted
+        // one so the two sit together in the theme's own layout.
+        sample.setAttribute("data-badgehq-pay", "1");
+        sample.textContent = money(pay);
+        block.insertBefore(was, block.firstChild);
       }
 
       function attachBadges(img) {
