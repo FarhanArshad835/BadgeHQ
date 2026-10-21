@@ -233,6 +233,7 @@ export async function fetchCollectionProducts(
               title
               tags
               productType
+              category { name }
               options { name values }
               publishedAt
               totalInventory
@@ -253,7 +254,15 @@ export async function fetchCollectionProducts(
         handle: String(n.handle || ""),
         title: String(n.title || ""),
         tags: Array.isArray(n.tags) ? n.tags.map(String) : [],
-        productType: String(n.productType || ""),
+        // Shopify's taxonomy category, with productType only as a fallback.
+        //
+        // productType is a free-text field the merchant fills in and 39% of
+        // this catalogue leaves blank - including 78 of the 94 products that
+        // ended up with no neighbours at all. category is assigned from
+        // Shopify's own taxonomy and is set on every product, so the signal
+        // that two products are the same kind of thing was there the whole
+        // time, in a field nothing read.
+        productType: String(n.category?.name || n.productType || ""),
         colors:
           ((n.options || []).find((o: any) => /colou?r/i.test(o?.name || "")) || { values: [] })
             .values.map(String),
