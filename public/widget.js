@@ -1096,35 +1096,37 @@
   // and fetch each TARGETED collection's product list.
   var _collectionMembers = {};
   var _collectionLoading = {};
+  /**
+   * Is the product being viewed in this collection, according to Liquid?
+   *
+   * Returns true, false, or null when Liquid has not told us - which is every
+   * page that is not a product page, and every card other than the one the
+   * page is about.
+   *
+   * Deliberately narrow. An earlier version wrote this single answer into
+   * _collectionMembers and marked it loaded, which made every OTHER card on a
+   * product page - related products, recently viewed - resolve to "not a
+   * member" and silently lose its badge. The answer Liquid gives is about one
+   * product, so it may only ever be used to answer about that product.
+   */
+  function liquidMembership(collectionHandle, handle) {
+    try {
+      var own = window.__bhqProductCollections;
+      if (!own || own.length === undefined) return null;
+      var me = productHandleFromPage();
+      if (!me || !handle || handle !== me) return null;
+      for (var i = 0; i < own.length; i++) {
+        if (own[i] === collectionHandle) return true;
+      }
+      return false;
+    } catch (e) {
+      return null;
+    }
+  }
+
   function prefetchCollectionMembers(collectionHandle, onComplete) {
     if (!collectionHandle) { if (onComplete) onComplete(); return; }
 
-    // On a product page Liquid has already told us which collections THIS
-    // product is in, so there is nothing to look up. The app embed emits
-    // window.__bhqProductCollections; without it, answering "is this one
-    // product a member?" meant downloading the whole collection - three
-    // pages of products.json, 726KB compressed and 11.5MB parsed, for a
-    // single yes or no.
-    //
-    // A one-product membership map is enough: every lookup on a product
-    // page is about the product being viewed.
-    try {
-      var own = window.__bhqProductCollections;
-      if (own && own.length !== undefined && detectPage() === "product") {
-        var meHandle = productHandleFromPage();
-        if (meHandle) {
-          var members = {};
-          for (var oi = 0; oi < own.length; oi++) {
-            if (own[oi] === collectionHandle) members[meHandle] = true;
-          }
-          _collectionMembers[collectionHandle] = { products: members, loaded: true };
-          if (onComplete) onComplete();
-          return;
-        }
-      }
-    } catch (e) {
-      /* fall through to the fetch */
-    }
     if (_collectionMembers[collectionHandle] && _collectionMembers[collectionHandle].loaded) {
       if (onComplete) onComplete();
       return;
@@ -1393,8 +1395,12 @@
 
     // Exclusion check first: if the product is in the excluded collection, hide.
     if (t.excludeCollection && t.excludeCollection.value) {
-      var exMembers = _collectionMembers[t.excludeCollection.value];
       var handleForExclude = (productData && productData.handle) || getHandleFromImg(img);
+      // Liquid answers for the product being viewed without waiting, which
+      // also removes the flash described below for that one card.
+      var exLiq = liquidMembership(t.excludeCollection.value, handleForExclude);
+      if (exLiq === true) return false;
+      var exMembers = _collectionMembers[t.excludeCollection.value];
       if (exMembers && exMembers.loaded) {
         if (handleForExclude && exMembers.products[handleForExclude]) return false;
       }
@@ -1435,6 +1441,13 @@
     // "show by default" which made collection-scoped badges leak onto every
     // product on the page.
     if (t.type === "collection") {
+      // Liquid first, for the product this page is about. It is exact and
+      // needs no download; it just cannot answer for any other card.
+      var liq = liquidMembership(
+        t.value,
+        (productData && productData.handle) || getHandleFromImg(img),
+      );
+      if (liq !== null) return liq;
       var members = _collectionMembers[t.value];
       if (members && members.loaded) {
         var handle = (productData && productData.handle) || getHandleFromImg(img);
