@@ -117,6 +117,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       placement: (b as any).placement || "image",
       infoPosition: (b as any).infoPosition || "above-price",
       hideComparePrice: !!(b as any).hideComparePrice,
+      padTop: (b as any).padTop ?? 4,
+      padRight: (b as any).padRight ?? 8,
+      padBottom: (b as any).padBottom ?? 4,
+      padLeft: (b as any).padLeft ?? 8,
       priceRule: (() => {
         try {
           return JSON.parse((b as any).priceRule || "{}");

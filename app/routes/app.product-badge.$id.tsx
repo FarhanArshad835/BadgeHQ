@@ -78,6 +78,10 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         placement: data.placement,
         infoPosition: data.infoPosition || "above-price",
         hideComparePrice: !!data.hideComparePrice,
+        padTop: Number(data.padTop ?? 4),
+        padRight: Number(data.padRight ?? 8),
+        padBottom: Number(data.padBottom ?? 4),
+        padLeft: Number(data.padLeft ?? 8),
         priceRule: data.priceRule || '{"mode":"hide"}',
         targeting: JSON.stringify(data.targeting),
         isActive: data.isActive,
@@ -129,6 +133,10 @@ function EditProductBadgeForm() {
   const [placement, setPlacement] = useState<"image" | "info">((badge as any).placement || "image");
   const [infoPosition, setInfoPosition] = useState<string>((badge as any).infoPosition || "above-price");
   const [hideComparePrice, setHideComparePrice] = useState<boolean>(!!(badge as any).hideComparePrice);
+  const [padTop, setPadTop] = useState<number>((badge as any).padTop ?? 4);
+  const [padRight, setPadRight] = useState<number>((badge as any).padRight ?? 8);
+  const [padBottom, setPadBottom] = useState<number>((badge as any).padBottom ?? 4);
+  const [padLeft, setPadLeft] = useState<number>((badge as any).padLeft ?? 8);
   const _pr: any = JSON.parse((badge as any).priceRule || '{"mode":"hide","markupPct":0,"roundTo":0}');
   const [priceMode, setPriceMode] = useState<string>(_pr.mode || "hide");
   const [discountType, setDiscountType] = useState<string>(_pr.discountType || "amount");
@@ -198,6 +206,10 @@ function EditProductBadgeForm() {
     placement !== ((badge as any).placement || "image") ||
     infoPosition !== ((badge as any).infoPosition || "above-price") ||
     hideComparePrice !== !!(badge as any).hideComparePrice ||
+    padTop !== ((badge as any).padTop ?? 4) ||
+    padRight !== ((badge as any).padRight ?? 8) ||
+    padBottom !== ((badge as any).padBottom ?? 4) ||
+    padLeft !== ((badge as any).padLeft ?? 8) ||
     isActive !== badge.isActive ||
     targetType !== badge.targeting.type ||
     targetValue !== (badge.targeting.value || "") ||
@@ -233,6 +245,7 @@ function EditProductBadgeForm() {
   const handleSave = () => {
     const data = {
       text, badgeType, shape, badgeColor, textColor, position, placement, infoPosition, hideComparePrice,
+      padTop, padRight, padBottom, padLeft,
       priceRule: JSON.stringify({ mode: priceMode, discountType, discountValue }),
       targeting: {
         type: targetType,
@@ -270,6 +283,9 @@ function EditProductBadgeForm() {
     transform: rotation ? `rotate(${rotation}deg)` : undefined,
     border: borderWidth ? `${borderWidth}px solid ${borderColor || "#000"}` : undefined,
     ...shapeStyles[shape],
+    // After the shape, so the configured padding wins - matching how the
+    // storefront applies it.
+    padding: `${padTop}px ${padRight}px ${padBottom}px ${padLeft}px`,
   };
 
   // One definition, rendered at whichever of the four slots is selected.
@@ -508,6 +524,19 @@ function EditProductBadgeForm() {
                     { label: "Bottom Left", value: "bottom-left" }, { label: "Bottom Right", value: "bottom-right" },
                   ]} value={position} onChange={setPosition} />
                 )}
+                <BlockStack gap="200">
+                  <Text as="h3" variant="headingSm">Badge Padding (px)</Text>
+                  <InlineGrid columns={4} gap="300">
+                    <TextField label="Top" type="number" value={String(padTop)}
+                      onChange={(v) => setPadTop(Number(v) || 0)} autoComplete="off" />
+                    <TextField label="Right" type="number" value={String(padRight)}
+                      onChange={(v) => setPadRight(Number(v) || 0)} autoComplete="off" />
+                    <TextField label="Bottom" type="number" value={String(padBottom)}
+                      onChange={(v) => setPadBottom(Number(v) || 0)} autoComplete="off" />
+                    <TextField label="Left" type="number" value={String(padLeft)}
+                      onChange={(v) => setPadLeft(Number(v) || 0)} autoComplete="off" />
+                  </InlineGrid>
+                </BlockStack>
                 <TextField label="Gradient Background" value={gradient} onChange={setGradient} autoComplete="off"
                   placeholder="linear-gradient(135deg, #ff6b6b, #ee5a24)" helpText="CSS gradient. Overrides badge color when set." />
                 <InlineGrid columns={2} gap="400">

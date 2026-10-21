@@ -85,6 +85,12 @@ model ProductBadge {
   gradient       String @default("")
   borderColor    String @default("")
   borderWidth    Int    @default(0)
+  // Badge padding, in px. Defaults match the 4px 8px that was hardcoded,
+  // so existing badges keep the size they have.
+  padTop    Int @default(4)
+  padRight  Int @default(8)
+  padBottom Int @default(4)
+  padLeft   Int @default(8)
   customCSS      String @default("")
 
   createdAt DateTime @default(now())
