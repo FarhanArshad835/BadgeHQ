@@ -51,6 +51,11 @@ model ProductBadge {
   textColor  String  @default("#ffffff")
   position   String  @default("top-left")
   placement  String  @default("image")
+  // Where in the product info area the badge sits, when placement is
+  // "info": above-title | below-title | above-price | below-price.
+  // Defaults to above-price, which is where info badges rendered before
+  // this was configurable.
+  infoPosition String @default("above-price")
   targeting  String  @default("{\"type\":\"all\"}")
   isActive   Boolean @default(false)
 

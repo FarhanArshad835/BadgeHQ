@@ -1652,7 +1652,7 @@
       // Strategy: don't trust class-name heuristics — they trip on BEM children like
       // `card__media`. Instead, walk up and ask each ancestor "do you contain a
       // price element?". The smallest ancestor that says yes IS the card root.
-      function findInfoInsertionPoint(img) {
+      function findInfoInsertionPoint(img, pos) {
         // Outer-wrapper-first ordering: insert badge BEFORE the entire price
         // block, not inside it. Inserting before .price__regular (a child of
         // .price__container) would land the badge between flex siblings and
@@ -1700,20 +1700,32 @@
           return null;
         }
 
-        // Pass 1: walk up looking for an ancestor that contains a price.
+        // The merchant picks which anchor and which side; above-price is the
+        // default because that is where info badges sat when the position
+        // was hardcoded.
+        var wantTitle = pos === "above-title" || pos === "below-title";
+        var mode = pos === "below-title" || pos === "below-price" ? "after" : "before";
+        var first = wantTitle ? TITLE_SELECTORS : PRICE_SELECTORS;
+        var second = wantTitle ? PRICE_SELECTORS : TITLE_SELECTORS;
+
+        // Pass 1: walk up looking for the anchor the merchant asked for.
         var node = img.parentElement;
         var lastSafe = null;
         for (var i = 0; i < 12 && node && !STOP_TAGS[node.tagName]; i++) {
-          var p = findIn(node, PRICE_SELECTORS);
-          if (p) return { target: p, mode: "before" };
+          var p = findIn(node, first);
+          if (p) return { target: p, mode: mode };
           lastSafe = node;
           node = node.parentElement;
         }
 
-        // Pass 2: same walk, looking for a title — insert badge AFTER it.
+        // Pass 2: the other anchor, when the preferred one is not in this
+        // card. A theme that renders no price still has a title, and
+        // landing next to that beats not rendering at all. Always after it,
+        // so the badge cannot end up above the product name on a card that
+        // was never asked for that.
         node = img.parentElement;
         for (var j = 0; j < 12 && node && !STOP_TAGS[node.tagName]; j++) {
-          var t = findIn(node, TITLE_SELECTORS);
+          var t = findIn(node, second);
           if (t) return { target: t, mode: "after" };
           node = node.parentElement;
         }
@@ -1803,7 +1815,7 @@
           // Info-area placement: render in the product info area, NOT on the image.
           // Respects merchant choice — does not fall through to image placement on failure.
           if (badge.placement === "info") {
-            var spot = findInfoInsertionPoint(img);
+            var spot = findInfoInsertionPoint(img, badge.infoPosition || "above-price");
             if (!spot) {
               if (window.console && console.warn) {
                 console.warn("[BadgeHQ] info-area placement: no card ancestor found for image — badge skipped. Theme may need a custom selector.", img);

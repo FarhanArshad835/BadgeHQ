@@ -76,6 +76,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         textColor: data.textColor,
         position: data.position,
         placement: data.placement,
+        infoPosition: data.infoPosition || "above-price",
         targeting: JSON.stringify(data.targeting),
         isActive: data.isActive,
         condition: JSON.stringify(data.condition),
@@ -124,6 +125,7 @@ function EditProductBadgeForm() {
   const [textColor, setTextColor] = useState(badge.textColor);
   const [position, setPosition] = useState(badge.position);
   const [placement, setPlacement] = useState<"image" | "info">((badge as any).placement || "image");
+  const [infoPosition, setInfoPosition] = useState<string>((badge as any).infoPosition || "above-price");
   const [isActive, setIsActive] = useState(badge.isActive);
   const [targetType, setTargetType] = useState(badge.targeting.type);
   const [targetValue, setTargetValue] = useState(badge.targeting.value || "");
@@ -221,7 +223,7 @@ function EditProductBadgeForm() {
 
   const handleSave = () => {
     const data = {
-      text, badgeType, shape, badgeColor, textColor, position, placement,
+      text, badgeType, shape, badgeColor, textColor, position, placement, infoPosition,
       targeting: {
         type: targetType,
         value: targetValue,
@@ -406,6 +408,15 @@ function EditProductBadgeForm() {
                     />
                   </InlineGrid>
                 </BlockStack>
+                {placement === "info" && (
+                  <Select label="Position in Info Area" options={[
+                    { label: "Above title", value: "above-title" },
+                    { label: "Below title", value: "below-title" },
+                    { label: "Above price", value: "above-price" },
+                    { label: "Below price", value: "below-price" },
+                  ]} value={infoPosition} onChange={setInfoPosition}
+                    helpText="Where the badge sits inside the card's text area." />
+                )}
                 {placement === "image" && (
                   <Select label="Position on Image" options={[
                     { label: "Top Left", value: "top-left" }, { label: "Top Right", value: "top-right" },

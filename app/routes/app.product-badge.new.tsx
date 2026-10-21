@@ -61,6 +61,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         textColor: data.textColor,
         position: data.position,
         placement: data.placement,
+        infoPosition: data.infoPosition || "above-price",
         targeting: JSON.stringify(data.targeting),
         isActive: data.isActive,
         condition: JSON.stringify(data.condition),
@@ -100,6 +101,7 @@ export default function NewProductBadge() {
   const [textColor, setTextColor] = useState("#ffffff");
   const [position, setPosition] = useState("top-left");
   const [placement, setPlacement] = useState<"image" | "info">("image");
+  const [infoPosition, setInfoPosition] = useState<string>("above-price");
   const [isActive, setIsActive] = useState(false);
 
   // Targeting
@@ -174,7 +176,7 @@ export default function NewProductBadge() {
       badgeColor,
       textColor,
       position,
-      placement,
+      placement, infoPosition,
       targeting: {
         type: targetType,
         value: targetValue,
@@ -468,6 +470,15 @@ export default function NewProductBadge() {
                   </InlineGrid>
                 </BlockStack>
 
+                {placement === "info" && (
+                  <Select label="Position in Info Area" options={[
+                    { label: "Above title", value: "above-title" },
+                    { label: "Below title", value: "below-title" },
+                    { label: "Above price", value: "above-price" },
+                    { label: "Below price", value: "below-price" },
+                  ]} value={infoPosition} onChange={setInfoPosition}
+                    helpText="Where the badge sits inside the card's text area." />
+                )}
                 {placement === "image" && (
                   <Select
                     label="Position on Image"

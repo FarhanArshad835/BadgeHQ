@@ -115,6 +115,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       textColor: b.textColor,
       position: b.position,
       placement: (b as any).placement || "image",
+      infoPosition: (b as any).infoPosition || "above-price",
       targeting: JSON.parse(b.targeting),
       condition: JSON.parse(b.condition),
       pages: JSON.parse(b.pages),
