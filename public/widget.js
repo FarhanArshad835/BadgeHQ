@@ -5285,6 +5285,109 @@
     var qs = window.location.search;
     if (/[?&](filter\.|sort_by=)/.test(qs)) return release();
 
+    /**
+     * Install the scroll-page rewriter.
+     *
+     * Armed whenever the ranked order is available, regardless of whether this
+     * shopper had any behaviour when the page loaded. It used to be assigned
+     * only on the branch taken when behaviour already existed, so a shopper who
+     * landed with an empty bag - everyone, on their first page - never got a
+     * rewriter, and wishlisting afterwards did not arm one either: this
+     * function runs once per page load and had already returned.
+     *
+     * That is why wishlisting on page 1 and then scrolling produced nothing.
+     * The per-batch re-scoring inside the rewriter was written for exactly that
+     * case and was never reached, because the rewriter did not exist.
+     *
+     * Safe to arm unconditionally: it returns the page untouched when there is
+     * no behaviour to act on.
+     */
+    function armPageRewriter() {
+    // Arm the page rewriter now the ranked order is loaded. Until this
+    // point the hook installed at parse time passes every response straight
+    // through, because there is nothing to rebuild a page with.
+    //
+    // This is what lifts the Shopify limit: a page is no longer ranks 25-48
+    // of one fixed order, it is whichever 24 products this shopper should
+    // see at that depth - including ones Shopify would have put on page 30.
+    __bhqPageRewriter = function (url, html, finish) {
+      var m = url.match(/[?&]page=(\d+)/);
+      var pageNo = m ? parseInt(m[1], 10) : 1;
+      if (!(pageNo > 1)) return finish(html);
+
+      // Shopify paginates the order the engine already wrote, so page N
+      // of a managed collection is page N of our own ranking. Rebuilding
+      // it only reshuffles it into the order it arrived in - visibly, on
+      // every scroll - and costs a card fetch per swapped slot.
+      //
+      // Left alone unless this shopper has behaviour that actually
+      // changes which products belong at this depth.
+      // Re-scored per batch, not read from the closure. wanted was fixed
+      // when the page loaded, so a product wishlisted while the shopper
+      // read page 1 had no effect on page 2 - the most recent engagement
+      // was the one guaranteed to be ignored.
+      var live = scoreBehaviour(W);
+      if (!live.length) return finish(html);
+
+      // Page 1 is rendered by Shopify and never passes through buildPage,
+      // so its products were not in the shown record and page 2 could
+      // repeat any of them - which is what put the same crop top twice in
+      // one row. Read off the live grid, because by now the client-side
+      // reorder may have changed which products are on it.
+      var onPage = document.querySelectorAll('a[href*="/products/"]');
+      for (var oi = 0; oi < onPage.length; oi++) {
+        var hm = onPage[oi].getAttribute("href").match(/\/products\/([^/?#]+)/);
+        if (hm) _shown[decodeURIComponent(hm[1]).toLowerCase()] = true;
+      }
+
+      // What the shopper has earned so far, same scale the sort uses.
+      var byHandle = {};
+      for (var wi = 0; wi < live.length; wi++) {
+        byHandle[live[wi].handle] = (byHandle[live[wi].handle] || 0) + live[wi].score;
+      }
+      // Affinity on those fresh scores, so a near match of something just
+      // engaged with can reach this batch rather than waiting for a
+      // reload. Strength and reach grow with how much the shopper has
+      // told us - this is what makes each page better than the last.
+      var mat = maturityFor(live.length);
+      var aff = {};
+      for (var li2 = 0; li2 < live.length; li2++) {
+        var nr = _neighbours[live[li2].handle];
+        if (!nr) continue;
+        for (var nk = 0; nk < nr.length; nk++) {
+          aff[nr[nk]] = (aff[nr[nk]] || 0) + live[li2].score * mat.share * (1 - nk / nr.length);
+        }
+      }
+      // Same two ceilings as page 1: against the product's own
+      // engagement, and against the strongest single engagement, so
+      // accumulated affinity never outranks something actually touched.
+      // Similarity strength on its own, for the lead slots. Same falloff
+      // down each neighbour list, but not capped against the engagement
+      // and never added to the score.
+      _affinityRank = {};
+      for (var fi = 0; fi < live.length; fi++) {
+        var fnr = _neighbours[live[fi].handle];
+        if (!fnr) continue;
+        for (var fk = 0; fk < fnr.length; fk++) {
+          _affinityRank[fnr[fk]] =
+            (_affinityRank[fnr[fk]] || 0) + live[fi].score * (1 - fk / fnr.length);
+        }
+      }
+      var topLive = live.length ? live[0].score : 0;
+      for (var ak in aff) {
+        var ownLive = byHandle[ak] || 0;
+        byHandle[ak] =
+          ownLive +
+          Math.min(
+            aff[ak],
+            Math.min(ownLive > 0 ? ownLive * 0.8 : Infinity, topLive * 0.8),
+          );
+      }
+
+      rebuildScrollPage(html, (pageNo - 1) * PAGE_SIZE, byHandle, RANDOMNESS, finish);
+    };
+    }
+
     // Scored by the shared helper so a scroll batch can recompute it from
     // whatever the shopper has done since this page loaded, and so the
     // recency weighting is applied in one place.
@@ -5303,7 +5406,10 @@
     // view. Caching costs nothing here - the request is already in flight
     // from parse time.
     if (!wanted.length) {
-      loadOrderRank(function () {});
+      // Armed here too. A shopper with no behaviour yet still needs the
+      // rewriter in place, because they may wishlist something while reading
+      // page 1 and then scroll - and this function will not run again.
+      loadOrderRank(armPageRewriter);
       return release();
     }
 
@@ -5326,89 +5432,7 @@
         else __bhqUnveil();
       })();
 
-      // Arm the page rewriter now the ranked order is loaded. Until this
-      // point the hook installed at parse time passes every response straight
-      // through, because there is nothing to rebuild a page with.
-      //
-      // This is what lifts the Shopify limit: a page is no longer ranks 25-48
-      // of one fixed order, it is whichever 24 products this shopper should
-      // see at that depth - including ones Shopify would have put on page 30.
-      __bhqPageRewriter = function (url, html, finish) {
-        var m = url.match(/[?&]page=(\d+)/);
-        var pageNo = m ? parseInt(m[1], 10) : 1;
-        if (!(pageNo > 1)) return finish(html);
-
-        // Shopify paginates the order the engine already wrote, so page N
-        // of a managed collection is page N of our own ranking. Rebuilding
-        // it only reshuffles it into the order it arrived in - visibly, on
-        // every scroll - and costs a card fetch per swapped slot.
-        //
-        // Left alone unless this shopper has behaviour that actually
-        // changes which products belong at this depth.
-        // Re-scored per batch, not read from the closure. wanted was fixed
-        // when the page loaded, so a product wishlisted while the shopper
-        // read page 1 had no effect on page 2 - the most recent engagement
-        // was the one guaranteed to be ignored.
-        var live = scoreBehaviour(W);
-        if (!live.length) return finish(html);
-
-        // Page 1 is rendered by Shopify and never passes through buildPage,
-        // so its products were not in the shown record and page 2 could
-        // repeat any of them - which is what put the same crop top twice in
-        // one row. Read off the live grid, because by now the client-side
-        // reorder may have changed which products are on it.
-        var onPage = document.querySelectorAll('a[href*="/products/"]');
-        for (var oi = 0; oi < onPage.length; oi++) {
-          var hm = onPage[oi].getAttribute("href").match(/\/products\/([^/?#]+)/);
-          if (hm) _shown[decodeURIComponent(hm[1]).toLowerCase()] = true;
-        }
-
-        // What the shopper has earned so far, same scale the sort uses.
-        var byHandle = {};
-        for (var wi = 0; wi < live.length; wi++) {
-          byHandle[live[wi].handle] = (byHandle[live[wi].handle] || 0) + live[wi].score;
-        }
-        // Affinity on those fresh scores, so a near match of something just
-        // engaged with can reach this batch rather than waiting for a
-        // reload. Strength and reach grow with how much the shopper has
-        // told us - this is what makes each page better than the last.
-        var mat = maturityFor(live.length);
-        var aff = {};
-        for (var li2 = 0; li2 < live.length; li2++) {
-          var nr = _neighbours[live[li2].handle];
-          if (!nr) continue;
-          for (var nk = 0; nk < nr.length; nk++) {
-            aff[nr[nk]] = (aff[nr[nk]] || 0) + live[li2].score * mat.share * (1 - nk / nr.length);
-          }
-        }
-        // Same two ceilings as page 1: against the product's own
-        // engagement, and against the strongest single engagement, so
-        // accumulated affinity never outranks something actually touched.
-        // Similarity strength on its own, for the lead slots. Same falloff
-        // down each neighbour list, but not capped against the engagement
-        // and never added to the score.
-        _affinityRank = {};
-        for (var fi = 0; fi < live.length; fi++) {
-          var fnr = _neighbours[live[fi].handle];
-          if (!fnr) continue;
-          for (var fk = 0; fk < fnr.length; fk++) {
-            _affinityRank[fnr[fk]] =
-              (_affinityRank[fnr[fk]] || 0) + live[fi].score * (1 - fk / fnr.length);
-          }
-        }
-        var topLive = live.length ? live[0].score : 0;
-        for (var ak in aff) {
-          var ownLive = byHandle[ak] || 0;
-          byHandle[ak] =
-            ownLive +
-            Math.min(
-              aff[ak],
-              Math.min(ownLive > 0 ? ownLive * 0.8 : Infinity, topLive * 0.8),
-            );
-        }
-
-        rebuildScrollPage(html, (pageNo - 1) * PAGE_SIZE, byHandle, RANDOMNESS, finish);
-      };
+      armPageRewriter();
 
       // The batch is sorted before it is inserted, not after.
       //
