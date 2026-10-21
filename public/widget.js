@@ -76,6 +76,14 @@
    * something to rewrite it with; until then the response passes straight
    * through untouched.
    */
+  /** How long a scroll page may spend being rebuilt before the original is
+   *  served instead.
+   *
+   *  The rebuild fetches up to MAX_SWAPS cards, in parallel, so on a warm
+   *  connection it finishes in roughly one card's time. The budget matters on
+   *  a slow one, and at 2.5s it was tight enough that a page could be served
+   *  without the products the shopper had just asked for, silently. */
+  var REWRITE_BUDGET_MS = 4000;
   var __bhqPageRewriter = null;
   (function installPageHook() {
     var PAGE_FETCH = /[?&]section_id=/;
@@ -85,7 +93,16 @@
       window.fetch = function (input) {
         var u = typeof input === "string" ? input : (input && input.url) || "";
         var r = of.apply(this, arguments);
-        if (!__bhqPageRewriter || !PAGE_FETCH.test(u) || u.indexOf("page=") === -1) return r;
+        if (!PAGE_FETCH.test(u) || u.indexOf("page=") === -1) return r;
+        // Armed only once the ranked order has loaded. A shopper who
+        // scrolls before that lands gets the page unrewritten, which is
+        // correct but worth being able to see.
+        if (!__bhqPageRewriter) {
+          if (window.console && console.warn) {
+            console.warn("[BHQ] rewriter not armed yet, page served unmodified:", u);
+          }
+          return r;
+        }
         // The response is read once here and handed back as a fresh one, so
         // the theme still sees an ordinary Response it can call text() on.
         return r
@@ -106,9 +123,15 @@
                 };
                 // A rewrite that stalls must not strand the shopper mid-scroll:
                 // past this the original page is used unchanged.
+                // Serving Shopify's page unchanged is the right failure, but
+                // it is indistinguishable from the rewrite having run and
+                // chosen the same products - so it says so.
                 setTimeout(function () {
+                  if (!done && window.console && console.warn) {
+                    console.warn("[BHQ] rewrite timed out, page served unmodified:", u);
+                  }
                   finish(html);
-                }, 2500);
+                }, REWRITE_BUDGET_MS);
                 try {
                   __bhqPageRewriter(u, html, finish);
                 } catch (e) {
@@ -5479,6 +5502,49 @@
    */
   var CARD_SECTIONS = ["pinned-card", "card-product", "product-card"];
 
+  /** Cards kept in storage at once. At ~17KB each this caps the cache near
+   *  700KB, well inside the ~5MB sessionStorage quota that the theme and
+   *  every other app on the page also draw from. */
+  var CARD_CACHE_MAX = 40;
+
+  /**
+   * Store a rendered card, evicting the oldest once the cache is full.
+   *
+   * Cards were written without any limit, so a shopper scrolling four pages
+   * accumulated ~1.7MB of them. Once the quota is reached every write throws
+   * and is swallowed, so the cache silently stops working and each scroll
+   * refetches all eight cards - which is what pushes a rebuild past its
+   * budget and serves the page without the products the shopper asked for.
+   *
+   * Insertion order is the eviction order. sessionStorage preserves it, and
+   * the oldest card is the one furthest up the page.
+   */
+  function cacheCard(key, html) {
+    try {
+      var keys = [];
+      for (var i = 0; i < sessionStorage.length; i++) {
+        var k = sessionStorage.key(i);
+        if (k && k.indexOf("badgehq-card-") === 0) keys.push(k);
+      }
+      while (keys.length >= CARD_CACHE_MAX) {
+        sessionStorage.removeItem(keys.shift());
+      }
+      sessionStorage.setItem(key, html);
+    } catch (e) {
+      // Full anyway, or private mode. Drop every card and keep this one:
+      // a cache that throws on every write is worse than an empty one.
+      try {
+        for (var j = sessionStorage.length - 1; j >= 0; j--) {
+          var k2 = sessionStorage.key(j);
+          if (k2 && k2.indexOf("badgehq-card-") === 0) sessionStorage.removeItem(k2);
+        }
+        sessionStorage.setItem(key, html);
+      } catch (e2) {
+        /* nothing more to do - the card still renders, just uncached */
+      }
+    }
+  }
+
   function fetchCardFor(handle, template, then) {
     var CK = "badgehq-card-" + handle;
     try {
@@ -5503,7 +5569,7 @@
           var card = cardFromHtml(html);
           if (!card) return attempt();
           try {
-            sessionStorage.setItem(CK, html);
+            cacheCard(CK, html);
           } catch (e2) {
             /* quota - it still works for this page */
           }
