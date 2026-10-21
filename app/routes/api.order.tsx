@@ -46,7 +46,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const settings = await prisma.merchandiseSettings.findUnique({
     where: { shop },
-    select: { isEnabled: true, collectionIds: true },
+    select: { isEnabled: true, collectionIds: true, lastRunAt: true },
   });
   if (!settings?.isEnabled) {
     return json({ ok: true, order: [] }, { headers: { ...CORS, ...CACHE } });
@@ -66,6 +66,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     {
       ok: true,
       collection: collection || null,
+      // When the engine last rebuilt this ranking.
+      //
+      // The storefront caches the whole payload in sessionStorage, which
+      // had no expiry and no stamp - so a tab that loaded the collection
+      // before a run kept serving the old scores and neighbours for the
+      // rest of the session. After a run that gave 76 products neighbours
+      // they had never had, those tabs still saw none of them.
+      //
+      // Comparing this against the cached copy is what retires it.
+      runAt: settings.lastRunAt ? settings.lastRunAt.getTime() : 0,
       // Position in this array IS the rank. Sent as a bare array rather than
       // objects: at a thousand products the key names would cost more than the
       // data.

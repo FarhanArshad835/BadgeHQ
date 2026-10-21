@@ -5003,9 +5003,64 @@
    *  slots of each new page, so similarity decides the ORDER products are
    *  served in without altering what they are worth. */
   var _affinityRank = null;
+  /** Engine run the cached ranking came from, so a stale one can be spotted. */
+  var _cachedStamp = 0;
   /** Injection runs once per page load. The re-sort that follows one calls
    *  back into the sort, and anything short of a latch lets that recurse. */
   var _injectedOnce = false;
+  /**
+   * Replace a cached ranking that the engine has since rebuilt.
+   *
+   * The cached copy is used immediately - waiting on the network to show a
+   * grid would be worse than showing a slightly old order - and this corrects
+   * it a moment later if the stamps disagree. Nothing is re-sorted on screen:
+   * the fresh data lands in _orderRank and _neighbours and takes effect on the
+   * next scroll page, which is where it matters.
+   */
+  function revalidateOrder(KEY) {
+    var req =
+      __bhqOrderPromise ||
+      fetch(API_ORIGIN + "/api/order?shop=" + encodeURIComponent(SHOP)).then(function (r) {
+        return r.json();
+      });
+    req
+      .then(function (d) {
+        if (!d || !d.order || !d.scores) return;
+        if ((d.runAt || 0) === _cachedStamp) return; // unchanged
+        var list = d.order;
+        var sc = d.scores;
+        if (sc.length !== list.length) return;
+        var rank = {};
+        for (var i = 0; i < list.length; i++) rank[list[i]] = sc[i];
+        var nb = d.neighbours || [];
+        var nbs = {};
+        for (var j = 0; j < list.length; j++) {
+          if (nb[j] && nb[j].length) nbs[list[j]] = nb[j];
+        }
+        var oosMap = {};
+        var oo = d.outOfStock || [];
+        for (var k = 0; k < oo.length; k++) {
+          var oh = list[oo[k]];
+          if (oh) oosMap[oh] = true;
+        }
+        _orderRank = rank;
+        _neighbours = nbs;
+        _outOfStock = oosMap;
+        _cachedStamp = d.runAt || 0;
+        try {
+          sessionStorage.setItem(
+            KEY,
+            JSON.stringify({ r: rank, n: nbs, o: oosMap, t: _cachedStamp }),
+          );
+        } catch (e) {
+          /* quota - it still works for this page */
+        }
+      })
+      .catch(function () {
+        /* the cached copy stands */
+      });
+  }
+
   function loadOrderRank(then) {
     if (_orderRank) return then(_orderRank);
     // Versioned. The first build of this cached POSITIONS under the same key;
@@ -5026,11 +5081,22 @@
       sessionStorage.removeItem("badgehq-order-v2");
       sessionStorage.removeItem("badgehq-order-v3");
       var cached = JSON.parse(sessionStorage.getItem(KEY) || "null");
+      // Only reused while the engine has not run since it was stored. The
+      // cache had no expiry at all, so a tab opened before a run kept the
+      // old scores and neighbours for the whole session - after a run that
+      // gave 76 products neighbours for the first time, those tabs behaved
+      // as though nothing had changed. The stamp is checked against the
+      // live payload below, which costs nothing: that request is already
+      // in flight from parse time.
       if (cached && cached.r && cached.n) {
+        _cachedStamp = cached.t || 0;
         _orderRank = cached.r;
         _neighbours = cached.n;
         _outOfStock = cached.o || {};
-        return then(_orderRank);
+        then(_orderRank);
+        // Still verify, and rebuild in place if the engine has since run.
+        revalidateOrder(KEY);
+        return;
       }
     } catch (e) {
       /* private mode - just fetch */
@@ -5075,7 +5141,10 @@
           // Only cache a payload worth reusing.
           // Both halves, or the next load restores an order with no affinity.
           if (usable) {
-            sessionStorage.setItem(KEY, JSON.stringify({ r: rank, n: _neighbours, o: _outOfStock }));
+            sessionStorage.setItem(
+              KEY,
+              JSON.stringify({ r: rank, n: _neighbours, o: _outOfStock, t: d.runAt || 0 }),
+            );
           }
         } catch (e2) {
           /* quota - it still works for this page */
