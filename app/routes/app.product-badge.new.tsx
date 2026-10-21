@@ -1,7 +1,7 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useActionData, useLoaderData, useNavigate, useSubmit } from "@remix-run/react";
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback } from "react";
 import {
   Page,
   Layout,
@@ -241,48 +241,6 @@ export default function NewProductBadge() {
   };
 
   const previewBg = gradient || badgeColor;
-  // Keep the preview in view while the admin scrolls.
-  //
-  // App Bridge reports the admin's scroll position to the embedded app. The
-  // preview is translated by however far the page has scrolled past it,
-  // clamped so it never rises above its own starting point or runs past the
-  // bottom of the settings column beside it.
-  const previewRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const el = previewRef.current;
-    if (!el || typeof window === "undefined") return;
-    let frame = 0;
-    const reposition = () => {
-      frame = 0;
-      const node = previewRef.current;
-      if (!node) return;
-      const parent = node.parentElement;
-      if (!parent) return;
-      // How far the admin has scrolled past the top of this column.
-      const top = parent.getBoundingClientRect().top;
-      const offset = Math.max(0, 16 - top);
-      // Never past the end of the taller column, or the preview would float
-      // below the form it belongs to.
-      const room = Math.max(0, parent.offsetHeight - node.offsetHeight);
-      node.style.transform = `translateY(${Math.min(offset, room)}px)`;
-    };
-    const onScroll = () => {
-      if (!frame) frame = window.requestAnimationFrame(reposition);
-    };
-    // Both: the admin forwards its scroll to the iframe document in some
-    // contexts and resizes it in others.
-    window.addEventListener("scroll", onScroll, { passive: true });
-    window.addEventListener("resize", onScroll, { passive: true });
-    document.addEventListener("scroll", onScroll, { passive: true, capture: true });
-    reposition();
-    return () => {
-      if (frame) window.cancelAnimationFrame(frame);
-      window.removeEventListener("scroll", onScroll);
-      window.removeEventListener("resize", onScroll);
-      document.removeEventListener("scroll", onScroll, true);
-    };
-  }, []);
-
   const previewStyle: React.CSSProperties = {
     position: "absolute",
     ...(position.includes("top") ? { top: 8 } : { bottom: 8 }),
@@ -918,20 +876,24 @@ export default function NewProductBadge() {
 
         {/* Preview */}
         <Layout.Section variant="oneThird">
-          {/* Held in view as the admin scrolls.
+          {/* The SECTION is what sticks, not this div.
 
-              CSS sticky cannot do this. An embedded app renders in an iframe
-              that App Bridge sizes to the full height of its content, so the
-              iframe itself never scrolls - the admin scrolls it from the
-              outside. A sticky element needs a scrolling ancestor inside the
-              document to stick to, and here there is none, which is why a top
-              offset and a 100vh cap both did nothing.
+              Polaris sets align-items:flex-start on its Layout, so this
+              column shrinks to the height of the preview inside it. A
+              sticky element cannot move outside its parent, and a parent
+              exactly its own height gives it nowhere to go - which is why
+              a sticky div in here did nothing. The section itself is a
+              flex item in the full-height row, so that is what has room.
 
-              The admin reports its scroll position through App Bridge, so the
-              preview is offset by hand instead. transform rather than top, so
-              it moves on the compositor and never reflows the form beside
-              it. */}
-          <div ref={previewRef} style={{ willChange: "transform" }}>
+              Measured in the admin: the iframe stays the size of the
+              window and the app scrolls inside it, so CSS sticky does
+              apply here - an earlier attempt to follow the admin's scroll
+              in JS was solving a problem this page does not have. */}
+          <style>{
+            ".Polaris-Layout__Section:has(> .bhq-preview-col){position:sticky;top:16px;align-self:flex-start;}" +
+            "@media (max-width:47.9975em){.Polaris-Layout__Section:has(> .bhq-preview-col){position:static;}}"
+          }</style>
+          <div className="bhq-preview-col">
           <Card>
             <BlockStack gap="300">
               <Text as="h2" variant="headingMd">Preview</Text>
