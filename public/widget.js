@@ -4783,6 +4783,34 @@
       var raw = String(id);
       var k = /^\d+$/.test(raw) ? raw : raw.replace(/[^a-z0-9-]/gi, "").toLowerCase();
       if (!k) return;
+      // Re-read before writing. bag was read once when this page loaded,
+      // and a shopper who opens a product, is recorded there, and comes
+      // back gets this page restored from the bfcache rather than
+      // reloaded - so this copy is older than storage. Writing it back
+      // wholesale erased the view and dwell recorded on the product page.
+      try {
+        var fresh = JSON.parse(sessionStorage.getItem(KEY) || "null");
+        if (fresh) {
+          for (var fk in fresh) {
+            if (!bag[fk]) bag[fk] = fresh[fk];
+            else {
+              // Keep whichever count is higher: this page may hold a bump
+              // not yet flushed, storage may hold one from another page.
+              var cur = bag[fk];
+              var got = fresh[fk];
+              for (var f2 in got) {
+                if (typeof got[f2] === "number") {
+                  if (typeof cur[f2] !== "number" || got[f2] > cur[f2]) cur[f2] = got[f2];
+                } else if (!cur[f2]) {
+                  cur[f2] = got[f2];
+                }
+              }
+            }
+          }
+        }
+      } catch (e0) {
+        /* unreadable storage - the in-memory bag is all there is */
+      }
       if (!bag[k]) bag[k] = { p: k };
       bag[k][field] = (bag[k][field] || 0) + (by || 1);
       // Handle and timestamp are for the client-side reorder only and are
@@ -5475,6 +5503,9 @@
       }
     }
 
+    /** URL a scroll listener is already armed for. */
+    var _armedFor = null;
+
     function prefetchNextPage() {
       // The theme carries the next URL on its own scroll trigger, and every
       // appended page brings an updated one. rel="next" does not: it is the
@@ -5494,7 +5525,13 @@
       if (!sectionId) return;
       var full =
         nextUrl + (nextUrl.indexOf("?") === -1 ? "?" : "&") + "section_id=" + sectionId;
-      if (__bhqPagePrefetch[full]) return;
+      // Guarded before a listener is armed, not only once a fetch has
+      // fired. The old guard let every call add another scroll listener,
+      // each with its own fired flag, so one scroll event fired all of
+      // them: page 2 was requested 29 times and the theme waited 4.7s for
+      // the last copy, which is slower than having no prefetch at all.
+      if (__bhqPagePrefetch[full] || _armedFor === full) return;
+      _armedFor = full;
 
       var fired = false;
       var maybe = function () {
@@ -5553,16 +5590,23 @@
      */
     function watchForNextPage() {
       if (!window.MutationObserver) return;
+      var trigger = document.querySelector('[id^="infinite-scroll-trigger"]');
       var grid = document.querySelector("#product-grid");
-      var root = (grid && grid.parentNode) || document.body;
-      if (!root) return;
+      // The trigger where the theme has one; otherwise fall back to
+      // watching the grid for appends, which is noisier but is the only
+      // signal available.
+      var target = trigger || (grid && grid.parentNode) || document.body;
+      if (!target) return;
       new MutationObserver(function () {
         prefetchNextPage();
-      }).observe(root, {
-        childList: true,
-        subtree: true,
+      }).observe(target, {
+        // The trigger's attribute only. childList with subtree fired on
+        // every insert anywhere under the grid - badges, wishlist hearts,
+        // lazy images - and attributeFilter does not restrict those.
         attributes: true,
         attributeFilter: ["data-next-page", "data-next-url"],
+        childList: !trigger,
+        subtree: !trigger,
       });
     }
 
@@ -5656,7 +5700,16 @@
       // Only as many as a page can actually lead with.
       var want = cands.slice(0, Math.ceil(PAGE_SIZE / 3));
       var idx = 0;
+      // Two at a time rather than one. Serially, seven cards took ~1.2s on
+      // a fast connection and about four seconds at 300ms latency - long
+      // enough that a shopper scrolling sooner makes the rewrite fetch the
+      // rest itself. Two keeps the latency cost down without crowding out
+      // the images on the page being read.
+      var inFlight = 0;
       var step = function () {
+        // Checked on entry, so two requests are in flight at most. Testing
+        // it after incrementing allowed a third through.
+        if (inFlight >= 2) return;
         // A newer engagement has superseded this queue - unwishlisting,
         // say - so stop fetching cards for what the shopper no longer
         // wants.
@@ -5664,14 +5717,15 @@
         if (idx >= want.length) return;
         var h2 = want[idx++].h;
         var isFirstRow = idx <= EAGER_ROW_COUNT;
+        inFlight++;
         fetchCardFor(h2, null, function (card) {
+          inFlight--;
           // The cards that will lead the next page are the ones whose
           // images the shopper sees first, so warm those too.
           if (card && isFirstRow) warmCardImage(card);
-          // One at a time: eight parallel requests would contend with the
-          // images on the page the shopper is reading.
           idle(step);
         });
+        step();
       };
       idle(step);
     }
@@ -6238,6 +6292,13 @@
         if (!im) continue;
         im.setAttribute("loading", "eager");
         im.setAttribute("fetchpriority", "high");
+      }
+      // Every image on the page decodes off the main thread. Without this
+      // a batch of 24 decodes synchronously as the page is appended, which
+      // is what makes the scroll catch on a low-end phone.
+      var all = grid.querySelectorAll("img");
+      for (var d = 0; d < all.length; d++) {
+        all[d].setAttribute("decoding", "async");
       }
     } catch (e2) {
       /* the page still works, just lazily */
