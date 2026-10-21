@@ -587,6 +587,11 @@
     if (path.match(/\/products\//)) return "product";
     if (path.match(/\/cart/)) return "cart";
     if (path.match(/\/collections\//)) return "collection";
+    // Search results. Without this a search page reported "other", so the
+    // six badges this shop targets at search never appeared on any of
+    // them - measured, one badge across 500 cards, against seventeen
+    // across fifty-six on a collection page.
+    if (path.match(/\/search/)) return "search";
     // Match homepage: exactly "/" or Shopify Markets locale prefixes like /en, /fr, /en-US
     if (path === "/" || path === "" || /^\/[a-z]{2}(-[a-z]{2,4})?\/?\s*$/i.test(path)) return "home";
     return "other";
