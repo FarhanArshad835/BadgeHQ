@@ -1158,79 +1158,6 @@
     fetchPage();
   }
 
-  // Bulk-prefetch up to ~1000 products in 4 paginated calls to /products.json.
-  // Pre-populates _productDataCache so subsequent per-card lookups (including
-  // dynamic loads detected by the MutationObserver) are O(1) with no network.
-  // Falls back gracefully — per-card fetch path still works for any handle
-  // not in the bulk cache.
-  //
-  // Cached in sessionStorage with a 5-minute TTL so navigating between
-  // collection pages doesn't re-fetch.
-  var _bulkLoading = false;
-  function bulkPrefetchProducts(onComplete) {
-    if (window.__badgehq_bulk_done || _bulkLoading) {
-      if (onComplete) onComplete();
-      return;
-    }
-    _bulkLoading = true;
-
-    // sessionStorage hot path
-    try {
-      var cached = sessionStorage.getItem("__badgehq_bulk");
-      if (cached) {
-        var parsed = JSON.parse(cached);
-        if (parsed && parsed.t && Date.now() - parsed.t < 5 * 60 * 1000 && parsed.d) {
-          for (var h in parsed.d) {
-            if (!_productDataCache[h]) _productDataCache[h] = parsed.d[h];
-          }
-          window.__badgehq_bulk_done = true;
-          _bulkLoading = false;
-          if (onComplete) onComplete();
-          return;
-        }
-      }
-    } catch (e) {}
-
-    var collected = {};
-    var page = 1;
-    var MAX_PAGES = 4; // 4 × 250 = 1000 products covered
-
-    function fetchPage() {
-      fetch("/products.json?limit=250&page=" + page, { credentials: "same-origin" })
-        .then(function (r) { return r.ok ? r.json() : { products: [] }; })
-        .then(function (data) {
-          var products = (data && data.products) || [];
-          for (var i = 0; i < products.length; i++) {
-            var p = products[i];
-            if (!p.handle) continue;
-            var parsed = _parseBulkProduct(p);
-            collected[p.handle] = parsed;
-            // Don't overwrite a richer per-card fetch result if one happened to land first
-            if (!_productDataCache[p.handle]) _productDataCache[p.handle] = parsed;
-          }
-          if (products.length === 250 && page < MAX_PAGES) {
-            page++;
-            fetchPage();
-            return;
-          }
-          // Done — persist + notify
-          try {
-            sessionStorage.setItem("__badgehq_bulk", JSON.stringify({ t: Date.now(), d: collected }));
-          } catch (e) {}
-          window.__badgehq_bulk_done = true;
-          _bulkLoading = false;
-          if (onComplete) onComplete();
-        })
-        .catch(function () {
-          // /products.json may be disabled on some stores. Per-card fetches still work.
-          _bulkLoading = false;
-          if (onComplete) onComplete();
-        });
-    }
-
-    fetchPage();
-  }
-
   // Server-side inventory feed prefetch. Hits our app's /api/products/inventory
   // endpoint which uses the merchant's stored Admin API token to read
   // inventory_quantity and other server-only fields (the storefront API hides
@@ -1987,29 +1914,26 @@
         window.__badgehq_observer = observer;
       }
 
-      // Kick off bulk product prefetch in parallel — pre-populates the per-handle
-      // cache so dynamically-loaded cards (and the retries below) get instant
-      // data lookups instead of one /products/{handle}.json fetch per card.
-      bulkPrefetchProducts(function () {
-        // After bulk completes, sweep the DOM once more — any cards that were
-        // detected before the cache was warm now have data available.
-        findAndAttach();
-      });
-
       // Server-side inventory feed (Admin API-backed). Only fetched when at
       // least one eligible badge has an inventory-based condition — saves
       // a per-pageview edge request on stores that don't use inventory
       // badges, which is most of them.
-      var needsInventory = eligible.some(function (b) {
-        var c = b && b.condition;
-        if (!c) return false;
-        return c.type === "inventory_count" || c.type === "low_stock" || c.type === "out_of_stock";
+      // The inventory feed is now the only bulk source, so it is fetched
+      // whenever any badge needs product data at all - not just for
+      // inventory conditions.
+      //
+      // It replaces a prefetch of /products.json that pulled four pages at
+      // 285KB gzipped and 4.4MB decoded each - about 1.1MB downloaded and
+      // 17MB parsed per visit, re-fetched every five minutes - to keep
+      // eleven small fields per product. Everything it kept is in this
+      // feed already, under slightly different names, at 172KB gzipped for
+      // the whole catalogue. The one field it uniquely had, the numeric
+      // product id, is read only by badges targeting specific products,
+      // and this shop has none; a card still falls back to its own
+      // /products/{handle}.json when something needs more.
+      bulkPrefetchInventory(function () {
+        findAndAttach();
       });
-      if (needsInventory) {
-        bulkPrefetchInventory(function () {
-          findAndAttach();
-        });
-      }
 
       // Initial pass on whatever's already in the DOM, plus a few short retries
       // for theme JS (lazy-loaders, image reveal animations) that mutates after
