@@ -22,6 +22,24 @@
   widget.js stays async and does everything else, including the affinity
   pull-ins that need the full payload.
 {%- endcomment -%}
+{%- comment -%}
+  Which collections the product on screen belongs to.
+
+  Badges and bundle offers can be scoped to a collection, and the only way
+  the storefront can answer "is this product in that collection?" is to
+  download the collection and look. On this shop one product-page badge was
+  pulling three pages of products.json - 726KB compressed, 11.5MB parsed -
+  to decide whether a single product was a member.
+
+  Liquid already knows. Emitting it here costs a few hundred bytes inline and
+  removes the fetch entirely. Only rendered on a product page, where the
+  product object exists.
+{%- endcomment -%}
+{%- if product -%}
+  <script>
+    window.__bhqProductCollections = {{ product.collections | map: "handle" | json }};
+  </script>
+{%- endif -%}
 <script>
   (function () {
     var SHOP = (window.Shopify && window.Shopify.shop) || "";
