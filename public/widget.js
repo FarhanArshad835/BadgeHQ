@@ -92,6 +92,15 @@
    *  phone grid, which is what is on screen the instant the page lands. */
   var EAGER_ROW_COUNT = 2;
 
+  /** Set once the reorder is running, so an engagement anywhere on the page
+   *  can warm the cards it just made relevant.
+   *
+   *  Lead cards were only prefetched on page load, when the behaviour bag is
+   *  empty for most shoppers - so a wishlist click warmed nothing and all
+   *  eight cards were fetched at scroll time, which is the moment that had to
+   *  be fast. */
+  var __bhqOnEngage = null;
+
   /** Run when the browser is not busy, so prefetching never competes with the
    *  page the shopper is actually looking at. */
   function idle(fn) {
@@ -114,6 +123,20 @@
     try {
       var of = window.fetch;
       if (!of) return;
+      // The unhooked fetch, for our own requests.
+      //
+      // Prefetching a scroll page through the hook made the hook rewrite it
+      // on the way in, which marked those products as shown; the theme then
+      // asked for the same page, the hook rewrote the already-rewritten
+      // HTML, and every product it had just chosen was skipped as already
+      // shown. A shopper who wishlisted a boot got eight boot cards fetched
+      // and then replaced by whatever was next in the ranking.
+      //
+      // The rewrite belongs at serve time regardless: behaviour can change
+      // between prefetching a page and the shopper reaching it.
+      window.__bhqRawFetch = function () {
+        return of.apply(window, arguments);
+      };
       window.fetch = function (input) {
         var u = typeof input === "string" ? input : (input && input.url) || "";
         if (!PAGE_FETCH.test(u) || u.indexOf("page=") === -1) {
@@ -4777,6 +4800,10 @@
       } catch (e) {
         /* private mode / quota - the beacon still sends what is in memory */
       }
+      // Every engagement funnels through here - view, dwell, cart, wishlist
+      // - so this is the one place that knows the shopper just changed what
+      // is relevant to them. The reorder warms its cards from it.
+      if (__bhqOnEngage) __bhqOnEngage();
     }
 
     /**
@@ -5404,27 +5431,43 @@
     function prefetchPageImages(html) {
       try {
         if (!html) return;
-        var srcs = [];
-        var re = /<img[^>]+src="([^"]+)"/gi;
-        var m;
-        while ((m = re.exec(html)) && srcs.length < IMG_PREFETCH_COUNT) {
-          var src = m[1];
+        // Parsed rather than regexed for the src alone: a card offers seven
+        // widths through srcset, and the browser picks one using sizes. Just
+        // warming the src downloads width=533 (~58KB) when the card will
+        // actually request width=360 (~31KB) on a phone - so the prefetch
+        // cost almost twice what it saved, and missed the cache anyway.
+        var tpl = document.createElement("template");
+        tpl.innerHTML = html;
+        var imgs = tpl.content.querySelectorAll("img");
+        var picked = [];
+        for (var i = 0; i < imgs.length && picked.length < IMG_PREFETCH_COUNT; i++) {
+          var src = imgs[i].getAttribute("src") || "";
           if (src.indexOf("/cdn/shop/") === -1) continue;
-          srcs.push(src.indexOf("//") === 0 ? location.protocol + src : src);
+          picked.push({
+            src: src,
+            srcset: imgs[i].getAttribute("srcset") || "",
+            sizes: imgs[i].getAttribute("sizes") || "",
+          });
         }
-        if (!srcs.length) return;
+        if (!picked.length) return;
 
-        var i = 0;
+        var n = 0;
         var next = function () {
-          if (i >= srcs.length) return;
+          if (n >= picked.length) return;
+          var p2 = picked[n++];
           var im = new Image();
-          // Lowest priority: these are for a page the shopper has not asked
-          // for yet and must not compete with the one they are reading.
+          // Lowest priority: this is for a page the shopper has not asked
+          // for and must not compete with the one they are reading.
           if ("fetchPriority" in im) im.fetchPriority = "low";
           im.onload = im.onerror = function () {
             idle(next);
           };
-          im.src = srcs[i++];
+          // sizes before srcset: the browser resolves the candidate when
+          // srcset is set, and needs sizes in place to resolve it the same
+          // way the real card will.
+          if (p2.sizes) im.sizes = p2.sizes;
+          if (p2.srcset) im.srcset = p2.srcset;
+          im.src = p2.src;
         };
         idle(next);
       } catch (e) {
@@ -5468,7 +5511,12 @@
         if (remaining > window.innerHeight * 2) return;
         fired = true;
         window.removeEventListener("scroll", maybe);
-        __bhqPagePrefetch[full] = fetch(full, { credentials: "same-origin" })
+        // Raw fetch: through the hook this page would be rewritten now and
+        // again on serve, and the second pass would discard the first's
+        // choices as already shown.
+        __bhqPagePrefetch[full] = (window.__bhqRawFetch || fetch)(full, {
+          credentials: "same-origin",
+        })
           .then(function (res) {
             if (!res.ok) throw new Error("bad status");
             return res.text();
@@ -5485,7 +5533,89 @@
       maybe();
     }
 
-    function prefetchLeadCards() {
+    /** Coming back from a product page restores this page from the bfcache
+     *  rather than reloading it, so the view and dwell recorded over there
+     *  are in storage while this page's state is still the old one. */
+    function watchBackNavigation() {
+      window.addEventListener("pageshow", function (e) {
+        if (e.persisted && __bhqOnEngage) __bhqOnEngage();
+      });
+    }
+
+    /**
+     * Re-arm the page prefetch each time the theme appends a page.
+     *
+     * prefetchNextPage ran once, on load, and its scroll listener removed
+     * itself after firing - so only page 2 was ever prefetched and every
+     * page from 3 onward paid the full wait again. The theme rewrites its
+     * trigger's data-next-page as each page lands, so watching that
+     * attribute is what tells us a new page is available to prefetch.
+     */
+    function watchForNextPage() {
+      if (!window.MutationObserver) return;
+      var grid = document.querySelector("#product-grid");
+      var root = (grid && grid.parentNode) || document.body;
+      if (!root) return;
+      new MutationObserver(function () {
+        prefetchNextPage();
+      }).observe(root, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ["data-next-page", "data-next-url"],
+      });
+    }
+
+    /** Warm one card's image at the size the card will actually request. */
+    function warmCardImage(card) {
+      try {
+        var src = card.querySelector && card.querySelector("img");
+        if (!src) return;
+        var im = new Image();
+        if ("fetchPriority" in im) im.fetchPriority = "low";
+        var ss = src.getAttribute("srcset");
+        var sz = src.getAttribute("sizes");
+        // sizes before srcset, so the browser resolves the same candidate
+        // the card will.
+        if (sz) im.sizes = sz;
+        if (ss) im.srcset = ss;
+        var s = src.getAttribute("src");
+        if (s) im.src = s;
+      } catch (e) {
+        /* a warm cache is a bonus */
+      }
+    }
+
+    /** Engagement generation: a later one cancels an earlier one's queue. */
+    var _engageGen = 0;
+    var _engageTimer = null;
+
+    /**
+     * Re-warm everything the shopper just made relevant.
+     *
+     * Prefetching only happened on page load, when the behaviour bag is empty
+     * for most shoppers - so a wishlist click warmed nothing and all eight
+     * lead cards were fetched at scroll time, which is the one moment that
+     * had to be instant.
+     *
+     * Debounced because a single tap can produce several bumps, and
+     * generation-guarded because unwishlisting should stop the previous
+     * queue rather than race it.
+     *
+     * Deliberately does NOT touch the current page. Reordering cards the
+     * shopper is looking at is the shuffle this all started with; this only
+     * affects what the next page will be.
+     */
+    function onEngagement() {
+      clearTimeout(_engageTimer);
+      _engageTimer = setTimeout(function () {
+        if (!_orderRank) return;
+        var gen = ++_engageGen;
+        prefetchLeadCards(gen);
+      }, 250);
+    }
+
+    function prefetchLeadCards(gen) {
       var live = scoreBehaviour(W);
       if (!live.length || !_orderRank) return;
 
@@ -5527,9 +5657,17 @@
       var want = cands.slice(0, Math.ceil(PAGE_SIZE / 3));
       var idx = 0;
       var step = function () {
+        // A newer engagement has superseded this queue - unwishlisting,
+        // say - so stop fetching cards for what the shopper no longer
+        // wants.
+        if (gen !== undefined && gen !== _engageGen) return;
         if (idx >= want.length) return;
         var h2 = want[idx++].h;
-        fetchCardFor(h2, null, function () {
+        var isFirstRow = idx <= EAGER_ROW_COUNT;
+        fetchCardFor(h2, null, function (card) {
+          // The cards that will lead the next page are the ones whose
+          // images the shopper sees first, so warm those too.
+          if (card && isFirstRow) warmCardImage(card);
           // One at a time: eight parallel requests would contend with the
           // images on the page the shopper is reading.
           idle(step);
@@ -5650,6 +5788,12 @@
         // Worth doing even with no behaviour: the next page still has to
         // be fetched, and fetching it early is the whole saving.
         prefetchNextPage();
+        watchForNextPage();
+        watchBackNavigation();
+      watchBackNavigation();
+        // This is the branch a first-time shopper takes, so this is exactly
+        // the case where a later wishlist needs to warm its cards.
+        __bhqOnEngage = onEngagement;
       });
       return release();
     }
@@ -5678,7 +5822,12 @@
       // them nothing: the page is already here and the cards that lead it
       // come back from storage without a request.
       prefetchNextPage();
+      watchForNextPage();
+      watchBackNavigation();
       prefetchLeadCards();
+      // Re-run whenever the shopper engages, which is when it first has
+      // anything to do.
+      __bhqOnEngage = onEngagement;
 
       // The batch is sorted before it is inserted, not after.
       //
