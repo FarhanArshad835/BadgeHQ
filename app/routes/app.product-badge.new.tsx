@@ -876,6 +876,10 @@ export default function NewProductBadge() {
 
         {/* Preview */}
         <Layout.Section variant="oneThird">
+          {/* Sticky so the badge stays in view while the settings below it
+              are scrolled - the whole point of a preview is to watch it
+              change as you edit, and the form is far longer than it is. */}
+          <div style={{ position: "sticky", top: 16 }}>
           <Card>
             <BlockStack gap="300">
               <Text as="h2" variant="headingMd">Preview</Text>
@@ -931,6 +935,7 @@ export default function NewProductBadge() {
               )}
             </BlockStack>
           </Card>
+          </div>
         </Layout.Section>
       </Layout>
     </Page>
