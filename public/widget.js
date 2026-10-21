@@ -85,6 +85,16 @@
    *  without the products the shopper had just asked for, silently. */
   var REWRITE_BUDGET_MS = 4000;
   var __bhqPageRewriter = null;
+  /** Scroll pages fetched before the shopper asked for them, by URL.
+   *
+   *  The theme only starts loading the next page when the shopper is 200px
+   *  from the bottom - less than half a screen on a phone - and Shopify takes
+   *  around a second to answer on a slow connection. Starting that request
+   *  while they are still reading turns the wait into nothing.
+   *
+   *  Shopify marks these responses private, max-age=0, so the browser will
+   *  not reuse one from its own cache; the text is held here instead. */
+  var __bhqPagePrefetch = {};
   (function installPageHook() {
     var PAGE_FETCH = /[?&]section_id=/;
     try {
@@ -92,8 +102,20 @@
       if (!of) return;
       window.fetch = function (input) {
         var u = typeof input === "string" ? input : (input && input.url) || "";
-        var r = of.apply(this, arguments);
-        if (!PAGE_FETCH.test(u) || u.indexOf("page=") === -1) return r;
+        if (!PAGE_FETCH.test(u) || u.indexOf("page=") === -1) {
+          return of.apply(this, arguments);
+        }
+        // Already fetched while the shopper was reading: hand it straight
+        // back rather than asking Shopify again.
+        var pre = __bhqPagePrefetch[u];
+        var r = pre
+          ? pre.then(function (html) {
+              return new Response(html, {
+                status: 200,
+                headers: { "Content-Type": "text/html" },
+              });
+            })
+          : of.apply(this, arguments);
         // Armed only once the ranked order has loaded. A shopper who
         // scrolls before that lands gets the page unrewritten, which is
         // correct but worth being able to see.
@@ -5302,6 +5324,141 @@
      * Safe to arm unconditionally: it returns the page untouched when there is
      * no behaviour to act on.
      */
+    /**
+     * Fetch the cards the next scroll page will lead with, now.
+     *
+     * A scroll page costs the shopper two waits in sequence: ~284ms for
+     * Shopify to return the page, then ~181ms more while the cards that
+     * belong at the top of it are fetched. The second wait is avoidable -
+     * which cards those are is known the moment the shopper engages, and
+     * they are usually reading page 1 for several seconds before they
+     * scroll at all.
+     *
+     * Fetched into the same sessionStorage cache rebuildScrollPage reads, so
+     * a prefetched card comes back synchronously and the scroll costs only
+     * Shopify's own page fetch.
+     *
+     * Deliberately idle work: it runs behind requestIdleCallback where the
+     * browser has one, so it never competes with the page the shopper is
+     * actually looking at.
+     */
+    /**
+     * Start loading the next scroll page while the shopper is still reading.
+     *
+     * The theme triggers its own load at 200px from the bottom. On a phone
+     * that is less than half a screen of warning, and Shopify needs roughly a
+     * second to answer over a slow connection - so the shopper reaches the end
+     * of the grid and waits, every single page.
+     *
+     * This watches for them passing 60% of the page and starts the same
+     * request then, storing the response. When the theme finally asks, the
+     * hook hands back what is already here.
+     *
+     * One page ahead only. Two would mean fetching ~150KB the shopper may
+     * never scroll to, which on a metered connection is their money.
+     */
+    function prefetchNextPage() {
+      var link = document.querySelector('link[rel="next"], a[rel="next"]');
+      var nextUrl = link && link.getAttribute("href");
+      if (!nextUrl) {
+        // Themes differ; derive it from the current page instead.
+        var cur = parseInt((location.search.match(/[?&]page=(\d+)/) || [])[1] || "1", 10);
+        nextUrl = location.pathname + "?page=" + (cur + 1);
+      }
+      var grid = document.querySelector("#product-grid");
+      var sectionId =
+        (grid && grid.closest("[id^='shopify-section-']") || {}).id || "";
+      sectionId = sectionId.replace("shopify-section-", "");
+      if (!sectionId) return;
+      var full =
+        nextUrl + (nextUrl.indexOf("?") === -1 ? "?" : "&") + "section_id=" + sectionId;
+
+      var fired = false;
+      var maybe = function () {
+        if (fired) return;
+        var scrolled = window.pageYOffset + window.innerHeight;
+        var total = document.documentElement.scrollHeight;
+        if (total <= 0 || scrolled / total < 0.6) return;
+        fired = true;
+        window.removeEventListener("scroll", maybe);
+        if (__bhqPagePrefetch[full]) return;
+        __bhqPagePrefetch[full] = fetch(full, { credentials: "same-origin" })
+          .then(function (res) {
+            if (!res.ok) throw new Error("bad status");
+            return res.text();
+          })
+          .catch(function () {
+            // Forget it, so the theme falls through to its own fetch.
+            delete __bhqPagePrefetch[full];
+            return Promise.reject();
+          });
+        // A rejection here must not surface as unhandled; the hook only
+        // reads this when it exists.
+        __bhqPagePrefetch[full].catch(function () {});
+      };
+      window.addEventListener("scroll", maybe, { passive: true });
+      maybe();
+    }
+
+    function prefetchLeadCards() {
+      var live = scoreBehaviour(W);
+      if (!live.length || !_orderRank) return;
+
+      // Same similarity strength the lead slots sort on.
+      var aff = {};
+      for (var i = 0; i < live.length; i++) {
+        var nr = _neighbours[live[i].handle];
+        if (!nr) continue;
+        for (var k = 0; k < nr.length; k++) {
+          aff[nr[k]] = (aff[nr[k]] || 0) + live[i].score * (1 - k / nr.length);
+        }
+      }
+
+      // Only what is not already on screen: anything the shopper can see
+      // will not be fetched for a later page either.
+      var onPage = {};
+      try {
+        var links = document.querySelectorAll('#product-grid a[href*="/products/"]');
+        for (var li = 0; li < links.length; li++) {
+          var lm = (links[li].getAttribute("href") || "").match(/\/products\/([^/?#]+)/);
+          if (lm) onPage[decodeURIComponent(lm[1]).toLowerCase()] = true;
+        }
+      } catch (e) {
+        /* fall through - a prefetch of something already shown is wasteful,
+           not wrong */
+      }
+
+      var cands = [];
+      for (var h in aff) {
+        if (onPage[h] || _outOfStock[h]) continue;
+        if (typeof _orderRank[h] !== "number") continue;
+        cands.push({ h: h, s: aff[h] });
+      }
+      cands.sort(function (a, b) {
+        return b.s - a.s;
+      });
+
+      // Only as many as a page can actually lead with.
+      var want = cands.slice(0, Math.ceil(PAGE_SIZE / 3));
+      var idx = 0;
+      // Declared before step, which calls it: a var function expression is
+      // not hoisted, so the other order throws on the first callback.
+      var schedule = function (fn) {
+        if (window.requestIdleCallback) window.requestIdleCallback(fn, { timeout: 2000 });
+        else setTimeout(fn, 200);
+      };
+      var step = function () {
+        if (idx >= want.length) return;
+        var h2 = want[idx++].h;
+        fetchCardFor(h2, null, function () {
+          // One at a time: eight parallel requests would contend with the
+          // images on the page the shopper is reading.
+          schedule(step);
+        });
+      };
+      schedule(step);
+    }
+
     function armPageRewriter() {
     // Arm the page rewriter now the ranked order is loaded. Until this
     // point the hook installed at parse time passes every response straight
@@ -5409,7 +5566,12 @@
       // Armed here too. A shopper with no behaviour yet still needs the
       // rewriter in place, because they may wishlist something while reading
       // page 1 and then scroll - and this function will not run again.
-      loadOrderRank(armPageRewriter);
+      loadOrderRank(function () {
+        armPageRewriter();
+        // Worth doing even with no behaviour: the next page still has to
+        // be fetched, and fetching it early is the whole saving.
+        prefetchNextPage();
+      });
       return release();
     }
 
@@ -5433,6 +5595,11 @@
       })();
 
       armPageRewriter();
+      // Both run while the shopper reads page 1, so the next scroll costs
+      // them nothing: the page is already here and the cards that lead it
+      // come back from storage without a request.
+      prefetchNextPage();
+      prefetchLeadCards();
 
       // The batch is sorted before it is inserted, not after.
       //
