@@ -5806,9 +5806,17 @@
     };
 
     // A filtered or explicitly sorted view is the shopper asking for a
-    // specific order. Overriding it would be wrong.
+    // specific order. Overriding it would be wrong - but only the ORDER is
+    // off limits. Returning here also skipped arming the scroll rewriter
+    // and the page prefetch, and the rewriter is what hands the theme its
+    // next page: with it unarmed the hook still intercepted the fetch, so
+    // sorting a collection stopped infinite scroll loading anything at
+    // all.
+    //
+    // The badges, the price rules and the scroll machinery all still
+    // belong on a sorted page. Only the personalised reorder does not.
     var qs = window.location.search;
-    if (/[?&](filter\.|sort_by=)/.test(qs)) return release();
+    var sortedOrFiltered = /[?&](filter\.|sort_by=)/.test(qs);
 
     /**
      * Install the scroll-page rewriter.
@@ -6175,7 +6183,8 @@
       // read page 1 had no effect on page 2 - the most recent engagement
       // was the one guaranteed to be ignored.
       var live = scoreBehaviour(W);
-      if (!live.length) return finish(html);
+      // The shopper picked this order; serve the page as Shopify built it.
+      if (sortedOrFiltered || !live.length) return finish(html);
 
       // Page 1 is rendered by Shopify and never passes through buildPage,
       // so its products were not in the shown record and page 2 could
@@ -6283,7 +6292,8 @@
       (function attempt() {
         // Released on every path: a sorted grid, a grid that could not be
         // found, or a grid that was already in the right order.
-        if (applyShopperOrder(wanted)) {
+        // Same rule on the first page: badges yes, reordering no.
+        if (sortedOrFiltered || applyShopperOrder(wanted)) {
           __bhqUnveil();
           return;
         }
