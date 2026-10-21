@@ -949,6 +949,35 @@
     square: "border-radius:2px;width:48px;height:48px;",
   };
 
+  /**
+   * Render badge text, bolding anything wrapped in asterisks.
+   *
+   * "Get it for *649*" puts 649 in bold. A merchant wanting one word to
+   * stand out had no way to say so: the text went in through textContent,
+   * which is a single run of plain text by definition.
+   *
+   * Everything is escaped first and only <strong> is emitted afterwards, so
+   * this stays as safe as textContent was. Badge text is merchant-authored
+   * rather than shopper-authored, but it reaches every visitor, and a field
+   * that renders arbitrary HTML is a stored-XSS hole waiting for one badly
+   * chosen paste.
+   */
+  function setBadgeText(el, text) {
+    var raw = String(text == null ? "" : text);
+    if (raw.indexOf("*") === -1) {
+      el.textContent = raw;
+      return;
+    }
+    var esc = raw
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+    // Paired asterisks only, and never across a line, so a lone one is
+    // shown as typed rather than swallowing the rest of the badge.
+    el.innerHTML = esc.replace(/\*([^*\n]+)\*/g, "<strong>$1</strong>");
+  }
+
   /** A badge's padding as a CSS value.
    *
    *  Was hardcoded at 4px 8px, with the shape styles setting their own on
@@ -2153,9 +2182,12 @@
             // shape exactly as it was.
             (badgePadding(badge) ? "padding:" + badgePadding(badge) + ";" : "") +
                 (badge.customCSS || "");
-              infoEl.textContent = badge.badgeType === "dynamic"
-                ? resolveDynamicText(badge.text, productData)
-                : badge.text;
+              setBadgeText(
+                infoEl,
+                badge.badgeType === "dynamic"
+                  ? resolveDynamicText(badge.text, productData)
+                  : badge.text,
+              );
             }
             infoEl.className = "badgehq-product-badge badgehq-pb-" + badge.id;
             wrap.appendChild(infoEl);
@@ -2241,9 +2273,12 @@
             (badgePadding(badge) ? "padding:" + badgePadding(badge) + ";" : "") +
             (badge.customCSS || "");
 
-          el.textContent = badge.badgeType === "dynamic"
-            ? resolveDynamicText(badge.text, productData)
-            : badge.text;
+          setBadgeText(
+            el,
+            badge.badgeType === "dynamic"
+              ? resolveDynamicText(badge.text, productData)
+              : badge.text,
+          );
 
           cornerStack.appendChild(el);
         });

@@ -265,7 +265,7 @@ export default function NewProductBadge() {
       }} />
     ) : (
       <div style={{ ...previewStyle, position: "static", display: "inline-flex", marginTop: 6 }}>
-        {badgeType === "dynamic" ? text.replace(/\{\{discount\}\}/g, "25").replace(/\{\{inventory\}\}/g, "3").replace(/\{\{sold\}\}/g, "142").replace(/\{\{price\}\}/g, `${currencySymbol}29.99`).replace(/\{\{compare_price\}\}/g, `${currencySymbol}39.99`) : text}
+        {<BadgeLabel text={badgeType === "dynamic" ? text.replace(/\{\{discount\}\}/g, "25").replace(/\{\{inventory\}\}/g, "3").replace(/\{\{sold\}\}/g, "142").replace(/\{\{price\}\}/g, `${currencySymbol}29.99`).replace(/\{\{compare_price\}\}/g, `${currencySymbol}39.99`) : text} />}
       </div>
     );
 
@@ -298,7 +298,8 @@ export default function NewProductBadge() {
 
                 {badgeType === "text" && (
                   <>
-                    <TextField label="Badge Text" value={text} onChange={setText} autoComplete="off" />
+                    <TextField label="Badge Text" value={text} onChange={setText} autoComplete="off"
+                      helpText="Wrap a word in asterisks to bold it, e.g. Get it for *₹649*" />
                     <Text as="p" variant="bodyMd" tone="subdued">Quick presets:</Text>
                     <InlineGrid columns={{ xs: 3, sm: 5 }} gap="200">
                       {PRESET_BADGES.map((preset) => (
@@ -861,7 +862,7 @@ export default function NewProductBadge() {
                       />
                     ) : (
                       <div style={previewStyle}>
-                        {badgeType === "dynamic" ? text.replace(/\{\{discount\}\}/g, "25").replace(/\{\{inventory\}\}/g, "3").replace(/\{\{sold\}\}/g, "142").replace(/\{\{price\}\}/g, `${currencySymbol}29.99`).replace(/\{\{compare_price\}\}/g, `${currencySymbol}39.99`) : text}
+                        {<BadgeLabel text={badgeType === "dynamic" ? text.replace(/\{\{discount\}\}/g, "25").replace(/\{\{inventory\}\}/g, "3").replace(/\{\{sold\}\}/g, "142").replace(/\{\{price\}\}/g, `${currencySymbol}29.99`).replace(/\{\{compare_price\}\}/g, `${currencySymbol}39.99`) : text} />}
                       </div>
                     )
                   )}
@@ -1017,3 +1018,19 @@ function PlacementCard({
     </button>
   );
 }
+
+/** Badge text with *asterisks* rendered bold, matching the storefront.
+ *
+ *  Split rather than innerHTML: the preview is inside the admin, and there
+ *  is no reason to hand merchant text to a parser here when React can place
+ *  the strong tags itself.
+ */
+function BadgeLabel({ text }: { text: string }) {
+  var parts = String(text || "").split(/\*([^*\n]+)\*/g);
+  return (
+    <>
+      {parts.map((p, i) => (i % 2 ? <strong key={i}>{p}</strong> : p))}
+    </>
+  );
+}
+
