@@ -235,6 +235,20 @@ export default function NewProductBadge() {
     ...shapeStyles[shape],
   };
 
+  // One definition, rendered at whichever of the four slots is selected.
+  const infoBadgePreview =
+    badgeType === "image" && imageUrl ? (
+      <img src={imageUrl} alt="Badge" style={{
+        display: "inline-block", marginTop: 6,
+        maxWidth: 80, height: "auto", opacity,
+        transform: rotation ? `rotate(${rotation}deg)` : undefined,
+      }} />
+    ) : (
+      <div style={{ ...previewStyle, position: "static", display: "inline-flex", marginTop: 6 }}>
+        {badgeType === "dynamic" ? text.replace(/\{\{discount\}\}/g, "25").replace(/\{\{inventory\}\}/g, "3").replace(/\{\{sold\}\}/g, "142").replace(/\{\{price\}\}/g, `${currencySymbol}29.99`).replace(/\{\{compare_price\}\}/g, `${currencySymbol}39.99`) : text}
+      </div>
+    );
+
   return (
     <Page>
       <TitleBar title="Create Product Badge">
@@ -763,28 +777,14 @@ export default function NewProductBadge() {
                   )}
                 </div>
                 <div style={{ marginTop: 12 }}>
+                  {/* The badge moves with the selected position, so the
+                      preview answers the question the dropdown asks. */}
+                  {placement === "info" && infoPosition === "above-title" && infoBadgePreview}
                   <Text as="p" variant="bodyMd">Product Name Example</Text>
-                  {placement === "info" && (
-                    badgeType === "image" && imageUrl ? (
-                      <img
-                        src={imageUrl}
-                        alt="Badge"
-                        style={{
-                          display: "inline-block",
-                          marginTop: 6,
-                          maxWidth: 80,
-                          height: "auto",
-                          opacity,
-                          transform: rotation ? `rotate(${rotation}deg)` : undefined,
-                        }}
-                      />
-                    ) : (
-                      <div style={{ ...previewStyle, position: "static", display: "inline-flex", marginTop: 6 }}>
-                        {badgeType === "dynamic" ? text.replace(/\{\{discount\}\}/g, "25").replace(/\{\{inventory\}\}/g, "3").replace(/\{\{sold\}\}/g, "142").replace(/\{\{price\}\}/g, `${currencySymbol}29.99`).replace(/\{\{compare_price\}\}/g, `${currencySymbol}39.99`) : text}
-                      </div>
-                    )
-                  )}
+                  {placement === "info" && infoPosition === "below-title" && infoBadgePreview}
+                  {placement === "info" && infoPosition === "above-price" && infoBadgePreview}
                   <Text as="p" variant="bodySm" tone="subdued">{currencySymbol}29.99</Text>
+                  {placement === "info" && infoPosition === "below-price" && infoBadgePreview}
                 </div>
               </Box>
 
