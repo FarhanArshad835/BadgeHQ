@@ -383,8 +383,18 @@ function EditProductBadgeForm() {
                   </InlineGrid>
                 )}
                 {conditionType === "price_range" && (
-                  <TextField label="Price range" value={conditionValue} onChange={setConditionValue} autoComplete="off"
-                    helpText={`Enter min-max (e.g., 0-25 for products under ${currencySymbol}25)`} />
+                  <InlineGrid columns={2} gap="400">
+                    <Select label="Operator" options={[
+                      { label: "Less than", value: "less_than" },
+                      { label: "Greater than", value: "greater_than" },
+                      { label: "Equal to", value: "equal_to" },
+                      { label: "Between", value: "between" },
+                    ]} value={conditionOperator} onChange={setConditionOperator} />
+                    <TextField label="Price" value={conditionValue} onChange={setConditionValue} autoComplete="off"
+                      helpText={conditionOperator === "between"
+                        ? `Enter min-max, e.g. 0-${1000}`
+                        : `A single amount in ${currencySymbol}`} />
+                  </InlineGrid>
                 )}
                 {conditionType === "inventory_count" && (
                   <InlineGrid columns={2} gap="400">

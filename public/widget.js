@@ -1011,7 +1011,9 @@
         // the switch, so a badge can arrive here with value "849" and
         // operator "less_than" - which this read as min=849, max=Infinity
         // and matched everything AT OR ABOVE the number instead.
-        if (range.length < 2 || range[1] === "") {
+        // "between" means a range even if only one number was typed; any
+        // other operator means the value is a bound.
+        if ((c.operator && c.operator !== "between") || range.length < 2 || range[1] === "") {
           var bound = parseFloat(range[0]);
           if (isNaN(bound)) return false;
           var pop = c.operator || "less_than";
