@@ -216,6 +216,16 @@ function EditProductBadgeForm() {
     padRight !== ((badge as any).padRight ?? 8) ||
     padBottom !== ((badge as any).padBottom ?? 4) ||
     padLeft !== ((badge as any).padLeft ?? 8) ||
+    fontFamily !== ((badge as any).fontFamily || "") ||
+    fontWeight !== ((badge as any).fontWeight ?? 700) ||
+    // The price rule is a JSON blob, so compare the parts a merchant can
+    // actually change rather than the serialised string, which would also
+    // differ on key order.
+    priceMode !== (_pr.mode || "hide") ||
+    discountType !== (_pr.discountType || "amount") ||
+    discountValue !== (Number(_pr.discountValue) || 0) ||
+    priceColor !== (_pr.priceColor || "") ||
+    strikeColor !== (_pr.strikeColor || "") ||
     isActive !== badge.isActive ||
     targetType !== badge.targeting.type ||
     targetValue !== (badge.targeting.value || "") ||
