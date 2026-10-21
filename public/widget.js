@@ -1746,7 +1746,27 @@
        */
       function showDiscountedPrice(block, listed, pay, existingStruck) {
         if (block.querySelector("[data-badgehq-pay]")) return;
-        var sample = block.querySelector(".price-item--sale, .price-item--last, .price-item");
+        // Queried one selector at a time, most specific first.
+        //
+        // querySelector with a comma-separated list returns the first match
+        // in DOCUMENT order, not the order the selectors are written - and
+        // Dawn puts the struck regular price before the sale price, so a
+        // single call asking for the sale price handed back the struck one.
+        // The rule then rewrote the number it was meant to strike and hid
+        // the one it was meant to show.
+        var sample = null;
+        var ORDER = [".price-item--sale", ".price-item--last", ".price-item--regular", ".price-item"];
+        for (var si = 0; si < ORDER.length && !sample; si++) {
+          var cand = block.querySelectorAll(ORDER[si]);
+          for (var ci = 0; ci < cand.length; ci++) {
+            // Skip the struck element itself and anything screen-reader only.
+            if (cand[ci].tagName === "S") continue;
+            if (/visually-hidden/.test(cand[ci].className || "")) continue;
+            if (!(cand[ci].textContent || "").trim()) continue;
+            sample = cand[ci];
+            break;
+          }
+        }
         if (!sample) return;
         var text = (sample.textContent || "").trim();
         if (!text) return;
