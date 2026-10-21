@@ -121,6 +121,8 @@ export default function NewProductBadge() {
   const [priceMode, setPriceMode] = useState<string>(_pr.mode || "hide");
   const [discountType, setDiscountType] = useState<string>(_pr.discountType || "amount");
   const [discountValue, setDiscountValue] = useState<number>(Number(_pr.discountValue) || 0);
+  const [priceColor, setPriceColor] = useState<string>(_pr.priceColor || "");
+  const [strikeColor, setStrikeColor] = useState<string>(_pr.strikeColor || "");
   const [isActive, setIsActive] = useState(false);
 
   // Targeting
@@ -197,7 +199,7 @@ export default function NewProductBadge() {
       position,
       placement, infoPosition, hideComparePrice,
       padTop, padRight, padBottom, padLeft, fontFamily, fontWeight,
-      priceRule: JSON.stringify({ mode: priceMode, discountType, discountValue }),
+      priceRule: JSON.stringify({ mode: priceMode, discountType, discountValue, priceColor, strikeColor }),
       targeting: {
         type: targetType,
         value: targetValue,
@@ -565,6 +567,18 @@ export default function NewProductBadge() {
                             autoComplete="off"
                             helpText="A product listed at 849 with 100 off shows 849 struck and 749 as the price."
                           />
+                        </InlineGrid>
+                        <InlineGrid columns={2} gap="400">
+                          <TextField label="Discounted price colour" value={priceColor}
+                            onChange={setPriceColor} autoComplete="off"
+                            placeholder="Leave empty for the theme's own"
+                            prefix={<input type="color" value={priceColor || "#000000"}
+                              onChange={(e) => setPriceColor(e.target.value)} style={{ width: 24, height: 24, padding: 0, border: "none", cursor: "pointer", borderRadius: 4 }} />} />
+                          <TextField label="Struck price colour" value={strikeColor}
+                            onChange={setStrikeColor} autoComplete="off"
+                            placeholder="Leave empty for faded"
+                            prefix={<input type="color" value={strikeColor || "#888888"}
+                              onChange={(e) => setStrikeColor(e.target.value)} style={{ width: 24, height: 24, padding: 0, border: "none", cursor: "pointer", borderRadius: 4 }} />} />
                         </InlineGrid>
                         <Banner tone="warning">
                           This only changes what the card shows. Create the matching

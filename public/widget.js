@@ -1785,7 +1785,7 @@
               if (off <= 0 || off >= listed) continue;
               var pay = listed - off;
               block.__bhqPriceRule = true;
-              showDiscountedPrice(block, listed, pay, struck);
+              showDiscountedPrice(block, listed, pay, struck, rule);
               continue;
             }
 
@@ -1812,7 +1812,7 @@
        * Any MRP Shopify was already striking is hidden: two struck-through
        * numbers on one card reads as a mistake.
        */
-      function showDiscountedPrice(block, listed, pay, existingStruck) {
+      function showDiscountedPrice(block, listed, pay, existingStruck, rule) {
         if (block.querySelector("[data-badgehq-pay]")) return;
         // Queried one selector at a time, most specific first.
         //
@@ -1858,13 +1858,25 @@
         var was = document.createElement("s");
         was.setAttribute("data-badgehq-struck", "1");
         was.className = "price-item price-item--regular";
-        was.style.cssText = "opacity:.6;margin-right:6px;";
+        // Colours are optional. Unset means the theme's own, which is what
+        // every rule saved before this gets - the struck figure keeps the
+        // faded look it had, and the payable one stays whatever the card
+        // already used.
+        var r = rule || {};
+        was.style.cssText =
+          "margin-right:6px;" +
+          (r.strikeColor ? "color:" + r.strikeColor + ";" : "opacity:.6;");
         was.textContent = money(listed);
 
         // The theme is showing the listed price; this becomes the discounted
         // one so the two sit together in the theme's own layout.
         sample.setAttribute("data-badgehq-pay", "1");
         sample.textContent = money(pay);
+        if (r.priceColor) {
+          // setProperty with important, because a theme that sets the price
+          // colour in its own stylesheet would otherwise win.
+          sample.style.setProperty("color", r.priceColor, "important");
+        }
         block.insertBefore(was, block.firstChild);
       }
 
