@@ -1686,9 +1686,26 @@
        */
       function applyCardPriceRule(img, rule, productData) {
         try {
-          var card = img.closest("li, .card-wrapper, [class*='product-card'], [class*='card']");
-          if (!card) return;
-          var blocks = card.querySelectorAll(".price, [class*='product-price'], [class*='card__price']");
+          // Walk out until an ancestor actually contains a price.
+          //
+          // closest() returns the NEAREST match, and [class*='card'] also
+          // matches the image wrapper - on this theme card__media - which
+          // holds no price at all. The rule found zero blocks and did
+          // nothing, silently. Stopping at the first ancestor that has one
+          // is what "the card" actually means here.
+          var PRICE_IN_CARD = ".price, [class*='product-price'], [class*='card__price']";
+          var STOP = { MAIN: 1, HEADER: 1, FOOTER: 1, NAV: 1, BODY: 1, HTML: 1 };
+          var blocks = null;
+          var node = img.parentElement;
+          for (var up = 0; up < 12 && node && !STOP[node.tagName]; up++) {
+            var found = node.querySelectorAll(PRICE_IN_CARD);
+            if (found.length) {
+              blocks = found;
+              break;
+            }
+            node = node.parentElement;
+          }
+          if (!blocks || !blocks.length) return;
           for (var i = 0; i < blocks.length; i++) {
             var block = blocks[i];
             if (block.__bhqPriceRule) continue;
