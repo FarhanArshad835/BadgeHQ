@@ -103,6 +103,44 @@
 
   /** Run when the browser is not busy, so prefetching never competes with the
    *  page the shopper is actually looking at. */
+  /**
+   * Make a scroll page's images load well, whoever the shopper is.
+   *
+   * These used to live in buildPage, which only runs when the page is being
+   * rebuilt for someone with behaviour. A shopper who has not engaged - most
+   * of the traffic, and everyone on their first visit - took the early exit
+   * and got none of it: the first row still lazy, every image decoding on the
+   * main thread as the page appended.
+   *
+   * Nothing here depends on personalisation, so it runs on the HTML itself,
+   * before any decision about rewriting.
+   */
+  function tunePageImages(html) {
+    try {
+      var tpl = document.createElement("template");
+      tpl.innerHTML = html;
+      var imgs = tpl.content.querySelectorAll("img");
+      if (!imgs.length) return html;
+      for (var i = 0; i < imgs.length; i++) {
+        // Off the main thread: a batch of 24 decoding synchronously as the
+        // page appends is what makes the scroll catch on a cheap phone.
+        imgs[i].setAttribute("decoding", "async");
+      }
+      // The top of a new page is on screen the moment it is appended, so
+      // waiting for an intersection to start those images is a wasted wait.
+      var cards = tpl.content.querySelectorAll("li");
+      for (var c = 0; c < Math.min(cards.length, EAGER_ROW_COUNT); c++) {
+        var im = cards[c].querySelector("img");
+        if (!im) continue;
+        im.setAttribute("loading", "eager");
+        im.setAttribute("fetchpriority", "high");
+      }
+      return tpl.innerHTML;
+    } catch (e) {
+      return html;
+    }
+  }
+
   function idle(fn) {
     if (window.requestIdleCallback) window.requestIdleCallback(fn, { timeout: 2000 });
     else setTimeout(fn, 200);
@@ -185,6 +223,11 @@
                 var finish = function (out) {
                   if (done) return;
                   done = true;
+                  // Every exit passes through here - rewritten, timed out,
+                  // or handed back untouched - so this is where the image
+                  // tuning belongs if it is to reach a shopper who has no
+                  // behaviour and never enters the rewrite at all.
+                  out = tunePageImages(out);
                   resolve(
                     new Response(out, {
                       status: res.status,
@@ -5698,7 +5741,11 @@
       });
 
       // Only as many as a page can actually lead with.
-      var want = cands.slice(0, Math.ceil(PAGE_SIZE / 3));
+      // Lead slots plus the swaps the rewrite may want beyond them. Serve
+      // time no longer goes to the network, so a card that is not warmed
+      // here is one the shopper simply does not get - the cap is now what
+      // personalisation is worth, not just what leads the page.
+      var want = cands.slice(0, Math.ceil(PAGE_SIZE / 3) + MAX_SWAPS);
       var idx = 0;
       // Two at a time rather than one. Serially, seven cards took ~1.2s on
       // a fast connection and about four seconds at 300ms latency - long
@@ -6018,6 +6065,16 @@
     }
   }
 
+  /** A card already in the cache, or null. Never touches the network. */
+  function cachedCard(handle) {
+    try {
+      var html = sessionStorage.getItem("badgehq-card-" + handle);
+      return html ? cardFromHtml(html) : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
   function fetchCardFor(handle, template, then) {
     var CK = "badgehq-card-" + handle;
     try {
@@ -6217,10 +6274,27 @@
 
     var want = pageSliceFor(offset, PAGE_SIZE, byHandle, randomness);
     var keep = [];
-    var fetchList = [];
+    // Caps how many of Shopify's cards a page may replace, so it stays a
+    // collection rather than becoming all near-matches.
+    var swaps = 0;
     for (var w = 0; w < want.length; w++) {
-      if (supply[want[w]]) keep.push({ h: want[w], el: supply[want[w]] });
-      else if (fetchList.length < MAX_SWAPS) fetchList.push(want[w]);
+      if (supply[want[w]]) {
+        keep.push({ h: want[w], el: supply[want[w]] });
+      } else if (swaps < MAX_SWAPS) {
+        // Only if its card is already here.
+        //
+        // Fetching at serve time put 1-7 network requests between the
+        // theme asking for a page and the shopper seeing it - measured at
+        // 236-501ms on a fast desktop, and that is the one moment which
+        // has to be instant. The engagement recalc warms these in advance;
+        // anything it has not reached yet is simply left out, and Shopify's
+        // own card fills the slot instead.
+        var ready = cachedCard(want[w]);
+        if (ready) {
+          keep.push({ h: want[w], el: ready });
+          swaps++;
+        }
+      }
     }
     // Anything Shopify sent that this shopper does not want, kept as filler so
     // a page never comes back short.
@@ -6229,29 +6303,9 @@
       if (want.indexOf(sh) === -1) filler.push({ h: sh, el: supply[sh] });
     }
 
-    if (!fetchList.length) return then(buildPage(keep, filler, tpl));
-
-    var pending = fetchList.length;
-    var fetched = [];
-    fetchList.forEach(function (h) {
-      fetchCardFor(h, null, function (card) {
-        if (card) fetched.push({ h: h, el: card });
-        if (--pending !== 0) return;
-        // Assembled in the order the shopper should see them.
-        var merged = [];
-        for (var k = 0; k < want.length; k++) {
-          var hit = null;
-          for (var f = 0; f < fetched.length && !hit; f++) {
-            if (fetched[f].h === want[k]) hit = fetched[f];
-          }
-          for (var kk = 0; kk < keep.length && !hit; kk++) {
-            if (keep[kk].h === want[k]) hit = keep[kk];
-          }
-          if (hit) merged.push(hit);
-        }
-        then(buildPage(merged, filler, tpl));
-      });
-    });
+    // keep is already in want order: the loop above walks want and pushes
+    // in that order, so the page comes out ranked without a merge pass.
+    return then(buildPage(keep, filler, tpl));
   }
 
   /** Put the chosen cards back into the response the theme expects. */
