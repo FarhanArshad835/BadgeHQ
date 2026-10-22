@@ -325,6 +325,14 @@ function EditProductBadgeForm() {
         <button onClick={() => navigate("/app/product-badge")}>Back</button>
         <button variant="primary" onClick={handleSave} disabled={!isDirty}>Save</button>
       </TitleBar>
+      {/* The preview needs the face too, or it shows a fallback while the
+          storefront shows Poppins. Rendered only when selected. */}
+      {fontFamily.indexOf("Poppins") !== -1 && (
+        <link
+          rel="stylesheet"
+          href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap"
+        />
+      )}
       <Layout>
         <Layout.Section>
           <BlockStack gap="400">
@@ -558,6 +566,7 @@ function EditProductBadgeForm() {
                   <Select label="Font" options={[
                     { label: "Inherit from theme", value: "" },
                     { label: "System (matches the shopper's device)", value: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji'" },
+                    { label: "Poppins (web font)", value: "'Poppins', sans-serif" },
                     { label: "Arial", value: "Arial, sans-serif" },
                     { label: "Helvetica", value: "Helvetica, sans-serif" },
                     { label: "Georgia", value: "Georgia, serif" },

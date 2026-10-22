@@ -978,6 +978,48 @@
     el.innerHTML = esc.replace(/\*([^*\n]+)\*/g, "<strong>$1</strong>");
   }
 
+  /**
+   * Load a webfont, once, only if a badge actually asks for it.
+   *
+   * Every other font option is already on the device, so nothing had to be
+   * fetched. Poppins does: the stylesheet is 4.8KB and each weight another
+   * ~40KB, which is not a cost to put on every shop whether they use it or
+   * not.
+   *
+   * display=swap so the badge renders in a fallback immediately and reflows
+   * when the face arrives, rather than holding the text invisible.
+   */
+  var _fontsLoaded = {};
+  function ensureWebFont(family) {
+    if (!family || _fontsLoaded[family]) return;
+    var WEB_FONTS = {
+      Poppins: "https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap",
+    };
+    var href = WEB_FONTS[family];
+    if (!href) return;
+    _fontsLoaded[family] = true;
+    try {
+      if (document.querySelector('link[href="' + href + '"]')) return;
+      var link = document.createElement("link");
+      link.rel = "stylesheet";
+      link.href = href;
+      (document.head || document.documentElement).appendChild(link);
+    } catch (e) {
+      /* the badge falls back to the theme font */
+    }
+  }
+
+  /** The webfont a badge needs, if any. Reads the first family in the
+   *  stack, which is how these values are written. */
+  function webFontOf(badge) {
+    var f = (badge && badge.fontFamily) || "";
+    // The stack is written with the family quoted - "'Poppins', sans-serif"
+    // - so a prefix test on the raw string never matches. Compare the first
+    // family with its quotes stripped.
+    var first = f.split(",")[0].replace(/['"]/g, "").trim();
+    return first === "Poppins" ? "Poppins" : "";
+  }
+
   /** A badge's padding as a CSS value.
    *
    *  Was hardcoded at 4px 8px, with the shape styles setting their own on
@@ -2184,7 +2226,7 @@
                 "color:" + badge.textColor + ";" +
                 "font-size:" + (badge.fontSize || 11) + "px;" +
                 "font-weight:" + (badge.fontWeight || 700) + ";line-height:1;" +
-                (badge.fontFamily ? "font-family:" + badge.fontFamily + ";" : "") +
+                (badge.fontFamily ? (ensureWebFont(webFontOf(badge)), "font-family:" + badge.fontFamily + ";") : "") +
                 "width:auto;height:auto;max-width:max-content;white-space:nowrap;box-sizing:border-box;pointer-events:none;" +
                 "opacity:" + (badge.opacity || 1) + ";" +
                 (badge.rotation ? "transform:rotate(" + badge.rotation + "deg);" : "") +
@@ -2277,7 +2319,7 @@
             "color:" + badge.textColor + ";" +
             "font-size:" + (badge.fontSize || 11) + "px;" +
             "font-weight:" + (badge.fontWeight || 700) + ";line-height:1;" +
-            (badge.fontFamily ? "font-family:" + badge.fontFamily + ";" : "") +
+            (badge.fontFamily ? (ensureWebFont(webFontOf(badge)), "font-family:" + badge.fontFamily + ";") : "") +
             "width:auto;height:auto;max-width:max-content;white-space:nowrap;box-sizing:border-box;pointer-events:none;" +
             "opacity:" + (badge.opacity || 1) + ";" +
             (badge.rotation ? "transform:rotate(" + badge.rotation + "deg);" : "") +
