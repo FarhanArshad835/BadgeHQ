@@ -497,8 +497,38 @@
     }
   }
 
+  /**
+   * Inject the shop's own stylesheet.
+   *
+   * Badge-level customCSS is inline style on the badge element, so it can
+   * only ever restyle the badge itself. Restyling the card around it - the
+   * title, the price row, the theme's own elements - needs a real stylesheet,
+   * which is what this is.
+   *
+   * Loaded once, from Global Settings, so a merchant can do it without
+   * editing their theme.
+   */
+  function injectCustomCSS(gs) {
+    var css = gs && gs.customCSS;
+    if (!css || typeof css !== "string") return;
+    // Custom CSS can name a face no badge uses, so the stylesheet is loaded
+    // on mention rather than only on a badge setting.
+    if (css.indexOf("Poppins") !== -1) ensureWebFont("Poppins");
+    if (css.indexOf("Montserrat") !== -1) ensureWebFont("Montserrat");
+    try {
+      if (document.getElementById("badgehq-custom-css")) return;
+      var st = document.createElement("style");
+      st.id = "badgehq-custom-css";
+      st.textContent = css;
+      (document.head || document.documentElement).appendChild(st);
+    } catch (e) {
+      /* bad CSS is the merchant's to fix; it must not stop the widget */
+    }
+  }
+
   function initBadgeHQ(data) {
     var gs = data.globalSettings || {};
+    injectCustomCSS(gs);
     applyPriceDisplay(gs);
     var w = data.widgets || {};
     var currencySymbol = data.currencySymbol || "$";
@@ -994,6 +1024,7 @@
     if (!family || _fontsLoaded[family]) return;
     var WEB_FONTS = {
       Poppins: "https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap",
+      Montserrat: "https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap",
     };
     var href = WEB_FONTS[family];
     if (!href) return;
@@ -1017,7 +1048,7 @@
     // - so a prefix test on the raw string never matches. Compare the first
     // family with its quotes stripped.
     var first = f.split(",")[0].replace(/['"]/g, "").trim();
-    return first === "Poppins" ? "Poppins" : "";
+    return first === "Poppins" || first === "Montserrat" ? first : "";
   }
 
   /** A badge's padding as a CSS value.

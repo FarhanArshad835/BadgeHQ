@@ -10,6 +10,7 @@ import {
   Text,
   Select,
   Checkbox,
+  TextField,
   Banner,
   Box,
 } from "@shopify/polaris";
@@ -71,6 +72,7 @@ export default function GlobalSettings() {
     fontFamily: settings.fontFamily || "inherit",
     colorScheme: settings.colorScheme || "light",
     hideCompare: !!(settings as any).priceDisplay?.hideCompare,
+    customCSS: (settings as any).customCSS || "",
   };
 
   const [enabled, setEnabled] = useState(initial.enabled);
@@ -79,13 +81,15 @@ export default function GlobalSettings() {
   const [hideCompare, setHideCompare] = useState<boolean>(
     !!(initial as any).hideCompare,
   );
+  const [customCSS, setCustomCSS] = useState<string>((initial as any).customCSS || "");
   const [showSuccess, setShowSuccess] = useState(false);
 
   const isDirty =
     enabled !== initial.enabled ||
     fontFamily !== initial.fontFamily ||
     colorScheme !== initial.colorScheme ||
-    hideCompare !== (initial as any).hideCompare;
+    hideCompare !== (initial as any).hideCompare ||
+    customCSS !== ((initial as any).customCSS || "");
 
   useEffect(() => {
     if (actionData?.success) {
@@ -100,6 +104,7 @@ export default function GlobalSettings() {
     setFontFamily(initial.fontFamily);
     setColorScheme(initial.colorScheme);
     setHideCompare(!!(initial as any).hideCompare);
+    setCustomCSS((initial as any).customCSS || "");
   };
 
   const handleSave = () => {
@@ -111,6 +116,7 @@ export default function GlobalSettings() {
         // Nested so the widget can tell "not configured" from "configured
         // off" without the two looking the same.
         priceDisplay: { enabled: hideCompare, hideCompare },
+        customCSS,
       },
     };
     submit({ data: JSON.stringify(data) }, { method: "POST" });
@@ -136,6 +142,21 @@ export default function GlobalSettings() {
                   helpText="When disabled, no widgets will render on your storefront"
                   checked={enabled}
                   onChange={setEnabled}
+                />
+              </BlockStack>
+            </Card>
+
+            <Card>
+              <BlockStack gap="400">
+                <Text as="h2" variant="headingMd">Custom CSS</Text>
+                <TextField
+                  label="Storefront CSS"
+                  value={customCSS}
+                  onChange={setCustomCSS}
+                  multiline={8}
+                  autoComplete="off"
+                  helpText="Loaded as a stylesheet on every page. Can restyle the theme's own card elements, which badge-level CSS cannot."
+                  placeholder=".card__heading { font-size: 14px !important; }"
                 />
               </BlockStack>
             </Card>
