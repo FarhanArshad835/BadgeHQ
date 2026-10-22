@@ -6559,9 +6559,29 @@
    *  567) plus the widest behaviour bonus, so the two bands never interleave. */
   var OOS_PENALTY = 100000;
 
-  /** Per-load seed: the shuffle differs between reloads but is fixed within
-   *  one load, so a card never moves while the shopper is reading it. */
-  var _seed = Math.floor(Math.random() * 1e9);
+  /** Shuffle seed, held for the session per collection.
+   *
+   *  Was regenerated on every load, which made the grid a different order
+   *  each time the page was built. That is fine until the shopper opens a
+   *  product and presses back: the collection reloads, the jitter reshuffles
+   *  everything past the first page, and the product they were looking at is
+   *  somewhere else - or on a page that has not loaded yet.
+   *
+   *  Per path, so two collections still differ, and per session, so a shopper
+   *  returning tomorrow sees a fresh arrangement.
+   */
+  var _seed = (function () {
+    var fresh = Math.floor(Math.random() * 1e9);
+    try {
+      var key = "badgehq-seed-" + location.pathname;
+      var held = parseInt(sessionStorage.getItem(key), 10);
+      if (held > 0) return held;
+      sessionStorage.setItem(key, String(fresh));
+    } catch (e) {
+      /* private mode - a per-load seed is still better than none */
+    }
+    return fresh;
+  })();
   function jitter(handle) {
     var h = _seed;
     for (var i = 0; i < handle.length; i++) {
