@@ -31,6 +31,7 @@ import {
   getMerchSettings,
   fetchCollectionProducts,
   computeScores,
+  salesByVariant,
   rankProducts,
   runMerchandising,
   behaviourByProduct,
@@ -181,7 +182,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       session.shop,
     );
     const lifetime = new Map(lifetimeRows.map((r) => [r.productId, r.units]));
-    const scored = computeScores(facts, sales, behaviour, s, lifetime);
+    // Same reason as behaviour above: without this the preview would credit
+    // demand the run discounts, and the two would disagree about the order.
+    const variantSales = await salesByVariant(session.shop, s.salesWindowDays);
+    const scored = computeScores(facts, sales, behaviour, s, lifetime, variantSales);
     let order = rankProducts(scored, s.sinkOutOfStock);
 
     // Sorting happens here, not in the table: the table only holds the twenty

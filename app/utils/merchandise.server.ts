@@ -104,6 +104,43 @@ async function lifetimeSalesByProduct(shop: string) {
   return map;
 }
 
+/**
+ * Units sold per VARIANT, so the scorer can tell proven demand a shopper can
+ * still act on from proven demand that is now unbuyable.
+ *
+ * Returns product -> (variantId -> units) rather than a flat total. The totals
+ * salesByProduct returns are the same figures summed; both are read because a
+ * product whose variants are all still stocked must score exactly as it does
+ * today, and summing here would quietly re-derive that from a different path.
+ *
+ * Lines synced before variantId was captured carry "" and are dropped: a line
+ * that cannot be matched to a variant cannot be said to be buyable or not, and
+ * counting it either way would be a guess. They still reach the score through
+ * salesByProduct, which does not filter on variantId.
+ */
+export async function salesByVariant(shop: string, windowDays: number) {
+  const rows = await prisma.$queryRawUnsafe<
+    Array<{ productId: string; variantId: string; units: number }>
+  >(
+    `SELECT "productId", "variantId", SUM(quantity)::int AS units
+       FROM "OrderLineFinancials"
+      WHERE shop = $1
+        AND "productId" <> ''
+        AND "variantId" <> ''
+        AND "orderCreatedAt" >= NOW() - ($2 || ' days')::interval
+      GROUP BY "productId", "variantId"`,
+    shop,
+    String(windowDays),
+  );
+  const map = new Map<string, Map<string, number>>();
+  for (const r of rows) {
+    let inner = map.get(r.productId);
+    if (!inner) map.set(r.productId, (inner = new Map()));
+    inner.set(r.variantId, r.units);
+  }
+  return map;
+}
+
 async function salesByProduct(shop: string, windowDays: number) {
   const rows = await prisma.$queryRawUnsafe<Array<{ productId: string; units: number }>>(
     `SELECT "productId", SUM(quantity)::int AS units
@@ -203,6 +240,9 @@ type ProductFacts = {
   reviewCount: number;
   publishedAt: Date | null;
   inStock: boolean;
+  /** Ids of the variants a shopper can actually buy right now. Empty for a
+   *  product that does not track inventory, which is handled by inStock. */
+  buyableVariantIds: Set<string>;
 };
 
 /**
@@ -238,6 +278,9 @@ export async function fetchCollectionProducts(
               publishedAt
               totalInventory
               reviews: metafield(namespace: "doran", key: "prReviewCount") { value }
+              variants(first: 100) {
+                nodes { id availableForSale inventoryQuantity }
+              }
             }
           }
         }
@@ -271,6 +314,14 @@ export async function fetchCollectionProducts(
         // totalInventory is null for products that do not track inventory;
         // those are always purchasable, so they must not be treated as sold out.
         inStock: n.totalInventory == null || Number(n.totalInventory) > 0,
+        // availableForSale alone is not enough: a variant on "continue selling
+        // when out of stock" reports true at zero quantity, and counting that
+        // as buyable is how a sold-out size keeps its sales credit.
+        buyableVariantIds: new Set<string>(
+          (n.variants?.nodes || [])
+            .filter((v: any) => v?.availableForSale && Number(v?.inventoryQuantity ?? 0) > 0)
+            .map((v: any) => String(v.id)),
+        ),
       });
     }
 
@@ -292,12 +343,41 @@ export async function fetchCollectionProducts(
  * would push everything else to near-zero, which stops the other signals from
  * being able to separate anything.
  */
+/**
+ * The share of a product's own proven demand a shopper can still act on.
+ *
+ * Measured in UNITS SOLD, not in variants: the two answer different questions
+ * and only the first one matters. A product with 17 of 18 sizes stocked looks
+ * healthy by variant count, but if the missing size drove half the sales then
+ * half the demand is gone - which is exactly the case this exists for. On this
+ * catalogue one variant is 40%+ of all sales for a fifth of products, so a
+ * single dead variant routinely removes more demand than a count can see.
+ *
+ * Returns 1 when there is nothing to go on - no sales in the window, or no
+ * variant-level lines - so a product is never penalised for lack of evidence.
+ * New arrivals that have not sold yet therefore score exactly as they do now.
+ */
+function buyableShare(p: ProductFacts, perVariant: Map<string, number> | undefined): number {
+  if (!perVariant || perVariant.size === 0) return 1;
+  let total = 0;
+  let buyable = 0;
+  for (const [variantId, units] of perVariant) {
+    total += units;
+    if (p.buyableVariantIds.has(variantId)) buyable += units;
+  }
+  if (total <= 0) return 1;
+  return buyable / total;
+}
+
 export function computeScores(
   facts: ProductFacts[],
   sales: Map<string, number>,
   behaviour: Map<string, BehaviourCounts>,
   s: MerchSettings,
   lifetime?: Map<string, number>,
+  /** Units per variant, for the buyable-demand discount. Omitted by callers
+   *  that have not read it; the score then behaves exactly as before. */
+  variantSales?: Map<string, Map<string, number>>,
 ): Array<{
   productId: string;
   score: number;
@@ -315,7 +395,12 @@ export function computeScores(
   const behOf = (p: ProductFacts) =>
     behaviour.get(p.productId) ?? { cart: 0, wish: 0, dwell: 0, views: 0 };
 
-  const maxUnitsLog = Math.max(...facts.map((p) => Math.log1p(unitsOf(p))), 1);
+  // Both the per-product figure and the ceiling it is normalised against are
+  // buyable units, so a collection where everything is partly sold out is not
+  // silently re-inflated back to the same order by a lowered maximum.
+  const shareOf = (p: ProductFacts) => buyableShare(p, variantSales?.get(p.productId));
+  const buyableUnitsOf = (p: ProductFacts) => unitsOf(p) * shareOf(p);
+  const maxUnitsLog = Math.max(...facts.map((p) => Math.log1p(buyableUnitsOf(p))), 1);
   const maxReviews = Math.max(...facts.map((p) => p.reviewCount), 1);
 
   // Each action is normalised against the best performer in the SAME
@@ -341,6 +426,10 @@ export function computeScores(
 
   const scored = facts.map((p) => {
     const units = unitsOf(p);
+    const share = shareOf(p);
+    // Sales credit is for demand a shopper can still act on. A size that sold
+    // well and is now gone earned nothing that is available to earn again.
+    const buyableUnits = units * share;
     const b = behOf(p);
 
     const parts: Array<{ label: string; points: number; detail: string }> = [];
@@ -352,16 +441,30 @@ export function computeScores(
       parts.push({ label, points: Math.round((share * weight) / totalWeight * 1000), detail });
     };
 
-    add(s.useSales, "Best sellers", Math.log1p(units) / maxUnitsLog, s.weightSales,
-      `${units} sold`);
+    add(s.useSales, "Best sellers", Math.log1p(buyableUnits) / maxUnitsLog, s.weightSales,
+      share < 1
+        ? `${Math.round(buyableUnits)} of ${units} sold still in stock`
+        : `${units} sold`);
     add(s.useReviews, "Reviews", p.reviewCount / maxReviews, s.weightReviews,
       `${p.reviewCount} review${p.reviewCount === 1 ? "" : "s"}`);
     if (s.useNewArrival) {
       // Decays across the window rather than dropping off a cliff on day 31.
       const ageDays = p.publishedAt ? (now - p.publishedAt.getTime()) / 86400_000 : Infinity;
       const freshness = p.publishedAt && ageDays * 86400_000 < newMs ? 1 - (ageDays * 86400_000) / newMs : 0;
-      add(true, "New arrival", freshness, s.weightNewArrival,
-        Number.isFinite(ageDays) ? `${Math.round(ageDays)}d old` : "no date");
+      // Scaled by buyable demand for the same reason sales is, and it matters
+      // MORE here. A new style launches with thin stock per size, the popular
+      // sizes sell through in a fortnight, and nothing has been restocked yet -
+      // so the bonus peaks exactly when the product is least buyable. Measured
+      // on this catalogue: every product older than ~400 days had 0-4% of its
+      // demand dead, while new arrivals in the top 20 ran 43-73% dead, and for
+      // the worst of them the untouched bonus was 60% of the score. Discounting
+      // sales alone moved it two places; this is the half that does the work.
+      add(true, "New arrival", freshness * share, s.weightNewArrival,
+        !Number.isFinite(ageDays)
+          ? "no date"
+          : share < 1
+            ? `${Math.round(ageDays)}d old, ${Math.round(share * 100)}% of demand in stock`
+            : `${Math.round(ageDays)}d old`);
     }
     add(s.useCart, "Added to cart", b.cart / maxCart, s.weightCart, `${b.cart}`);
     add(s.useWish, "Wishlisted", b.wish / maxWish, s.weightWish, `${b.wish}`);
@@ -649,6 +752,9 @@ export async function runMerchandising(
   }
 
   const sales = await salesByProduct(shop, s.salesWindowDays);
+  // Same window as the totals above: the discount has to be computed against
+  // the demand the score is actually crediting, not a different period's.
+  const variantSales = await salesByVariant(shop, s.salesWindowDays);
   // Only ever used to order products that score nothing on the real signals,
   // so it is read once per run alongside the windowed figures.
   const lifetime = await lifetimeSalesByProduct(shop);
@@ -668,7 +774,7 @@ export async function runMerchandising(
         continue;
       }
 
-      const scored = computeScores(facts, sales, behaviour, s, lifetime);
+      const scored = computeScores(facts, sales, behaviour, s, lifetime, variantSales);
       await saveScores(shop, facts, scored, computeNeighbours(facts));
 
       if (opts.dryRun) {
