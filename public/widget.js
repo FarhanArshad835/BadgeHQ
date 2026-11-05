@@ -5998,6 +5998,9 @@ var __bhqEngaged = false;
    */
   var COLOR_OPT_RE = /colou?r/i;
 
+  /** handle -> { colour(lowercase) -> units sold }, from /api/color-demand. */
+  var _colorDemand = {};
+
   /** The colour option's value for a variant, or "" when it has none. */
   function variantColor(variant, colorIndex) {
     if (colorIndex < 0) return "";
@@ -6096,13 +6099,31 @@ var __bhqEngaged = false;
 
     // One request for the whole collection: variants, options and per-variant
     // images all arrive together, so no per-product round trips.
-    fetch("/collections/" + encodeURIComponent(here) + "/products.json?limit=250", {
-      credentials: "same-origin",
-    })
-      .then(function (r) {
+    // The collection's products and how much each colour has sold, together:
+    // the second decides the order of the cards the first produces, so
+    // waiting for one without the other would only mean laying the grid
+    // out twice.
+    Promise.all([
+      fetch("/collections/" + encodeURIComponent(here) + "/products.json?limit=250", {
+        credentials: "same-origin",
+      }).then(function (r) {
         return r.ok ? r.json() : { products: [] };
-      })
-      .then(function (data) {
+      }),
+      (window.__bhqRawFetch || window.fetch)(
+        API_ORIGIN + "/api/color-demand?shop=" + encodeURIComponent(SHOP),
+      )
+        .then(function (r) {
+          return r.ok ? r.json() : { demand: {} };
+        })
+        // Demand is an improvement on the order, not a requirement for
+        // it: without it the cards still render, dealt in rounds.
+        .catch(function () {
+          return { demand: {} };
+        }),
+    ])
+      .then(function (both) {
+        var data = both[0];
+        _colorDemand = (both[1] && both[1].demand) || {};
         var byHandle = {};
         var products = (data && data.products) || [];
         for (var i = 0; i < products.length; i++) byHandle[products[i].handle] = products[i];
@@ -6153,6 +6174,29 @@ var __bhqEngaged = false;
       if (groups.length > maxColors) maxColors = groups.length;
     }
     if (!entries.length) return;
+
+    // Within a product, its best-selling colour goes in round one.
+    //
+    // Shopify lists a product's colours in the order the merchant typed
+    // them, which says nothing about which one sells: on these clogs the
+    // range runs from 141 units to 21. Sorting by demand puts the colour
+    // shoppers actually buy on the first screen and the slow one further
+    // down, while the rounds still keep a product's own colours apart.
+    //
+    // A colour with no sales keeps its listed position among the other
+    // unsold colours rather than being pushed to the back: no sales on a
+    // new colour is an absence of evidence, not evidence of weakness.
+    for (var s2 = 0; s2 < entries.length; s2++) {
+      var sold = _colorDemand[entries[s2].product.handle] || {};
+      entries[s2].groups.forEach(function (g2, idx) {
+        g2._units = sold[String(g2.color).toLowerCase()] || 0;
+        g2._listed = idx;
+      });
+      entries[s2].groups.sort(function (a, b) {
+        if (b._units !== a._units) return b._units - a._units;
+        return a._listed - b._listed;
+      });
+    }
 
     // Build every card before touching the DOM: cloning from a card that
     // has already been removed yields nothing.
