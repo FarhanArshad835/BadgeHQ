@@ -357,6 +357,13 @@ export default {
       if (url.pathname === "/api/delivery-edd") {
         return proxyWithCache(request, "/api/delivery-edd", env);
       }
+      // Units sold per colour, for ranking colour cards. Without this
+      // route the worker answered 404 and the grid silently fell back to
+      // the merchant's listed colour order - the cards rendered, so the
+      // only symptom was the wrong colour leading.
+      if (url.pathname === "/api/color-demand") {
+        return proxyWithCache(request, "/api/color-demand", env);
+      }
     }
 
     return new Response("Not found", {
