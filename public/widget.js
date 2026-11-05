@@ -340,7 +340,7 @@
    * minority is knowable synchronously, right now, with no network - which is
    * what makes it possible to decide before the first paint instead of after.
    */
-  var __bhqEngaged = false;
+var __bhqEngaged = false;
   (function veilIfEngaged() {
     try {
       if (!/\/collections\//.test(location.pathname) && location.pathname !== "/") return;
@@ -1303,7 +1303,38 @@
    * member" and silently lose its badge. The answer Liquid gives is about one
    * product, so it may only ever be used to answer about that product.
    */
-  function liquidMembership(collectionHandle, handle) {
+  /* Which products belong to the collection being viewed.
+   *
+   * Started at parse time, beside the ranking, because both are needed
+   * before a scroll page can be built and neither depends on the other.
+   * Non-blocking on purpose: the first paint must never wait on it, and
+   * mayPlaceOnPage lets everything through until it lands - the grid
+   * Shopify served is already correct, so the worst case is the page
+   * behaving as it did before this check existed.
+   *
+   * Placed after prefetchCollectionMembers rather than beside the ranking
+   * prefetch at parse time: the function hoists but the _collectionMembers
+   * map it writes does not, so calling it earlier threw before any fetch
+   * started - and the catch here would have hidden that, leaving the guard
+   * passing everything through exactly as if it were not there.
+   *
+   * Reads the same sessionStorage cache the badge rules fill, so on most
+   * navigations this costs nothing. */
+  (function prefetchOwnCollection() {
+    try {
+      var m = location.pathname.match(/\/collections\/([^/?#]+)/);
+      if (!m) return;
+      var h = decodeURIComponent(m[1]).toLowerCase();
+      // 'all' is not a real collection - Shopify serves it alphabetically
+      // and products.json for it would claim the whole catalogue belongs,
+      // which is true and therefore useless as a filter.
+      if (!h || h === 'all') return;
+      prefetchCollectionMembers(h);
+    } catch (e) {
+      /* membership stays unknown, which lets everything through */
+    }
+  })();
+    function liquidMembership(collectionHandle, handle) {
     try {
       var own = window.__bhqProductCollections;
       if (!own || own.length === undefined) return null;
@@ -5644,6 +5675,33 @@
    * merchant's own sort is the safer thing to land on than a ranking they did
    * not ask for here.
    */
+  /**
+   * May this product be placed on the page being viewed?
+   *
+   * The ranking and the shopper's engagement bag are both catalogue-wide: a
+   * product has one standing, and the bag records what the shopper touched
+   * ANYWHERE. Neither is scoped to a collection, so without this check a tee
+   * engaged with in Clothing was pulled into Kitten Heels - it cleared the
+   * bar the page set, and nothing asked whether it belonged there.
+   *
+   * Membership comes from Shopify's own products.json for the collection,
+   * which the widget already fetches and caches for the badge rules.
+   *
+   * Returns true when membership cannot be established - not loaded yet, or
+   * a collection too large for the fetch cap. An unknown answer must not
+   * silently empty a grid; the global-order gate above is what keeps an
+   * unmanaged collection from being reordered at all.
+   */
+  function mayPlaceOnPage(handle) {
+    var col = currentCollectionHandle();
+    if (!col) return true;
+    var m = _collectionMembers[col];
+    if (!m || !m.loaded) return true;
+    var members = m.products || {};
+    // An empty map means the fetch failed, not that the collection is empty.
+    for (var k in members) return !!members[handle];
+    return true;
+  }
   function mayApplyGlobalOrder() {
     if (!_managedCollections || !_managedCollections.length) return false;
     // The home page grid is not a collection page and has no handle to match,
@@ -5803,6 +5861,8 @@
     var incoming = [];
     for (var h in byHandle) {
       if (onPage[h] || _outOfStock[h]) continue;
+      // Engaged with elsewhere is not a reason to appear here.
+      if (!mayPlaceOnPage(h)) continue;
       var total = (typeof rank[h] === "number" ? rank[h] : 0) + byHandle[h];
       if (total > floor) incoming.push({ h: h, t: total });
     }
@@ -6724,6 +6784,8 @@
     var rank = _orderRank || {};
     var all = [];
     for (var h in rank) {
+      // The ranking spans the catalogue; this page is one collection.
+      if (!mayPlaceOnPage(h)) continue;
       var base = rank[h] + (byHandle[h] || 0);
       // Scaled to the score, so the nudge is proportionate: it reshuffles
       // products that are genuinely close and never lifts a weak one over a
