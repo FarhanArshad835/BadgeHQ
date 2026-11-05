@@ -5614,6 +5614,48 @@
    * against products that have not loaded.
    */
   var _orderRank = null;
+  /** Handles of the collections the engine is allowed to reorder, from
+   *  /api/order. Null until a payload arrives. */
+  var _managedCollections = null;
+
+  /** The collection handle of the page being viewed, or "" when this is not a
+   *  collection page. Shopify's own URL is the source: /collections/<handle>,
+   *  with any /products/... suffix (a product viewed within a collection)
+   *  trimmed off. */
+  function currentCollectionHandle() {
+    var m = location.pathname.match(/\/collections\/([^/?#]+)/);
+    return m ? decodeURIComponent(m[1]).toLowerCase() : "";
+  }
+
+  /**
+   * May the engine's global ranking be applied to the grid on this page?
+   *
+   * Only on a collection the merchant actually selected. The ranking covers
+   * the whole catalogue - a product has one standing, and each collection is
+   * a subset of it - so without this check the widget applied it to all 49
+   * collections in the store, overriding the Best selling and alphabetical
+   * sorts the merchant had set in Shopify on the other 46.
+   *
+   * The shopper's OWN personalisation is deliberately not gated on this: it
+   * responds to what this shopper did rather than replacing the merchant's
+   * chosen order, and it belongs on every collection.
+   *
+   * Unknown (no payload yet) returns false, and so does an empty list: a
+   * merchant's own sort is the safer thing to land on than a ranking they did
+   * not ask for here.
+   */
+  function mayApplyGlobalOrder() {
+    if (!_managedCollections || !_managedCollections.length) return false;
+    // The home page grid is not a collection page and has no handle to match,
+    // so the engine's order has never been the merchant's own sort there.
+    if (location.pathname === "/") return true;
+    var h = currentCollectionHandle();
+    if (!h) return false;
+    for (var i = 0; i < _managedCollections.length; i++) {
+      if (_managedCollections[i] === h) return true;
+    }
+    return false;
+  }
   /** handle -> the handles most like it, best first. */
   var _neighbours = {};
   /** How strongly each product resembles what this shopper engaged with.
@@ -5666,6 +5708,7 @@
         var list = (d && d.order) || [];
         var sc = (d && d.scores) || [];
         var nb = (d && d.neighbours) || [];
+        _managedCollections = (d && d.managed) || [];
         _neighbours = {};
         for (var ni = 0; ni < list.length; ni++) {
           if (nb[ni] && nb[ni].length) _neighbours[list[ni]] = nb[ni];
@@ -5686,14 +5729,27 @@
         if (usable) {
           for (var i = 0; i < list.length; i++) rank[list[i]] = sc[i];
         }
-        _orderRank = rank;
+        // The ranking covers the whole catalogue, so it is only an
+        // ordering for the collections the merchant actually chose.
+        // Held empty elsewhere rather than blocked further down: every
+        // consumer already treats an unranked page as one to leave
+        // alone, so the badges, price rules and scroll machinery all
+        // keep working - only the reorder stops. The shopper's own
+        // points are added to this and still apply everywhere.
+        _orderRank = mayApplyGlobalOrder() ? rank : {};
         try {
           // Only cache a payload worth reusing.
           // Both halves, or the next load restores an order with no affinity.
           if (usable) {
             sessionStorage.setItem(
               KEY,
-              JSON.stringify({ r: rank, n: _neighbours, o: _outOfStock, t: d.runAt || 0 }),
+              JSON.stringify({
+                r: rank,
+                n: _neighbours,
+                o: _outOfStock,
+                m: _managedCollections,
+                t: d.runAt || 0,
+              }),
             );
           }
         } catch (e2) {

@@ -257,7 +257,19 @@ export async function fetchCollectionProducts(
   admin: { graphql: (q: string, o?: any) => Promise<Response> },
   collectionId: string,
 ): Promise<ProductFacts[]> {
+  const r = await fetchCollection(admin, collectionId);
+  return r.facts;
+}
+
+/** The same read, keeping the collection's own handle. The storefront names
+ *  collections by handle and the public order route cannot resolve a GID, so
+ *  the handle has to come from a run that holds admin access. */
+export async function fetchCollection(
+  admin: { graphql: (q: string, o?: any) => Promise<Response> },
+  collectionId: string,
+): Promise<{ handle: string; facts: ProductFacts[] }> {
   const out: ProductFacts[] = [];
+  let handle = "";
   let cursor: string | null = null;
 
   for (let page = 0; page < 40; page++) {
@@ -265,6 +277,7 @@ export async function fetchCollectionProducts(
       `#graphql
       query CollectionProducts($id: ID!, $cursor: String) {
         collection(id: $id) {
+          handle
           products(first: 250, after: $cursor) {
             pageInfo { hasNextPage endCursor }
             nodes {
@@ -288,6 +301,7 @@ export async function fetchCollectionProducts(
       { variables: { id: collectionId, cursor } },
     );
     const body: any = await res.json();
+    if (!handle) handle = String(body?.data?.collection?.handle || "");
     const conn = body?.data?.collection?.products;
     if (!conn) break;
 
@@ -328,7 +342,7 @@ export async function fetchCollectionProducts(
     if (!conn.pageInfo?.hasNextPage) break;
     cursor = conn.pageInfo.endCursor;
   }
-  return out;
+  return { handle, facts: out };
 }
 
 /**
@@ -765,10 +779,14 @@ export async function runMerchandising(
     : new Map<string, BehaviourCounts>();
 
   const results: Array<{ id: string; products: number; reordered: boolean; error?: string }> = [];
+  // Collected as the run reads each collection, so the storefront can tell a
+  // managed collection from the rest without a second round of API calls.
+  const handles: string[] = [];
 
   for (const collectionId of s.collectionIds) {
     try {
-      const facts = await fetchCollectionProducts(admin, collectionId);
+      const { handle, facts } = await fetchCollection(admin, collectionId);
+      if (handle) handles.push(handle);
       if (!facts.length) {
         results.push({ id: collectionId, products: 0, reordered: false, error: "empty or missing" });
         continue;
@@ -814,6 +832,10 @@ export async function runMerchandising(
     where: { shop },
     data: {
       lastRunAt: new Date(),
+      // Only when the run actually read some: a run that failed on every
+      // collection must not blank the list and hand the storefront a licence
+      // to reorder everything again.
+      ...(handles.length ? { collectionHandles: JSON.stringify(handles) } : {}),
       lastRunStatus: results.every((r) => r.reordered || r.products === 0)
         ? `ok: ${results.length} collections`
         : `partial: ${results.filter((r) => r.error).length} failed`,

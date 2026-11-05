@@ -1081,6 +1081,12 @@ model MerchandiseSettings {
   /// has 48 collections of which 18 hold 250+ products. Nothing is touched
   /// until it is named here.
   collectionIds String @default("[]")
+  /// The same collections as handles, which is how the storefront names them.
+  /// Written by each engine run: /api/order is public and unauthenticated, so
+  /// it cannot ask Shopify to resolve a GID, and without this the widget had
+  /// no way to tell a managed collection from the other 46 and reordered them
+  /// all - overriding the merchant's own Best selling / alphabetical sort.
+  collectionHandles String @default("[]")
 
   /// Signal weights. Sales dominates by default: a product with 2,000 units
   /// sold and one with 3 must not rank together because both happen to be in

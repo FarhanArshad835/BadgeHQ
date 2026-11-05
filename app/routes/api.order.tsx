@@ -61,7 +61,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const settings = await prisma.merchandiseSettings.findUnique({
     where: { shop },
-    select: { isEnabled: true, collectionIds: true, lastRunAt: true },
+    select: {
+      isEnabled: true,
+      collectionIds: true,
+      collectionHandles: true,
+      lastRunAt: true,
+    },
   });
   if (!settings?.isEnabled) {
     return json({ ok: true, order: [] }, { headers: { ...CORS, ...CACHE } });
@@ -81,6 +86,27 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     {
       ok: true,
       collection: collection || null,
+      // The collections this engine actually manages, as handles.
+      //
+      // Without it the storefront had no way to tell one of the three managed
+      // collections from the other 46, so it applied the global ranking to
+      // every /collections/ page in the store - overriding the Best selling
+      // and alphabetical sorts the merchant had chosen in Shopify. The order
+      // below is the whole catalogue by design (a product has one standing,
+      // and each collection is a subset of it), which is exactly why the
+      // storefront needs to be told where it may apply it.
+      //
+      // Empty until the engine has run once since this shipped, and an empty
+      // list means "do not reorder anywhere" rather than "reorder everywhere":
+      // the merchant's own sort is the safer default to land on.
+      managed: (() => {
+        try {
+          const h = JSON.parse(settings.collectionHandles);
+          return Array.isArray(h) ? h.map(String) : [];
+        } catch {
+          return [];
+        }
+      })(),
       // When the engine last rebuilt this ranking.
       //
       // The storefront caches the whole payload in sessionStorage, which
