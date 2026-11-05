@@ -73,6 +73,11 @@ export default function GlobalSettings() {
     colorScheme: settings.colorScheme || "light",
     hideCompare: !!(settings as any).priceDisplay?.hideCompare,
     customCSS: (settings as any).customCSS || "",
+    // Stored as an array; edited here as one handle per line, which reads
+    // better than JSON for a list that is usually one or two entries.
+    colorCardCollections: Array.isArray((settings as any).colorCards?.collections)
+      ? ((settings as any).colorCards.collections as string[]).join("\n")
+      : "",
   };
 
   const [enabled, setEnabled] = useState(initial.enabled);
@@ -82,6 +87,9 @@ export default function GlobalSettings() {
     !!(initial as any).hideCompare,
   );
   const [customCSS, setCustomCSS] = useState<string>((initial as any).customCSS || "");
+  const [colorCards, setColorCards] = useState<string>(
+    (initial as any).colorCardCollections || "",
+  );
   const [showSuccess, setShowSuccess] = useState(false);
 
   const isDirty =
@@ -89,7 +97,8 @@ export default function GlobalSettings() {
     fontFamily !== initial.fontFamily ||
     colorScheme !== initial.colorScheme ||
     hideCompare !== (initial as any).hideCompare ||
-    customCSS !== ((initial as any).customCSS || "");
+    customCSS !== ((initial as any).customCSS || "") ||
+    colorCards !== ((initial as any).colorCardCollections || "");
 
   useEffect(() => {
     if (actionData?.success) {
@@ -105,6 +114,7 @@ export default function GlobalSettings() {
     setColorScheme(initial.colorScheme);
     setHideCompare(!!(initial as any).hideCompare);
     setCustomCSS((initial as any).customCSS || "");
+    setColorCards((initial as any).colorCardCollections || "");
   };
 
   const handleSave = () => {
@@ -117,6 +127,12 @@ export default function GlobalSettings() {
         // off" without the two looking the same.
         priceDisplay: { enabled: hideCompare, hideCompare },
         customCSS,
+        colorCards: {
+          collections: colorCards
+            .split("\n")
+            .map((h) => h.trim().toLowerCase())
+            .filter(Boolean),
+        },
       },
     };
     submit({ data: JSON.stringify(data) }, { method: "POST" });
@@ -142,6 +158,21 @@ export default function GlobalSettings() {
                   helpText="When disabled, no widgets will render on your storefront"
                   checked={enabled}
                   onChange={setEnabled}
+                />
+              </BlockStack>
+            </Card>
+
+            <Card>
+              <BlockStack gap="400">
+                <Text as="h2" variant="headingMd">Colour cards</Text>
+                <TextField
+                  label="Collections to split by colour"
+                  value={colorCards}
+                  onChange={setColorCards}
+                  multiline={3}
+                  autoComplete="off"
+                  helpText="One collection handle per line, as it appears in the URL (jmlooks.com/collections/clogs -> clogs). Each colour of a product becomes its own card with its own photo, linking straight to that colour. A collection left out here is untouched. Sold-out colours stay visible but greyed out."
+                  placeholder="clogs"
                 />
               </BlockStack>
             </Card>

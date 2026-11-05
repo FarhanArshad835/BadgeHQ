@@ -534,6 +534,11 @@ var __bhqEngaged = false;
     var currencySymbol = data.currencySymbol || "$";
     var page = detectPage();
 
+    // Before the badge pass: a split card is still a card, and the
+    // badges, price rules and wishlist hearts that run after this all
+    // walk the grid as they find it.
+    if (page === "collection") renderColorCards(gs);
+
     if (w.announcementBars)
       w.announcementBars.forEach(function (bar) {
         renderAnnouncementBar(bar, page);
@@ -5974,6 +5979,198 @@ var __bhqEngaged = false;
     return { share: 0.7, pull: 8 };
   }
 
+  /* ===================== COLOUR CARDS =====================
+   *
+   * One card per colour, instead of one card per product.
+   *
+   * A product with three colours shows one photo on the grid, so a shopper
+   * who wants the black pair has to open the beige one to find out it exists.
+   * On Clogs every one of the ten products carries a distinct photo per
+   * colour, so splitting shows the real thing rather than the same picture
+   * relabelled.
+   *
+   * Opt-in per collection through Global Settings, because it triples a grid
+   * and that is only wanted where the colours are the point:
+   *   { "colorCards": { "collections": ["clogs"] } }
+   *
+   * Sold-out colours stay, dimmed and unclickable: they show the range
+   * without walking a shopper into a dead end.
+   */
+  var COLOR_OPT_RE = /colou?r/i;
+
+  /** The colour option's value for a variant, or "" when it has none. */
+  function variantColor(variant, colorIndex) {
+    if (colorIndex < 0) return "";
+    var key = "option" + (colorIndex + 1);
+    return String(variant[key] || "").trim();
+  }
+
+  /** Which option position holds the colour, or -1. */
+  function colorOptionIndex(product) {
+    var opts = product.options || [];
+    for (var i = 0; i < opts.length; i++) {
+      var name = typeof opts[i] === "string" ? opts[i] : (opts[i] && opts[i].name);
+      if (COLOR_OPT_RE.test(String(name || ""))) return i;
+    }
+    return -1;
+  }
+
+  /**
+   * Group a product's variants by colour.
+   *
+   * Returns [{ color, image, available, url }], in the order Shopify lists
+   * the option's values, so the grid keeps the merchant's own ordering.
+   * Empty when the product has no colour option - the caller then leaves its
+   * card exactly as the theme rendered it.
+   */
+  function colorGroups(product) {
+    var ci = colorOptionIndex(product);
+    if (ci < 0) return [];
+    var byColor = {};
+    var order = [];
+    var variants = product.variants || [];
+    for (var i = 0; i < variants.length; i++) {
+      var v = variants[i];
+      var c = variantColor(v, ci);
+      if (!c) continue;
+      if (!byColor[c]) {
+        byColor[c] = { color: c, image: "", available: false, variantId: v.id };
+        order.push(c);
+      }
+      // Available if ANY size in this colour can be bought.
+      if (v.available) byColor[c].available = true;
+      // First image belonging to this colour wins; featured_image is set per
+      // variant by Shopify when the merchant has assigned one.
+      if (!byColor[c].image && v.featured_image && v.featured_image.src) {
+        byColor[c].image = v.featured_image.src;
+      }
+      // Prefer a buyable variant's id for the link, so the colour opens ready
+      // to add rather than on a sold-out size.
+      if (v.available && !byColor[c].pickedLive) {
+        byColor[c].variantId = v.id;
+        byColor[c].pickedLive = true;
+      }
+    }
+    var out = [];
+    for (var k = 0; k < order.length; k++) {
+      var g = byColor[order[k]];
+      // Fall back to the product's own image rather than an empty tile.
+      if (!g.image) g.image = (product.images && product.images[0]) || "";
+      g.url = "/products/" + product.handle + "?variant=" + g.variantId;
+      out.push(g);
+    }
+    return out;
+  }
+  /** The collections colour cards are switched on for. */
+  function colorCardCollections(gs) {
+    try {
+      var list = gs && gs.colorCards && gs.colorCards.collections;
+      if (!list || list.length === undefined) return [];
+      var out = [];
+      for (var i = 0; i < list.length; i++) {
+        out.push(String(list[i]).trim().toLowerCase());
+      }
+      return out;
+    } catch (e) {
+      return [];
+    }
+  }
+
+  /**
+   * Replace each card on the grid with one card per colour.
+   *
+   * The theme's own card is cloned per colour rather than built from scratch,
+   * so every colour tile keeps the theme's markup, styling and the decoration
+   * other apps add after load. Only the image, the link and the title change.
+   */
+  function renderColorCards(gs) {
+    var cols = colorCardCollections(gs);
+    if (!cols.length) return;
+    var here = currentCollectionHandle();
+    if (!here || cols.indexOf(here) === -1) return;
+
+    var grid = document.querySelector("#product-grid");
+    if (!grid) return;
+    if (grid.getAttribute("data-bhq-colorcards") === "1") return;
+    grid.setAttribute("data-bhq-colorcards", "1");
+
+    // One request for the whole collection: variants, options and per-variant
+    // images all arrive together, so no per-product round trips.
+    fetch("/collections/" + encodeURIComponent(here) + "/products.json?limit=250", {
+      credentials: "same-origin",
+    })
+      .then(function (r) {
+        return r.ok ? r.json() : { products: [] };
+      })
+      .then(function (data) {
+        var byHandle = {};
+        var products = (data && data.products) || [];
+        for (var i = 0; i < products.length; i++) byHandle[products[i].handle] = products[i];
+        splitCardsByColor(grid, byHandle);
+      })
+      .catch(function () {
+        /* the grid stays exactly as the theme rendered it */
+      });
+  }
+
+  function splitCardsByColor(grid, byHandle) {
+    var items = grid.querySelectorAll("li.grid__item");
+    for (var i = 0; i < items.length; i++) {
+      (function (li) {
+        var a = li.querySelector('a[href*="/products/"]');
+        if (!a) return;
+        var h = (a.getAttribute("href") || "").split("/products/")[1];
+        if (!h) return;
+        h = h.split("?")[0].split("#")[0];
+        var product = byHandle[h];
+        if (!product) return;
+        var groups = colorGroups(product);
+        // One colour is already one card. Nothing to split, nothing to do.
+        if (groups.length < 2) return;
+
+        var frag = document.createDocumentFragment();
+        for (var g = 0; g < groups.length; g++) {
+          frag.appendChild(buildColorCard(li, groups[g], product));
+        }
+        li.parentNode.replaceChild(frag, li);
+      })(items[i]);
+    }
+  }
+
+  function buildColorCard(templateLi, group, product) {
+    var li = templateLi.cloneNode(true);
+    li.setAttribute("data-bhq-color", group.color);
+
+    // Every link points at this colour.
+    var links = li.querySelectorAll('a[href*="/products/"]');
+    for (var i = 0; i < links.length; i++) links[i].setAttribute("href", group.url);
+
+    // Swap in this colour's photo. srcset is cleared or the browser keeps
+    // serving the original from it and the swap appears to do nothing.
+    if (group.image) {
+      var imgs = li.querySelectorAll("img");
+      for (var j = 0; j < imgs.length; j++) {
+        imgs[j].setAttribute("src", group.image);
+        imgs[j].removeAttribute("srcset");
+        imgs[j].removeAttribute("data-srcset");
+        imgs[j].setAttribute("loading", "lazy");
+      }
+    }
+
+    // Name the colour on the card, so three near-identical tiles are
+    // distinguishable at a glance rather than only by their photo.
+    var title = li.querySelector(".card__heading a, .card-information a, h3 a");
+    if (title && title.textContent.indexOf(" - " + group.color) === -1) {
+      title.textContent = title.textContent.trim() + " - " + group.color;
+    }
+
+    if (!group.available) {
+      li.setAttribute("data-bhq-soldout", "1");
+      li.style.opacity = "0.45";
+      li.style.pointerEvents = "none";
+    }
+    return li;
+  }
   function reorderGridForShopper(page, weights) {
     // The veil is only ever raised once a change has been decided, so an
     // early exit has nothing to release - the grid was never hidden.
