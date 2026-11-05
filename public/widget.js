@@ -6113,27 +6113,67 @@ var __bhqEngaged = false;
       });
   }
 
+  /**
+   * Split every card, then lay the colours out so a product's own
+   * colours are never adjacent.
+   *
+   * Inserting them where the product sat put three near-identical tiles
+   * in a row, which reads as one shoe padding out the grid rather than
+   * a range worth browsing.
+   *
+   * Dealt in ROUNDS instead: every product contributes its first colour,
+   * then every product its second, and so on. The merchant's product
+   * order still decides the first screen - round one IS that order - and
+   * a product's colours end up a full round apart, which on this grid is
+   * eight or more cards.
+   *
+   * Rounds beat shuffling here: a shuffle can still deal two of the same
+   * product side by side, and it would throw away the ordering the
+   * merchant chose.
+   */
   function splitCardsByColor(grid, byHandle) {
     var items = grid.querySelectorAll("li.grid__item");
-    for (var i = 0; i < items.length; i++) {
-      (function (li) {
-        var a = li.querySelector('a[href*="/products/"]');
-        if (!a) return;
-        var h = (a.getAttribute("href") || "").split("/products/")[1];
-        if (!h) return;
-        h = h.split("?")[0].split("#")[0];
-        var product = byHandle[h];
-        if (!product) return;
-        var groups = colorGroups(product);
-        // One colour is already one card. Nothing to split, nothing to do.
-        if (groups.length < 2) return;
+    var entries = [];
+    var maxColors = 0;
 
-        var frag = document.createDocumentFragment();
-        for (var g = 0; g < groups.length; g++) {
-          frag.appendChild(buildColorCard(li, groups[g], product));
-        }
-        li.parentNode.replaceChild(frag, li);
-      })(items[i]);
+    for (var i = 0; i < items.length; i++) {
+      var li = items[i];
+      var a = li.querySelector('a[href*="/products/"]');
+      if (!a) continue;
+      var h = (a.getAttribute("href") || "").split("/products/")[1];
+      if (!h) continue;
+      h = h.split("?")[0].split("#")[0];
+      var product = byHandle[h];
+      if (!product) continue;
+      var groups = colorGroups(product);
+      // A single-colour product is already one card, but it still takes
+      // part in round one so it keeps its place in the merchant order.
+      if (!groups.length) continue;
+      entries.push({ li: li, groups: groups, product: product });
+      if (groups.length > maxColors) maxColors = groups.length;
+    }
+    if (!entries.length) return;
+
+    // Build every card before touching the DOM: cloning from a card that
+    // has already been removed yields nothing.
+    var rounds = [];
+    for (var r = 0; r < maxColors; r++) {
+      for (var e = 0; e < entries.length; e++) {
+        var g = entries[e].groups[r];
+        if (!g) continue;
+        rounds.push(buildColorCard(entries[e].li, g, entries[e].product));
+      }
+    }
+
+    // The first original card marks where the new grid begins; the rest
+    // are removed once their clones exist.
+    var anchor = entries[0].li;
+    var frag = document.createDocumentFragment();
+    for (var c = 0; c < rounds.length; c++) frag.appendChild(rounds[c]);
+    anchor.parentNode.insertBefore(frag, anchor);
+    for (var d = 0; d < entries.length; d++) {
+      var old = entries[d].li;
+      if (old.parentNode) old.parentNode.removeChild(old);
     }
   }
 
