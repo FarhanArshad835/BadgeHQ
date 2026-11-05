@@ -5985,6 +5985,28 @@ var __bhqEngaged = false;
     // for a reorder that is not coming is just a blank grid.
     if (page !== "collection" && page !== "home") return release();
 
+    // A collection the merchant did not pick is left entirely alone.
+    //
+    // Emptying the ranking here was not enough. The rewriter, the page
+    // prefetch and the lead-card prefetch all still armed, each then
+    // finding its own reason to do nothing - and every one of those
+    // reasons had to be found and fixed separately as products kept
+    // appearing on collections they did not belong to. Stopping before
+    // any of it arms is the only version of this that cannot leak: a
+    // path nobody has looked at yet never runs either.
+    //
+    // The managed list arrives with the ranking, so this waits for it
+    // rather than reading it at parse time. Badges, price rules and the
+    // theme's own infinite scroll are untouched - they do not come
+    // through here.
+    loadOrderRank(function () {
+      if (!mayApplyGlobalOrder()) return release();
+      reorderGridNow(page, weights, release);
+    });
+  }
+
+  function reorderGridNow(page, weights, release) {
+
     // Defaults match the old constants, so a shop that has never touched the
     // sliders behaves exactly as before.
     var W = {
@@ -6675,15 +6697,27 @@ var __bhqEngaged = false;
     // similar products were still being decided when the page was
     // assembled without them.
     //
-    // A card already cached is therefore answered at once - it cannot
-    // be the wrong product, because it only entered the cache after
-    // passing this same check.
-    var CKfast = "badgehq-card-" + handle;
-    try {
-      var hit = sessionStorage.getItem(CKfast);
-      if (hit) return then(cardFromHtml(hit));
-    } catch (e) {
-      /* private mode - fall through to the slow path */
+    // A cached card skips the WAIT, never the CHECK.
+    //
+    // The cache is keyed by handle alone and is shared across every
+    // collection in the session, so a tee cached while browsing
+    // Clothing is sitting there ready when Kitten Heels asks. Treating
+    // a cache hit as already-approved - on the grounds that it passed
+    // this check once - put the tees straight back: it passed the check
+    // for a DIFFERENT collection.
+    //
+    // So the hit is only taken when membership is already known and
+    // says yes. When it is not known yet the card falls through to the
+    // wait below, which is correct and costs nothing extra, because
+    // the answer it waits for is what the next cards need anyway.
+    if (membershipKnown()) {
+      if (!mayPlaceOnPage(handle)) return then(null);
+      try {
+        var hit = sessionStorage.getItem("badgehq-card-" + handle);
+        if (hit) return then(cardFromHtml(hit));
+      } catch (e) {
+        /* private mode - fall through to the fetch */
+      }
     }
     withCollectionMembership(function () {
       if (!mayPlaceOnPage(handle)) return then(null);
@@ -6693,6 +6727,14 @@ var __bhqEngaged = false;
 
   /** Run fn once the viewed collection's membership is known, or
    *  immediately when there is nothing to wait for. */
+  /** Whether the viewed collection's membership has already landed, so a
+   *  decision can be made without waiting for a fetch. */
+  function membershipKnown() {
+    var col = currentCollectionHandle();
+    if (!col || col === "all") return true;
+    var m = _collectionMembers[col];
+    return !!(m && m.loaded);
+  }
   function withCollectionMembership(fn) {
     var col = currentCollectionHandle();
     if (!col || col === "all") return fn();
