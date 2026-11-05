@@ -6310,6 +6310,10 @@ var __bhqEngaged = false;
       for (var h in aff) {
         if (onPage[h] || _outOfStock[h]) continue;
         if (typeof _orderRank[h] !== "number") continue;
+        // A neighbour of an engaged product is still only a candidate
+        // for a collection it belongs to. Tees neighbour tees, which is
+        // how engaging with one put four of them on Kitten Heels.
+        if (!mayPlaceOnPage(h)) continue;
         cands.push({ h: h, s: aff[h] });
       }
       cands.sort(function (a, b) {
@@ -6649,6 +6653,55 @@ var __bhqEngaged = false;
   }
 
   function fetchCardFor(handle, template, then) {
+    // The last gate before a product is built into this grid.
+    //
+    // Guarding the places that CHOOSE products was not enough: each of
+    // the four - the engagement pull-in, the scroll-page builder and
+    // both affinity paths - was gated, and a tee still arrived, because
+    // a fifth path reached the card fetch directly. Every injected card
+    // passes through here, so this is the one place that cannot be
+    // bypassed by a path nobody has found yet.
+    // Membership is fetched, so it is usually not known yet when the
+    // first cards are chosen. Letting a card through while it is
+    // unknown is what kept the tees arriving with every selection path
+    // gated: the cache read returned null, the guard said yes, and the
+    // answer landed moments later with the cards already built.
+    //
+    // So wait for the answer - but only to DECIDE, never to deliver.
+    // rebuildScrollPage builds a scroll page synchronously from cards
+    // already in the cache, so a card that arrives after that call has
+    // returned has missed its page entirely. Waiting here with no cache
+    // in hand is what emptied the affinity lead slots: the eight
+    // similar products were still being decided when the page was
+    // assembled without them.
+    //
+    // A card already cached is therefore answered at once - it cannot
+    // be the wrong product, because it only entered the cache after
+    // passing this same check.
+    var CKfast = "badgehq-card-" + handle;
+    try {
+      var hit = sessionStorage.getItem(CKfast);
+      if (hit) return then(cardFromHtml(hit));
+    } catch (e) {
+      /* private mode - fall through to the slow path */
+    }
+    withCollectionMembership(function () {
+      if (!mayPlaceOnPage(handle)) return then(null);
+      fetchCardForNow(handle, template, then);
+    });
+  }
+
+  /** Run fn once the viewed collection's membership is known, or
+   *  immediately when there is nothing to wait for. */
+  function withCollectionMembership(fn) {
+    var col = currentCollectionHandle();
+    if (!col || col === "all") return fn();
+    var m = _collectionMembers[col];
+    if (m && m.loaded) return fn();
+    prefetchCollectionMembers(col, fn);
+  }
+
+  function fetchCardForNow(handle, template, then) {
     var CK = "badgehq-card-" + handle;
     try {
       var cached = sessionStorage.getItem(CK);
@@ -6830,6 +6883,7 @@ var __bhqEngaged = false;
       for (var ch in _affinityRank) {
         if (_shown[ch] || _outOfStock[ch]) continue;
         if (typeof rank[ch] !== "number") continue;
+        if (!mayPlaceOnPage(ch)) continue;
         cands.push({ h: ch, s: _affinityRank[ch] });
       }
       // Strongest similarity first, not highest score: the point is which
