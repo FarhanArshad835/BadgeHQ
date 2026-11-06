@@ -71,6 +71,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     wishlistCount,
     backInStockCount,
     aiRepliesCount,
+    merchandisingSettings,
     themeExtensionEnabled,
     currentPlan,
   ] = await Promise.all([
@@ -86,6 +87,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     prisma.wishlistSettings.count({ where: { shop, isEnabled: true } }),
     prisma.backInStockSettings.count({ where: { shop, isEnabled: true } }),
     prisma.aiReplySettings.count({ where: { shop, isEnabled: true } }),
+    prisma.merchandiseSettings.findUnique({
+      where: { shop },
+      select: { isEnabled: true, collectionIds: true },
+    }),
     checkThemeExtensionEnabled(shop, accessToken),
     getShopPlan(shop),
   ]);
@@ -108,6 +113,17 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       wishlists: wishlistCount,
       backInStock: backInStockCount,
       aiReplies: aiRepliesCount,
+      // Collections, not widgets: the engine has no widget rows, it
+      // reorders the collections the merchant picked.
+      merchandising: (() => {
+        if (!merchandisingSettings?.isEnabled) return 0;
+        try {
+          const ids = JSON.parse(merchandisingSettings.collectionIds);
+          return Array.isArray(ids) ? ids.length : 0;
+        } catch {
+          return 0;
+        }
+      })(),
     },
     isEnabled: themeExtensionEnabled,
     themeEditorUrl,
@@ -179,6 +195,14 @@ const features = [
     description: "Message shoppers on WhatsApp when a sold-out product is back",
     route: "/app/back-in-stock",
     key: "backInStock" as const,
+  },
+  {
+    title: "Collection Merchandising",
+    description: "Rank products in a collection by sales, reviews and shopper behaviour",
+    route: "/app/merchandising",
+    key: "merchandising" as const,
+    // This one manages collections, not widgets, so it counts them.
+    unit: "collection",
   },
   {
     title: "Automated Replies",
@@ -315,7 +339,8 @@ export default function Dashboard() {
                       // The badge override existed only for the P&L card, which is
                       // no longer listed; every remaining feature shows a count.
                       const count = (stats as Record<string, number>)[feature.key] ?? 0;
-                      return `${count} ${count === 1 ? "widget" : "widgets"}`;
+                      const unit = (feature as { unit?: string }).unit || "widget";
+                      return `${count} ${count === 1 ? unit : unit + "s"}`;
                     })()}
                   </Badge>
                   <Box>
