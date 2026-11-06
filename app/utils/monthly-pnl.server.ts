@@ -51,6 +51,8 @@ export type RevenueDelivered = {
   cancelledRtoRevenueMinor: bigint; // netPlaced − delivered (derived plug)
   refundsMinor: bigint;
   netSaleMinor: bigint; // delivered − refunds
+  /** Prepaid RTO cash the merchant kept: income, with no COGS against it. */
+  retainedRtoCashMinor: bigint;
   // Counts.
   placedOrders: number;
   deliveredOrders: number;
@@ -95,6 +97,9 @@ export async function revenueAndDelivered(shop: string, month: string): Promise<
       // Needed to tell a parcel that is genuinely moving from an order that
       // has no tracking number at all and therefore can never resolve.
       awb: true,
+      // Tells a prepaid RTO from a COD one: the first collected money that
+      // was kept, the second never collected any.
+      financialStatus: true,
     },
   });
 
@@ -119,6 +124,17 @@ export async function revenueAndDelivered(shop: string, month: string): Promise<
   let abandonedRevenueMinor = 0n;
   let lostRevenueMinor = 0n;
   let inTransitRevenueMinor = 0n;
+  // Money from prepaid orders whose parcel came back and was not refunded.
+  //
+  // The merchant keeps it, so it is income - but it sat outside the P&L
+  // entirely, because Net Sale counts only delivered orders and these are
+  // RTO. The goods return to stock and are costed again when they next
+  // sell, so no COGS belongs against it; the cash is the whole of it.
+  //
+  // COD RTOs are excluded by the status test: nothing was ever collected
+  // on them, so there is nothing to keep. In September that was 3,352 of
+  // the 3,442 returns.
+  let retainedRtoCashMinor = 0n;
 
   for (const o of orders) {
     // Shopify currentTotal is post-discount; gross_sale is pre-discount, so add
@@ -135,6 +151,10 @@ export async function revenueAndDelivered(shop: string, month: string): Promise<
     } else if (oc === "rto" || oc === "rto_in_transit") {
       rtoOrders++;
       rtoRevenueMinor += o.grossRevenueMinor;
+      const paid = o.financialStatus.toUpperCase();
+      if (paid === "PAID" || paid === "PARTIALLY_PAID") {
+        retainedRtoCashMinor += o.grossRevenueMinor - o.refundsMinor;
+      }
     } else if (oc === "cancelled") {
       cancelledOrders++;
       cancelledRevenueMinor += o.grossRevenueMinor;
@@ -186,6 +206,7 @@ export async function revenueAndDelivered(shop: string, month: string): Promise<
     cancelledRtoRevenueMinor,
     refundsMinor,
     netSaleMinor,
+    retainedRtoCashMinor,
     placedOrders,
     deliveredOrders,
     rtoOrders,
@@ -623,6 +644,8 @@ export type MonthlyPnl = {
   gstInputMinor: bigint | null;
   netGstMinor: bigint | null;
   returnExchangeFeesMinor: bigint;
+  /** Prepaid RTO cash kept: income with no COGS and no pairs against it. */
+  retainedRtoCashMinor: bigint;
   returnExchangeFeesSource: string;
   feesAlreadyInNetSaleMinor: bigint; // exchange share; shown but not added to profit // "auto" (summed fee orders) | "manual" (override)
   // Bottom line — null when any required cost is pending (suppressed).
@@ -859,7 +882,12 @@ export async function computeMonth(shop: string, month: string): Promise<Monthly
     // deliberately still computed on the full Net Sale: whether the fee is
     // taxable is a GST question for the merchant's accountant, and
     // overstating tax owed is the safer way to be wrong.
-    (returnExchangeFeesMinor - feesAlreadyInNetSaleMinor);
+    (returnExchangeFeesMinor - feesAlreadyInNetSaleMinor) +
+    // Prepaid RTO cash the merchant kept. Added rather than folded into
+    // Net Sale, which is defined as delivered revenue and has to stay
+    // that way for the funnel and the per-pair figures to mean anything -
+    // these parcels were never delivered and carry no pairs.
+    rev.retainedRtoCashMinor;
 
   let netPnlMinor: bigint | null = null;
   if (resolved && costsKnown) {
@@ -926,6 +954,7 @@ export async function computeMonth(shop: string, month: string): Promise<Monthly
     gstInputMinor,
     netGstMinor,
     returnExchangeFeesMinor,
+    retainedRtoCashMinor: rev.retainedRtoCashMinor,
     returnExchangeFeesSource,
     feesAlreadyInNetSaleMinor,
     netPnlMinor,

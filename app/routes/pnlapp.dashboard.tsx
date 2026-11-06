@@ -300,6 +300,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       gstInput: s(r.gstInputMinor),
       netGst: s(r.netGstMinor),
       returnExchangeFees: s(r.returnExchangeFeesMinor),
+      retainedRtoCash: s(r.retainedRtoCashMinor),
       returnExchangeFeesSource: r.returnExchangeFeesSource,
       feesAlreadyInNetSale: s(r.feesAlreadyInNetSaleMinor),
       netPnl: s(r.netPnlMinor),
@@ -401,6 +402,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       })),
       gstInput: s(c.gstInputMinor),
       returnExchangeFees: s(c.returnExchangeFeesMinor),
+      retainedRtoCash: s(c.retainedRtoCashMinor),
       netPnl: s(c.netPnlMinor),
       partialPnl: s(c.partialPnlMinor),
       unresolvedOrders: c.unresolvedOrders,
@@ -1284,6 +1286,7 @@ of which ${fmt(r.deliveredRevenue)} delivered`} value={fmt(r.grossSale)} strong
                 <CmpRow label="GST charged" cols={d.compare} pick={(c) => sfmt(c.gstOutput)} breakdown={colGstOut} explain={EXPLAIN.gstOut} />
                 <CmpRow label="GST reclaimed" cols={d.compare} pick={(c) => fmt(c.gstInput, "Pending")} breakdown={colGstIn} explain={EXPLAIN.gstIn} />
                 <CmpRow label="Return/Exchange Fees" cols={d.compare} pick={(c) => fmt(c.returnExchangeFees)} />
+                <CmpRow label="Kept on returned prepaid" cols={d.compare} pick={(c) => fmt(c.retainedRtoCash)} />
                 <CmpRow
                   label="P&L"
                   cols={d.compare}
