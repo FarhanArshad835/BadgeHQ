@@ -251,9 +251,13 @@ export async function deliveredCogs(
   // The delivered orders in the window.
   const delivered = await prisma.orderFinancials.findMany({
     where: { shop, orderCreatedAt: { gte: start, lt: end }, deliveryStatus: "delivered" },
-    select: { orderId: true },
+    select: { orderId: true, isExchangeFee: true },
   });
   const deliveredIds = delivered.map((d) => d.orderId);
+  // Replacement orders, so their pair can be left out of COGS below.
+  const exchangeOrderIds = new Set(
+    delivered.filter((d) => d.isExchangeFee).map((d) => d.orderId),
+  );
   if (!deliveredIds.length) {
     return {
       cogsMinor: 0n,
@@ -276,6 +280,7 @@ export async function deliveredCogs(
       lineCogsComplete: true,
       productTitle: true,
       productId: true,
+      orderId: true,
     },
   });
 
@@ -321,6 +326,25 @@ export async function deliveredCogs(
   let stockingCogsMinor = 0n;
   let stockingPairs = 0;
   for (const l of lines) {
+    // A replacement pair is not a third pair of goods sold.
+    //
+    // An exchange is one sale: the customer pays once, keeps the same
+    // number of pairs, and sends one back. Traced on ten September
+    // exchanges - #225985 against original #222583 and nine more - the
+    // original order stays delivered with its full cost while the
+    // replacement books another, so 31 pairs of COGS were counted
+    // against 21 pairs the customers kept.
+    //
+    // The returned pair goes back into stock and is costed again when
+    // it next sells, so counting it here charges the same goods twice.
+    // Skipped entirely rather than netted off: the replacement line
+    // carries its own cost, so this is an exact figure.
+    //
+    // Its pairs are left out of deliveredPairs too, or every per-pair
+    // number is divided by a count that includes pairs nobody bought.
+    // The Rs 100 fee stays in revenue - it was collected, and the fee
+    // line already avoids double-counting it.
+    if (exchangeOrderIds.has(l.orderId)) continue;
     deliveredPairs += l.quantity;
     // Same match the stocking cost used, so the split and the old separate
     // line can never disagree about which lines are stockings.
