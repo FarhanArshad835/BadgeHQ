@@ -270,8 +270,48 @@ export async function deliveredCogs(
 
   const lines = await prisma.orderLineFinancials.findMany({
     where: { shop, orderId: { in: deliveredIds } },
-    select: { quantity: true, lineCogsMinor: true, lineCogsComplete: true, productTitle: true },
+    select: {
+      quantity: true,
+      lineCogsMinor: true,
+      lineCogsComplete: true,
+      productTitle: true,
+      productId: true,
+    },
   });
+
+  // What each product costs, from its OWN costed lines.
+  //
+  // A line written before the sync captured variant ids carries no
+  // variant, so no cost could be looked up for it - 4,118 lines of one
+  // shoe, all before 12 October, against 346 costed ones after. The
+  // product is unchanged and still selling: only the pointer is missing.
+  //
+  // This is not an estimate. It is the same product's own cost per unit,
+  // taken from lines where Shopify did report it, so a line gets the
+  // figure it would have had if the pointer had been stored. Products
+  // with no costed line anywhere are left uncosted and still count
+  // against the match rate.
+  const costedProductIds = Array.from(
+    new Set(lines.filter((l) => l.productId).map((l) => l.productId)),
+  );
+  const productUnitCost = new Map<string, bigint>();
+  if (costedProductIds.length) {
+    const known = await prisma.$queryRawUnsafe<
+      Array<{ productId: string; unitCost: bigint }>
+    >(
+      `SELECT "productId",
+              (SUM("lineCogsMinor") / SUM(quantity))::bigint AS "unitCost"
+         FROM "OrderLineFinancials"
+        WHERE shop = $1
+          AND "lineCogsMinor" IS NOT NULL
+          AND quantity > 0
+          AND "productId" = ANY($2::text[])
+        GROUP BY "productId"`,
+      shop,
+      costedProductIds,
+    );
+    for (const k of known) productUnitCost.set(k.productId, k.unitCost);
+  }
 
   const term = stockingMatch.trim().toLowerCase();
   let cogsMinor = 0n;
@@ -286,9 +326,17 @@ export async function deliveredCogs(
     // line can never disagree about which lines are stockings.
     const isStocking = term !== "" && String(l.productTitle || "").toLowerCase().includes(term);
     if (isStocking) stockingPairs += l.quantity;
-    if (l.lineCogsComplete && l.lineCogsMinor != null) {
-      cogsMinor += l.lineCogsMinor;
-      if (isStocking) stockingCogsMinor += l.lineCogsMinor;
+    // The line's own cost where Shopify gave one, otherwise this
+    // product's cost from its other lines.
+    const lineCost =
+      l.lineCogsComplete && l.lineCogsMinor != null
+        ? l.lineCogsMinor
+        : l.productId && productUnitCost.has(l.productId)
+          ? productUnitCost.get(l.productId)! * BigInt(l.quantity)
+          : null;
+    if (lineCost != null) {
+      cogsMinor += lineCost;
+      if (isStocking) stockingCogsMinor += lineCost;
       linesWithCost++;
       costedQty += BigInt(l.quantity);
     }
