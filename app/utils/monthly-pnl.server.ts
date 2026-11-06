@@ -322,6 +322,11 @@ export async function deliveredCogs(
   let cogsMinor = 0n;
   let deliveredPairs = 0;
   let linesWithCost = 0;
+  // Lines the loop below actually weighs. Not lines.length: the match
+  // rate must divide by the same set it counts, and replacement lines
+  // are skipped. Dividing by every line put all four months back to
+  // Pending with the numerator already excluding them.
+  let linesConsidered = 0;
   let costedQty = 0n;
   let stockingCogsMinor = 0n;
   let stockingPairs = 0;
@@ -345,6 +350,7 @@ export async function deliveredCogs(
     // The Rs 100 fee stays in revenue - it was collected, and the fee
     // line already avoids double-counting it.
     if (exchangeOrderIds.has(l.orderId)) continue;
+    linesConsidered++;
     deliveredPairs += l.quantity;
     // Same match the stocking cost used, so the split and the old separate
     // line can never disagree about which lines are stockings.
@@ -366,8 +372,8 @@ export async function deliveredCogs(
     }
   }
 
-  const matchRate = lines.length ? linesWithCost / lines.length : 1;
-  const cogsComplete = linesWithCost === lines.length;
+  const matchRate = linesConsidered ? linesWithCost / linesConsidered : 1;
+  const cogsComplete = linesWithCost === linesConsidered;
   const weightedAvgCostPerPairMinor = costedQty > 0n ? cogsMinor / costedQty : null;
 
   // Spec Gate 3: below this match rate, do NOT impute across the gap — surface
