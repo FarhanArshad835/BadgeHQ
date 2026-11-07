@@ -403,6 +403,11 @@ var __bhqEngaged = false;
       // exit releases explicitly; this is the backstop for none of them
       // being reached.
       setTimeout(__bhqUnveil, 900);
+      // Second backstop at 1.2s. The 900ms ceiling above is cleared by
+      // any path that calls __bhqUnveil, but a veil that survives every
+      // one of them shows an empty collection - the worst failure this
+      // code can produce, and worse than any ordering it protects.
+      setTimeout(__bhqUnveil, 1200);
     } catch (e) {
       /* never let this be why a grid stays blank */
     }
@@ -6139,6 +6144,9 @@ var __bhqEngaged = false;
    * other apps add after load. Only the image, the link and the title change.
    */
   function renderColorCards(gs) {
+    // The veil goes up at parse time for a colour collection, so EVERY
+    // path out of here has to take it down again. Missing one leaves
+    // #product-grid at opacity 0 for ever: a blank collection page.
     var cols = colorCardCollections(gs);
     // Remembered for the NEXT load: the veil goes up at parse time,
     // long before the config has been fetched, so it can only know
@@ -6148,12 +6156,21 @@ var __bhqEngaged = false;
     } catch (e) {
       /* private mode - the grid simply paints unveiled */
     }
-    if (!cols.length) return;
+    if (!cols.length) {
+      __bhqUnveil();
+      return;
+    }
     var here = currentCollectionHandle();
-    if (!here || cols.indexOf(here) === -1) return;
+    if (!here || cols.indexOf(here) === -1) {
+      __bhqUnveil();
+      return;
+    }
 
     var grid = document.querySelector("#product-grid");
-    if (!grid) return;
+    if (!grid) {
+      __bhqUnveil();
+      return;
+    }
 
     // Infinite scroll appends batches the theme rendered itself, so a
     // one-shot guard on the grid left every page after the first
@@ -6219,7 +6236,10 @@ var __bhqEngaged = false;
         splitCardsByColor(grid, byHandle);
       })
       .catch(function () {
-        /* the grid stays exactly as the theme rendered it */
+        /* the grid stays exactly as the theme rendered it - but it
+           must still be SHOWN, or a failed fetch hides the whole
+           collection. */
+        __bhqUnveil();
       });
   }
 
@@ -6280,7 +6300,10 @@ var __bhqEngaged = false;
       entries.push({ li: li, groups: groups, product: product });
       if (groups.length > maxColors) maxColors = groups.length;
     }
-    if (!entries.length) return;
+    if (!entries.length) {
+      __bhqUnveil();
+      return;
+    }
 
     // Within a product, its best-selling colour goes in round one.
     //
