@@ -651,6 +651,7 @@ var __bhqEngaged = false;
       }, 400);
     });
     observer.observe(document.body, { childList: true, subtree: true });
+
     document.addEventListener("shopify:section:load", function () { wlDecorateCards(w.wishlist); });
   }
 
