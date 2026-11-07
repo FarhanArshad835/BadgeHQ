@@ -6001,6 +6001,9 @@ var __bhqEngaged = false;
   /** handle -> { colour(lowercase) -> units sold }, from /api/color-demand. */
   var _colorDemand = {};
 
+  /** How far the weakest colour of a product sits below its strongest. */
+  var COLOR_SPREAD = 40;
+
   /** The colour option's value for a variant, or "" when it has none. */
   function variantColor(variant, colorIndex) {
     if (colorIndex < 0) return "";
@@ -6253,15 +6256,47 @@ var __bhqEngaged = false;
       });
     }
 
+    // Space each product's colours evenly across the whole page.
+    //
+    // Dealing in plain rounds was not enough. Round r only contains the
+    // products that HAVE an (r+1)th colour, and most have three, so the
+    // late rounds are short and the few six-colour products come round
+    // again every few cards. Measured on this collection: one product
+    // landed at 3, 27, 47, 64, 70, 73 - gaps of 24, 20, 17, 6, then 3.
+    //
+    // Each colour is given a position instead: the product's own slot,
+    // plus an even share of the page per extra colour. A product with
+    // two colours is half a page apart, one with six is a sixth. The
+    // first colour keeps the merchant's order, so the opening screen is
+    // still theirs.
+    var totalCards = 0;
+    for (var tc = 0; tc < entries.length; tc++) totalCards += entries[tc].groups.length;
+
+    var slots = [];
+    for (var e2 = 0; e2 < entries.length; e2++) {
+      var gs2 = entries[e2].groups;
+      var stride = totalCards / gs2.length;
+      for (var gi = 0; gi < gs2.length; gi++) {
+        slots.push({
+          // Fractional on purpose: the sort below only needs an order,
+          // and rounding here would pile several products on one slot.
+          at: e2 + gi * stride,
+          entry: entries[e2],
+          group: gs2[gi],
+        });
+      }
+    }
+    slots.sort(function (a, b) {
+      return a.at - b.at;
+    });
+
     // Build every card before touching the DOM: cloning from a card that
     // has already been removed yields nothing.
     var rounds = [];
-    for (var r = 0; r < maxColors; r++) {
-      for (var e = 0; e < entries.length; e++) {
-        var g = entries[e].groups[r];
-        if (!g) continue;
-        rounds.push(buildColorCard(entries[e].li, g, entries[e].product));
-      }
+    for (var si = 0; si < slots.length; si++) {
+      rounds.push(
+        buildColorCard(slots[si].entry.li, slots[si].group, slots[si].entry.product),
+      );
     }
 
     // The first original card marks where the new grid begins; the rest
@@ -7424,7 +7459,16 @@ var __bhqEngaged = false;
       for (var i = 0; i < found.length; i++) {
         var root = cardRootOf(found[i]);
         var handle = wlHandleFromLink(found[i]);
-        if (root && handle) cards.push({ root: root, handle: handle.toLowerCase() });
+        if (root && handle) {
+          cards.push({
+            root: root,
+            handle: handle.toLowerCase(),
+            // Present only on a colour card, so the ranking can score
+            // each colour instead of giving a product's colours one
+            // shared score and sorting them into a block.
+            color: root.getAttribute ? root.getAttribute("data-bhq-color") : null,
+          });
+        }
       }
     }
     if (cards.length < 2) return false;
@@ -7630,6 +7674,33 @@ var __bhqEngaged = false;
       // Unranked products keep their place rather than sinking: a new
       // product the engine has not scored yet is not a bad product.
       var standing = typeof base === "number" ? base : -(idx + 1);
+      // A colour card is scored as its own product.
+      //
+      // Every colour of a product shares one handle, so they all scored
+      // identically and sorted into a solid block - the five sneaker
+      // colours at 9-12, the six heel colours at 16-21. The split had
+      // spaced them out; this put them straight back together, but only
+      // for a shopper with behaviour, which is why a fresh-session test
+      // kept reporting none.
+      //
+      // Each colour is offset by how much of the product it sells, from
+      // the same demand figures the cards are ordered by. The strongest
+      // colour keeps the product's own standing; weaker ones sit a
+      // little below, so colours compete rather than travel as a lump.
+      var colorAdj = 0;
+      if (c.color) {
+        var sold = _colorDemand[c.handle];
+        if (sold) {
+          var mine = sold[String(c.color).toLowerCase()] || 0;
+          var best = 0;
+          for (var ck in sold) if (sold[ck] > best) best = sold[ck];
+          // 0 for the best-selling colour, down to -COLOR_SPREAD for one
+          // that never sells. Small against a score that runs 0-1000, so
+          // it separates a product's own colours without moving it past
+          // products the merchant ranked differently.
+          colorAdj = best > 0 ? -COLOR_SPREAD * (1 - mine / best) : 0;
+        }
+      }
       return {
         root: c.root,
         idx: idx,
@@ -7638,6 +7709,7 @@ var __bhqEngaged = false;
         // than by filtering, so they keep their place among themselves.
         total:
           standing +
+          colorAdj +
           (byHandle[c.handle] || 0) -
           (_outOfStock[c.handle] ? OOS_PENALTY : 0),
       };
