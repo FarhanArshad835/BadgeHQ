@@ -1897,12 +1897,20 @@ var __bhqEngaged = false;
         try {
           // A card the engine already priced is left exactly as it was built.
           //
-          // The ordered grid draws the final price into the card from the
-          // stored row, discount included. The guard below is __bhqPriceRule,
-          // a JS property, which a card created after that pass ran has never
-          // had - so without this check the discount would be taken a second
-          // time off a price that already had it. One implementation owns a
-          // card's price, and for these cards it is the engine.
+          // The ordered grid writes the final price - discount included - from
+          // the stored row. Both of this pass's own guards miss such a card:
+          // __bhqPriceRule is a JS property and data-badgehq-pay an attribute
+          // this pass writes itself, and a freshly built card has neither.
+          //
+          // Measured on the live collection, cloning a discounted card and
+          // firing the pass at it: a card showing 749 came out as "849749".
+          // Not a second discount - worse. productData.price is Shopify's 849,
+          // so the pass treats the engine's 749 as the price to STRIKE and
+          // renders a markup that does not exist. With this guard: 749.
+          //
+          // It takes a load event to reproduce, because attachBadges bails
+          // unless img.complete && naturalWidth > 1 - which is why injecting a
+          // card by hand looks safe and is not.
           if (img.closest && img.closest("[data-bhq-priced]")) return;
           // Walk out until an ancestor actually contains a price.
           //
