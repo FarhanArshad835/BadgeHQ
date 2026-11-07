@@ -723,6 +723,24 @@ export function buildColorOrder(
 
   live.sort((a, b) => a.at - b.at);
   dead.sort((a, b) => a.at - b.at);
+
+  // The sold-out tail is short, so two colours of one product can still
+  // land together in it - measured, 2 pairs at positions 218-221 of 227
+  // on Sneakers, both sold out. Nudged apart here rather than by widening
+  // the spread, which would only move the collision somewhere else.
+  for (let i = 1; i < dead.length; i++) {
+    if (dead[i].card[0] !== dead[i - 1].card[0]) continue;
+    // Swap with the next card from a different product.
+    const j = dead.findIndex(
+      (d, k) => k > i && d.card[0] !== dead[i].card[0] && d.card[0] !== dead[i - 1].card[0],
+    );
+    if (j > i) {
+      const t = dead[i];
+      dead[i] = dead[j];
+      dead[j] = t;
+    }
+  }
+
   return live.concat(dead).map((s) => s.card);
 }
 export async function applyOrder(
