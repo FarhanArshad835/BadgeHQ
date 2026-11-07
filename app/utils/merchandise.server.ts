@@ -274,6 +274,11 @@ type ProductFacts = {
   /** One entry per colour, in the order Shopify lists them, carrying what
    *  a card needs: its photo, a variant to link to, and whether any size
    *  in that colour can still be bought. */
+  /** Live on the storefront: ACTIVE and published. A draft or unpublished
+   *  product is still in the collection in admin but 404s for a shopper. */
+  live: boolean;
+  /** The product's own photo, for a card that has no colour of its own. */
+  featuredImage: string;
   colorCards: Array<{
     color: string;
     image: string;
@@ -360,6 +365,13 @@ export async function fetchCollection(
               category { name }
               options { name values }
               publishedAt
+              # Whether a shopper can actually open this product. A
+              # collection in admin still lists drafts and unpublished
+              # products, and a card for one leads to a 404.
+              status
+              # For a product with no colour option: its card still needs
+              # a photo, and no variant carries one.
+              featuredImage { url }
               totalInventory
               reviews: metafield(namespace: "doran", key: "prReviewCount") { value }
               variants(first: 100) {
@@ -417,6 +429,8 @@ export async function fetchCollection(
             .filter((v: any) => v?.availableForSale && Number(v?.inventoryQuantity ?? 0) > 0)
             .map((v: any) => String(v.id)),
         ),
+        live: String(n.status || "").toUpperCase() === "ACTIVE" && !!n.publishedAt,
+        featuredImage: String(n.featuredImage?.url || ""),
         colorCards: colorCardsOf(n),
       });
     }
@@ -689,8 +703,16 @@ export function buildColorOrder(
   ordered.forEach((productId, position) => {
     const f = byId.get(productId);
     if (!f) return;
-    const cards = f.colorCards;
-    if (!cards.length) return;
+    // A draft or unpublished product 404s on the storefront. 20 of them
+    // were in this list, two flagged buyable - a shopper tapping those
+    // cards would have hit a dead page.
+    if (!f.live) return;
+    // A product with no colour option is still a product. 4 of them were
+    // dropped entirely, so rendering only from this list would have made
+    // them vanish from the grid. One card, no colour suffix.
+    const cards = f.colorCards.length
+      ? f.colorCards
+      : [{ color: "", image: f.featuredImage, variantId: "", soldOut: !f.inStock }];
 
     // Best-selling colour first, so it inherits the product's own position.
     const sold = demand.get(f.handle);

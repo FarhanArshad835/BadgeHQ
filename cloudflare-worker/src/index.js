@@ -130,6 +130,10 @@ async function proxyWithCache(request, originPath, env) {
   const respHeaders = new Headers();
   respHeaders.set("Content-Type", upstream.headers.get("Content-Type") || "application/json");
   respHeaders.set("Cache-Control", `public, max-age=${browserTtl}`);
+  // Lets a page measure what these responses actually cost it. Without this
+  // a cross-origin fetch reports size 0, so payload regressions are invisible
+  // from the storefront - which is how an 80KB list was reported as 9KB.
+  respHeaders.set("Timing-Allow-Origin", "*");
   respHeaders.set("Access-Control-Allow-Origin", "*");
   respHeaders.set("X-Source", "cloudflare-worker-api-proxy");
   respHeaders.set("X-Origin", "vercel");
