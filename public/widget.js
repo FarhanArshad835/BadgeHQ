@@ -6001,8 +6001,20 @@ var __bhqEngaged = false;
   /** handle -> { colour(lowercase) -> units sold }, from /api/color-demand. */
   var _colorDemand = {};
 
-  /** How far the weakest colour of a product sits below its strongest. */
-  var COLOR_SPREAD = 40;
+  /**
+   * How far the weakest colour of a product sits below its strongest.
+   *
+   * Sized against the real distribution, not picked. Products on this
+   * catalogue sit about 8 points apart near the top of the ranking, so
+   * the first value tried - 40 - spanned only five slots, which is
+   * exactly how many colours the worst offender has: every colour still
+   * landed inside the same handful of cards and the block survived.
+   *
+   * 240 is thirty slots, wide enough that a six-colour product is spread
+   * across the page while still far smaller than the 0-1000 score range,
+   * so a strong product never falls below a weak one on colour alone.
+   */
+  var COLOR_SPREAD = 240;
 
   /** The colour option's value for a variant, or "" when it has none. */
   function variantColor(variant, colorIndex) {
@@ -7707,14 +7719,27 @@ var __bhqEngaged = false;
       if (c.color) {
         var sold = _colorDemand[c.handle];
         if (sold) {
-          var mine = sold[String(c.color).toLowerCase()] || 0;
-          var best = 0;
-          for (var ck in sold) if (sold[ck] > best) best = sold[ck];
-          // 0 for the best-selling colour, down to -COLOR_SPREAD for one
-          // that never sells. Small against a score that runs 0-1000, so
-          // it separates a product's own colours without moving it past
-          // products the merchant ranked differently.
-          colorAdj = best > 0 ? -COLOR_SPREAD * (1 - mine / best) : 0;
+          // By RANK among the product's colours, not by units.
+          //
+          // Demand falls off a cliff - 4636, 1320, 474, 175, 155 - so
+          // scaling by units pins every colour after the first to
+          // almost the same offset and they bunch again, just further
+          // down. Rank spaces them evenly whatever the curve.
+          var mine = String(c.color).toLowerCase();
+          var ordered = [];
+          for (var ck in sold) ordered.push([ck, sold[ck]]);
+          ordered.sort(function (a, b) {
+            return b[1] - a[1];
+          });
+          var place = 0;
+          for (var oi = 0; oi < ordered.length; oi++) {
+            if (ordered[oi][0] === mine) {
+              place = oi;
+              break;
+            }
+          }
+          // 0 for the best seller, then an even step per place.
+          colorAdj = ordered.length > 1 ? -COLOR_SPREAD * (place / (ordered.length - 1)) : 0;
         }
       }
       return {
