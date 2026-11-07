@@ -6243,6 +6243,53 @@ var __bhqEngaged = false;
       soldOut: c[4] === 1,
     };
   }
+  /**
+   * The products behind the cards currently on the grid.
+   *
+   * Worked out from the handles actually present rather than a fixed window:
+   * once cards are colour cards, card count no longer tracks product count,
+   * so counting cards to guess a page number drifts further out with every
+   * batch. The handles are on the page already - they are what needs data.
+   */
+  function fetchProductPagesFor(handle, grid) {
+    var need = {};
+    var links = grid.querySelectorAll('li.grid__item a[href*="/products/"]');
+    for (var i = 0; i < links.length; i++) {
+      var h = (links[i].getAttribute("href") || "").split("/products/")[1];
+      if (h) need[h.split("?")[0].split("#")[0]] = true;
+    }
+    var wanted = 0;
+    for (var k in need) wanted++;
+
+    // Walk pages until every handle on the grid has data, or the collection
+    // runs out. Capped: a shopper deep in a 1,070-product collection should
+    // not pull the whole catalogue to split one batch.
+    var products = [];
+    var page = 1;
+    var MAX_PAGES = 8;
+    function next() {
+      return fetch(
+        "/collections/" + encodeURIComponent(handle) + "/products.json?limit=250&page=" + page,
+        { credentials: "same-origin" },
+      )
+        .then(function (r) {
+          return r.ok ? r.json() : { products: [] };
+        })
+        .then(function (d) {
+          var got = (d && d.products) || [];
+          products = products.concat(got);
+          var have = 0;
+          for (var j = 0; j < products.length; j++) if (need[products[j].handle]) have++;
+          if (have >= wanted || got.length < 250 || ++page > MAX_PAGES) {
+            return { products: products };
+          }
+          return next();
+        });
+    }
+    return next().catch(function () {
+      return { products: products };
+    });
+  }
   function renderColorCards(gs) {
     // The veil goes up at parse time for a colour collection, so EVERY
     // path out of here has to take it down again. Missing one leaves
@@ -6306,15 +6353,20 @@ var __bhqEngaged = false;
       //
       // Later pages are fetched by the scroll path, which splits each
       // batch as it arrives.
-      fetch(
-        "/collections/" +
-          encodeURIComponent(here) +
-          "/products.json?limit=" +
-          Math.max(12, Math.min(50, grid.querySelectorAll("li.grid__item").length)),
-        { credentials: "same-origin" },
-      ).then(function (r) {
-        return r.ok ? r.json() : { products: [] };
-      }),
+      // The products this batch actually needs, by page.
+      //
+      // This asked for the first N products of the collection with no
+      // page parameter, so it always returned the SAME opening products.
+      // Batch 1 and 2 are inside them and split; batch 3 holds products
+      // 49+, which are absent from the response, so every card falls
+      // through "product not found" and stays as Shopify sent it.
+      // Measured: batch 3 could split 2 of 24, batches 4 and 5 none.
+      //
+      // The theme paginates 24 at a time, so the page a batch belongs to
+      // is derivable from how many cards are already on the grid. Two
+      // pages are fetched, because a batch can straddle a boundary once
+      // the grid holds colour cards rather than one card per product.
+      fetchProductPagesFor(here, grid),
       (window.__bhqRawFetch || window.fetch)(
         API_ORIGIN + "/api/color-demand?shop=" + encodeURIComponent(SHOP),
       )
