@@ -6228,16 +6228,7 @@ var __bhqEngaged = false;
       for (var e = 0; e < entries.length; e++) {
         var g = entries[e].groups[r];
         if (!g) continue;
-        rounds.push(
-          buildColorCard(
-            entries[e].li,
-            g,
-            entries[e].product,
-            entries[e].groups.map(function (x) {
-              return x.color;
-            }),
-          ),
-        );
+        rounds.push(buildColorCard(entries[e].li, g, entries[e].product));
       }
     }
 
@@ -6253,7 +6244,7 @@ var __bhqEngaged = false;
     }
   }
 
-  function buildColorCard(templateLi, group, product, allColors) {
+  function buildColorCard(templateLi, group, product) {
     var li = templateLi.cloneNode(true);
     li.setAttribute("data-bhq-color", group.color);
 
@@ -6273,27 +6264,20 @@ var __bhqEngaged = false;
       }
     }
 
-    // Name the colour on the card, so near-identical tiles are
-    // distinguishable at a glance rather than only by their photo.
+    // Name the colour on the card.
     //
-    // Any colour already on the end is stripped first. The template is
-    // cloned once per colour, and on a re-run the card it clones may
-    // already carry one - which produced "Shoes - Peach - White": the
-    // trailing name was right and the eye read the first.
+    // Rebuilt from the product's own title plus THIS group's colour -
+    // the same group object the image above came from - rather than
+    // edited from whatever text the cloned card happened to carry.
+    // Editing meant the result depended on the template's existing
+    // title, which is how "Shoes - Peach - White" appeared: the colour
+    // shown and the colour read were taken from different places.
+    // There is only one source now, so the name beside a photo is the
+    // name of the variant that photo belongs to, by construction.
     var title = li.querySelector(".card__heading a, .card-information a, h3 a");
     if (title) {
-      var base = title.textContent.trim();
-      for (var ci = 0; ci < allColors.length; ci++) {
-        var suffix = " - " + allColors[ci];
-        while (base.length > suffix.length && base.slice(-suffix.length) === suffix) {
-          base = base.slice(0, -suffix.length).trim();
-          ci = -1;
-          break;
-        }
-      }
-      title.textContent = base + " - " + group.color;
+      title.textContent = String(product.title || "").trim() + " - " + group.color;
     }
-
     if (!group.available) {
       li.setAttribute("data-bhq-soldout", "1");
       li.style.opacity = "0.45";
