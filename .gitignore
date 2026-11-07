@@ -19,3 +19,6 @@ extensions/*/dist
 
 # Recovery exports: real customer phone numbers, not for the repo.
 unanswered-outage.csv
+
+# local CDP probes
+*.mjs
