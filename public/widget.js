@@ -344,6 +344,20 @@ var __bhqEngaged = false;
   (function veilIfEngaged() {
     try {
       if (!/\/collections\//.test(location.pathname) && location.pathname !== "/") return;
+      // A colour-card collection is always veiled, behaviour or not:
+      // the split replaces every card on the grid, so without this the
+      // shopper reads one order and then watches it become another.
+      try {
+        var cc = JSON.parse(sessionStorage.getItem("badgehq-colorcards") || "[]");
+        var hh = (location.pathname.match(/\/collections\/([^/?#]+)/) || [])[1];
+        if (hh && cc.indexOf(decodeURIComponent(hh).toLowerCase()) >= 0) {
+          __bhqEngaged = true;
+          veilGridNow();
+          return;
+        }
+      } catch (e) {
+        /* no cached list yet - falls through to the behaviour check */
+      }
       var raw = sessionStorage.getItem("badgehq-behaviour");
       if (!raw) return;
       var bag = JSON.parse(raw);
@@ -6126,6 +6140,14 @@ var __bhqEngaged = false;
    */
   function renderColorCards(gs) {
     var cols = colorCardCollections(gs);
+    // Remembered for the NEXT load: the veil goes up at parse time,
+    // long before the config has been fetched, so it can only know
+    // which collections split by colour from a previous visit.
+    try {
+      sessionStorage.setItem("badgehq-colorcards", JSON.stringify(cols));
+    } catch (e) {
+      /* private mode - the grid simply paints unveiled */
+    }
     if (!cols.length) return;
     var here = currentCollectionHandle();
     if (!here || cols.indexOf(here) === -1) return;
@@ -6156,9 +6178,24 @@ var __bhqEngaged = false;
     // waiting for one without the other would only mean laying the grid
     // out twice.
     Promise.all([
-      fetch("/collections/" + encodeURIComponent(here) + "/products.json?limit=250", {
-        credentials: "same-origin",
-      }).then(function (r) {
+      // Only the products on screen.
+      //
+      // 250 is 5.3MB and 1.2-1.8s on this collection, which is past the
+      // veil's 900ms ceiling - so the split landed after the grid was
+      // already being read and rearranged it twelve seconds in. The
+      // cards actually present are 540KB and ~260ms, which fits inside
+      // the veil, so the shopper sees the split order from the start
+      // and nothing moves afterwards.
+      //
+      // Later pages are fetched by the scroll path, which splits each
+      // batch as it arrives.
+      fetch(
+        "/collections/" +
+          encodeURIComponent(here) +
+          "/products.json?limit=" +
+          Math.max(12, Math.min(50, grid.querySelectorAll("li.grid__item").length)),
+        { credentials: "same-origin" },
+      ).then(function (r) {
         return r.ok ? r.json() : { products: [] };
       }),
       (window.__bhqRawFetch || window.fetch)(
@@ -6342,6 +6379,8 @@ var __bhqEngaged = false;
         /* a grid that cannot be sorted still renders */
       }
     }
+    // The grid is final now, so show it.
+    __bhqUnveil();
   }
 
   function buildColorCard(templateLi, group, product) {
