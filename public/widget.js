@@ -6327,6 +6327,21 @@ var __bhqEngaged = false;
       var old = entries[d].li;
       if (old.parentNode) old.parentNode.removeChild(old);
     }
+
+    // Sort again, now the cards being sorted exist.
+    //
+    // This runs from a fetch, so it lands AFTER reorderGridForShopper has
+    // already sorted the page. It then replaced every card it had just
+    // sorted with a fresh unsorted set, which is why sold-out colours
+    // stayed where the split put them however many gates were opened
+    // upstream: the sort was real, it just ran against the wrong cards.
+    if (typeof applyShopperOrder === "function") {
+      try {
+        applyShopperOrder(_lastWanted || []);
+      } catch (e) {
+        /* a grid that cannot be sorted still renders */
+      }
+    }
   }
 
   function buildColorCard(templateLi, group, product) {
@@ -7520,7 +7535,12 @@ var __bhqEngaged = false;
     }
     return null;
   }
+  /** The engagement list the last sort used, so a re-sort after the
+   *  colour split keeps the shopper's own ordering. */
+  var _lastWanted = null;
+
   function applyShopperOrder(wanted, batchOnly) {
+    _lastWanted = wanted;
     // Reuse the wishlist's card selectors: they already cover Dawn and the
     // other themes this app runs on, and they are maintained in one place.
     var cards = [];
