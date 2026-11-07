@@ -6349,6 +6349,343 @@ var __bhqEngaged = false;
       return { products: products };
     });
   }
+  /**
+   * The grid a shopper is actually looking at.
+   *
+   * When the ordered grid takes over, Shopify's #product-grid is hidden but
+   * stays in the DOM with its original 24 products. Anything that asks what
+   * is on screen - the next-page prefetcher, the "already visible?" tests -
+   * would read those instead of the cards being shown, and so answer for a
+   * grid nobody can see.
+   */
+  function liveGridSelector() {
+    return document.getElementById("bhq-ordered-grid")
+      ? "#bhq-ordered-grid"
+      : "#product-grid";
+  }
+
+  /**
+   * Draw the collection from the engine's ordered colour list.
+   *
+   * Copied from public/experimental/ordered-grid.js, which stays as the
+   * standalone version that can be pasted into DevTools on a live page. The
+   * code below is that file's, unchanged except that the shop and API base
+   * come from the page instead of constants, and every exit returns true or
+   * false so renderColorCards can fall back to splitting Shopify's own grid.
+   *
+   * Why it exists: the split rearranges the 24 products Shopify happened to
+   * send, so a colour belonging on page 5 sits on page 1 until a later batch
+   * displaces it - measured at 42 of 73 cards moving after one scroll. This
+   * draws from a list built across the whole collection, so a card is placed
+   * once, in its final position, and never moves.
+   *
+   * Returns true when it has taken over the grid, false when it touched
+   * nothing at all.
+   */
+  async function renderOrderedGrid() {
+  'use strict';
+  if (window.__bhqOrdered) return false;
+  window.__bhqOrdered = { log: [], filled: [], startedAt: performance.now() };
+  var S = window.__bhqOrdered;
+
+  var SHOP = (window.Shopify && window.Shopify.shop) || '';
+  if (!SHOP) return false;
+  var API = API_ORIGIN + '/api/color-order';
+  var BATCH = 24, WINDOW = 240, PREFETCH_PX = 2500;
+  var COL = (location.pathname.split('/collections/')[1] || '').split('/')[0];
+  var params = new URLSearchParams(location.search);
+
+  // ---- 5. step aside on sort / non-colour filters --------------------------------
+  var sort = params.get('sort_by');
+  var otherFilter = Array.from(params.keys()).some(function (k) {
+    return k.indexOf('filter.') === 0 && k !== 'filter.v.option.color';
+  });
+  if ((sort && sort !== 'manual') || otherFilter) return false;
+  var colourFilter = params.getAll('filter.v.option.color').map(function (c) { return c.toLowerCase(); });
+
+  var oldGrid = document.querySelector('#product-grid');
+  if (!oldGrid || !COL) return false;
+  var sectionEl = oldGrid.closest('[id^="shopify-section-"]');
+  var sectionId = sectionEl ? sectionEl.id.replace('shopify-section-', '') : null;
+
+  // ---- 1. decide first: load the frozen list (first window) ----------------------
+  var list = [], listTotal = null, listCursor = 0, tail = [], windowLoading = null;
+  // Fetch the next 240-card section of the list once, in the background, before it runs out.
+  function ensureWindow() {
+    if (windowLoading || listTotal === null || list.length >= listTotal) return windowLoading;
+    windowLoading = loadWindow(list.length).finally(function () { windowLoading = null; });
+    return windowLoading;
+  }
+  async function loadWindow(offset) {
+    var r = await fetch(API + '?shop=' + SHOP + '&collection=' + COL + '&offset=' + offset + '&limit=' + WINDOW);
+    if (!r.ok) throw new Error('list ' + r.status);
+    var d = await r.json();
+    if (!d || !d.cards) throw new Error('list empty');
+    if (Date.now() - Number(d.builtAt) > 2 * 3600 * 1000) throw new Error('list stale');
+    listTotal = d.total;
+    d.cards.forEach(function (c) {
+      // The row now carries what the card SHOWS, not just where it goes:
+      // [handle, colour, img, variantId, soldOut, title, price, strike, badges].
+      // Before this the renderer fetched /products/<handle>.js per product -
+      // 40KB and ~160ms each, about 0.4MB for one batch of 24 cards. The
+      // same batch is now 1.7KB, because the engine computed it hourly.
+      list.push({
+        h: c[0],
+        colour: c[1] || '',
+        img: c[2],
+        vid: String(c[3] || ''),
+        soldOut: !!c[4],
+        title: c[5] || '',
+        priceMinor: Number(c[6] || 0),
+        strikeMinor: Number(c[7] || 0),
+        badges: c[8] || []
+      });
+    });
+  }
+  try { await loadWindow(0); }
+  catch (e) { S.log.push('fallback: ' + e.message); return false; }
+
+  // ---- template card: Shopify's own undecorated markup --------------------------
+  var tpl = null;
+  try {
+    var html = await (await fetch(location.pathname + '?section_id=' + sectionId)).text();
+    var doc = new DOMParser().parseFromString(html, 'text/html');
+    tpl = doc.querySelector('#product-grid li.grid__item');
+  } catch (e) { /* fall through */ }
+  if (!tpl) { S.log.push('fallback: no template'); return false; }
+  tpl.querySelectorAll('.badge, .card__badge').forEach(function (b) { b.remove(); });
+
+  // fixed slot height = a real card at this viewport width
+  var slotH = Math.round(oldGrid.querySelector('li.grid__item').getBoundingClientRect().height);
+
+  // ---- 2. our own grid, same theme classes ---------------------------------------
+  var grid = document.createElement('ul');
+  grid.className = oldGrid.className;
+  grid.id = 'bhq-ordered-grid';
+  grid.setAttribute('role', 'list');
+  oldGrid.insertAdjacentElement('afterend', grid);
+  var hide = document.createElement('style');
+  hide.id = 'bhq-ordered-hide';
+  hide.textContent = '#product-grid,.collection__infinite-scroll-trigger,.jm-pagination{display:none!important}' +
+    '#bhq-ordered-grid>li{height:' + slotH + 'px;overflow:hidden}' +
+    '.bhq-ph{height:100%;border-radius:8px;background:linear-gradient(90deg,#f1f1f1 25%,#e7e7e7 37%,#f1f1f1 63%);background-size:400% 100%;animation:bhqsh 1.2s ease infinite}' +
+    '@keyframes bhqsh{0%{background-position:100% 50%}100%{background-position:0 50%}}';
+  document.head.appendChild(hide);
+  // The theme hides empty <div>s (div:empty{display:none}), so the marker must not be empty,
+  // and the "near the end?" test uses the grid's own bottom edge, never the marker's position.
+  var sentinel = document.createElement('div');
+  sentinel.setAttribute('aria-hidden', 'true');
+  sentinel.style.cssText = 'display:block!important;height:1px;overflow:hidden';
+  sentinel.innerHTML = '&nbsp;';
+  grid.insertAdjacentElement('afterend', sentinel);
+  function nearEnd() { return grid.getBoundingClientRect().bottom < innerHeight + PREFETCH_PX; }
+
+
+  // ---- live stock -----------------------------------------------------------------
+  //
+  // The engine's sold-out flag is up to an hour old, and a colour that sells
+  // out inside that hour must not be drawn among the buyable ones.
+  //
+  // Read from the collection feed, which reports `available` per variant. The
+  // obvious-looking /variants/<id>.json does NOT: it answers 200 with price and
+  // options and no availability at all, and 404s for more than one id - so a
+  // batch check built on it would have failed silently on every batch.
+  //
+  // A page is 250 products, about 337KB, and covers roughly 700 colour cards -
+  // so a long scroll needs one or two. Fetched lazily: a shopper who never
+  // scrolls never pays for it.
+  var stock = {};
+  var stockPages = 0;
+  var stockLoading = null;
+  // Latched when a page comes back empty. Without it the next batch asks for
+  // the same exhausted page number again - stockPages only advances on a
+  // non-empty read - so a deep scroll spends one dead request per batch.
+  var stockDone = false;
+  function loadStockPage() {
+    if (stockDone) return Promise.resolve(0);
+    if (stockLoading) return stockLoading;
+    stockLoading = fetch(
+      '/collections/' + COL + '/products.json?limit=250&page=' + (stockPages + 1),
+      { credentials: 'same-origin' }
+    )
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        var ps = (d && d.products) || [];
+        for (var i = 0; i < ps.length; i++) {
+          for (var k = 0; k < ps[i].variants.length; k++) {
+            var v = ps[i].variants[k];
+            stock[String(v.id)] = !!v.available;
+          }
+        }
+        if (ps.length) stockPages++;
+        else stockDone = true;
+        return ps.length;
+      })
+      .catch(function () { return 0; })
+      .finally(function () { stockLoading = null; });
+    return stockLoading;
+  }
+  // The first screen never waits for stock.
+  //
+  // The feed page is ~337KB. Awaiting it before the opening cards means grey
+  // slots for as long as it takes, which on a slow connection is seconds - the
+  // exact stall this renderer exists to remove. The row's own sold-out flag is
+  // at most an hour old and is good enough for the first screen; the fetch is
+  // kicked off in parallel and the batch after it has the answer.
+  var stockWarmed = false;
+  async function liveStock(entries) {
+    // One more page, at most, per batch: enough to stay ahead of the shopper
+    // without pulling the catalogue to draw 24 cards.
+    var missing = entries.filter(function (e) {
+      return e.vid && !stock.hasOwnProperty(e.vid);
+    }).length;
+    if (missing && !stockWarmed) {
+      // Start it, don't await it: the shopper sees cards now.
+      stockWarmed = true;
+      loadStockPage();
+    } else if (missing) {
+      await loadStockPage();
+    }
+    var out = {};
+    for (var i = 0; i < entries.length; i++) {
+      var id = entries[i].vid;
+      // Unknown stays unknown: the engine's flag then stands, which is the
+      // behaviour before this check existed. A failed read never hides a
+      // colour a shopper could have bought.
+      if (id && stock.hasOwnProperty(id)) out[id] = stock[id];
+    }
+    return out;
+  }
+  // ---- 1b. prepare the next n entries: live stock decides BEFORE drawing ------------
+  async function nextEntries(n) {
+    var out = [];
+    while (out.length < n) {
+      if (list.length - listCursor < 80) ensureWindow();            // read ahead, don't wait
+      if (listCursor >= list.length) {
+        if (listTotal !== null && list.length < listTotal) { await ensureWindow(); continue; }
+        if (tail.length) { out.push(tail.shift()); continue; }
+        break;
+      }
+      var take = list.slice(listCursor, listCursor + (n - out.length) + 8);
+      // Live stock for exactly these variants, in ONE request.
+      //
+      // The engine's sold-out flag is up to an hour old, and a colour that
+      // sells out in that hour must not be drawn among the buyable ones.
+      // Asked here, before anything is placed, so a card is never moved
+      // after the shopper has seen it.
+      var live = await liveStock(take);
+      for (var i = 0; i < take.length && out.length < n; i++) {
+        var e = take[i]; listCursor++;
+        if (colourFilter.length && colourFilter.indexOf(e.colour.toLowerCase()) < 0) continue;
+        var avail = e.vid && live.hasOwnProperty(e.vid) ? live[e.vid] : !e.soldOut;
+        if (!avail && !e.soldOut) { e.soldOut = true; tail.push(e); continue; } // sold out since run: to the tail
+        out.push(e);
+      }
+    }
+    return out;
+  }
+
+  // ---- 3. draw a complete card into a slot, once -----------------------------------
+  var money = function (cents) { return '₹' + Math.round(cents / 100).toLocaleString('en-IN'); };
+  var uid = 0;
+  function fill(slot, e) {
+    var li = tpl.cloneNode(true);
+    // Everything from the row: no product fetch, so a card can be drawn
+    // the moment its slot is reached.
+    var url = '/products/' + e.h + (e.vid ? '?variant=' + e.vid : '');
+    var title = e.title + (e.colour ? ' - ' + e.colour : '');
+    uid++;
+    li.querySelectorAll('[id]').forEach(function (el) { el.id = el.id + '-bhq' + uid; });
+    li.querySelectorAll('[aria-labelledby]').forEach(function (el) {
+      el.setAttribute('aria-labelledby', el.getAttribute('aria-labelledby').split(' ').map(function (x) { return x + '-bhq' + uid; }).join(' '));
+    });
+    li.querySelectorAll("a[href*='/products/']").forEach(function (a) { a.setAttribute('href', url); });
+    li.querySelectorAll('.card__heading a').forEach(function (a) { a.textContent = title; });
+    var src = 'https://cdn.shopify.com/s/files/' + e.img;
+    li.querySelectorAll('img').forEach(function (img) {
+      img.setAttribute('src', src + '?width=533');
+      img.setAttribute('srcset', [165, 360, 533, 720, 940].map(function (w) { return src + '?width=' + w + ' ' + w + 'w'; }).join(', '));
+      img.setAttribute('alt', title);
+      img.removeAttribute('onload');
+      img.style.opacity = '1';
+      img.setAttribute('loading', 'lazy');
+    });
+    var price = li.querySelector('.price');
+    if (price) {
+      // The FINAL price, already discounted by the engine. The storefront
+      // used to apply the Rs 100 Special Price rule itself, after the card
+      // was on screen - which is why a card changed seconds after it was
+      // drawn. One implementation now, and it runs before the draw.
+      var onSale = e.strikeMinor > e.priceMinor;
+      price.className = 'price' + (onSale ? ' price--on-sale' : '') + (e.soldOut ? ' price--sold-out' : '');
+      price.querySelectorAll('.price-item--regular').forEach(function (el) {
+        el.textContent = money(onSale ? e.strikeMinor : e.priceMinor);
+      });
+      price.querySelectorAll('.price-item--sale').forEach(function (el) {
+        el.textContent = money(e.priceMinor);
+      });
+    }
+    // Marks the card as priced by the engine.
+    //
+    // The widget's own price-rule pass rewrites a card's price from
+    // productData.price, guarded by a __bhqPriceRule JS property - which a
+    // card built here has never had. Without this attribute that pass would
+    // discount an already-discounted price, so the two implementations the
+    // engine was meant to replace would both run on the same card.
+    li.setAttribute('data-bhq-priced', '');
+    li.setAttribute('data-bhq-slot', String(slot.index));
+    li.setAttribute('data-bhq-key', e.h + '|' + e.colour);
+    if (e.soldOut) li.setAttribute('data-bhq-soldout', '');
+    li.style.height = slotH + 'px';
+    slot.el.replaceWith(li);          // same slot, same size: nothing moves
+    slot.el = li;
+    S.filled.push({ slot: slot.index, key: e.h + '|' + e.colour, at: Math.round(performance.now()) });
+  }
+
+  // ---- 3 + 4. batches: placeholders now, fill when data is ready ------------------
+  // The next batch's cards are decided and their data fetched as soon as the previous
+  // batch is drawn, so when the shopper gets near the end they are drawn immediately.
+  var slots = [], busy = false, done = false, prepared = null;
+  function prepare() { if (!prepared) prepared = nextEntries(BATCH); return prepared; }
+  async function addBatch() {
+    if (busy || done) return;
+    busy = true;
+    var t0 = performance.now();
+    var batch = [];
+    for (var i = 0; i < BATCH; i++) {
+      var ph = document.createElement('li');
+      ph.className = 'grid__item';
+      ph.innerHTML = '<div class="bhq-ph"></div>';
+      grid.appendChild(ph);
+      var slot = { index: slots.length + 1, el: ph };
+      slots.push(slot); batch.push(slot);
+    }
+    var entries = await prepare();
+    prepared = null;
+    batch.forEach(function (slot, i) {
+      if (entries[i]) fill(slot, entries[i]);
+      else { slot.el.remove(); done = true; }
+    });
+    S.log.push('batch ' + Math.ceil(slots.length / BATCH) + ': ' + entries.length + ' cards in ' + Math.round(performance.now() - t0) + 'ms');
+    busy = false;
+    if (!done) prepare();                       // get the following batch ready in the background
+    maybeLoad();
+  }
+  function maybeLoad() { if (!busy && !done && nearEnd()) addBatch(); }
+  // An IntersectionObserver only reports when the marker ENTERS the zone; a shopper already
+  // inside the zone (e.g. at the very bottom) gets no new report, so also check on scroll.
+  new IntersectionObserver(function (es) { if (es[0].isIntersecting) maybeLoad(); },
+    { rootMargin: '0px 0px ' + PREFETCH_PX + 'px 0px' }).observe(sentinel);
+  var ticking = false;
+  addEventListener('scroll', function () {
+    if (ticking) return; ticking = true;
+    requestAnimationFrame(function () { ticking = false; maybeLoad(); });
+  }, { passive: true });
+
+  await addBatch();
+  S.log.push('frozen list ' + listTotal + ' cards, slot height ' + slotH + 'px');
+  return true;
+  }
   function renderColorCards(gs) {
     // The veil goes up at parse time for a colour collection, so EVERY
     // path out of here has to take it down again. Missing one leaves
@@ -6372,6 +6709,33 @@ var __bhqEngaged = false;
       return;
     }
 
+    // The ordered grid first, the split only if it declines.
+    //
+    // Both produce one card per colour; the difference is where the order
+    // comes from. The split can only rearrange the 24 products Shopify
+    // happened to send, so a colour belonging deep in the collection sits
+    // on page 1 until a later batch displaces it - 42 of 73 cards moved
+    // after one scroll. The ordered grid draws from a list built across
+    // the whole collection, so nothing moves once drawn.
+    //
+    // It declines on a sort, a non-colour filter, a missing or stale list,
+    // or no template - every case where it cannot guarantee that. The
+    // split is what shoppers see today, so it stays as the fallback
+    // rather than leaving the page unsplit.
+    renderOrderedGrid().then(function (took) {
+      if (took) {
+        __bhqUnveil();
+        return;
+      }
+      splitPath(gs, here);
+    }, function () {
+      // A throw here must not be the reason a grid stays veiled.
+      splitPath(gs, here);
+    });
+  }
+
+  /** The original split: one card per colour, from the cards on the page. */
+  function splitPath(gs, here) {
     var grid = document.querySelector("#product-grid");
     if (!grid) {
       __bhqUnveil();
@@ -6391,7 +6755,7 @@ var __bhqEngaged = false;
     // card is never split twice.
     if (!grid.getAttribute("data-bhq-colorcards")) {
       grid.setAttribute("data-bhq-colorcards", "1");
-      watchGridForNewCards(grid, gs);
+      watchGridForNewCards(grid, gs, here);
     }
 
     // One request for the whole collection: variants, options and per-variant
@@ -6487,7 +6851,7 @@ var __bhqEngaged = false;
   /** Re-split when infinite scroll appends a batch. Debounced, because the
    *  theme inserts a page a card at a time. */
   var _colorCardTimer = null;
-  function watchGridForNewCards(grid, gs) {
+  function watchGridForNewCards(grid, gs, here) {
     if (!window.MutationObserver) return;
     new MutationObserver(function () {
       clearTimeout(_colorCardTimer);
@@ -6495,7 +6859,10 @@ var __bhqEngaged = false;
         var fresh = grid.querySelectorAll(
           "li.grid__item:not([data-bhq-color]):not([data-bhq-seen])",
         );
-        if (fresh.length) renderColorCards(gs);
+        // splitPath, not renderColorCards: this watcher only exists
+        // because the split is running, and re-entering the top would
+        // try the ordered grid again on every appended batch.
+        if (fresh.length) splitPath(gs, here);
       }, 400);
     }).observe(grid, { childList: true });
   }
@@ -6926,6 +7293,10 @@ var __bhqEngaged = false;
       // document's own head and always says page 2, so prefetching from it
       // worked once and then handed back a stale page for every later
       // scroll - the shopper got the full wait back from page 3 onward.
+      // Nothing to prefetch when the ordered grid is drawing: the theme's
+      // infinite scroll is hidden and its next page is never requested, so
+      // fetching that page would be a section render nobody reads.
+      if (document.getElementById("bhq-ordered-grid")) return;
       var trigger = document.querySelector('[id^="infinite-scroll-trigger"]');
       var nextUrl =
         (trigger && (trigger.getAttribute("data-next-page") || trigger.getAttribute("data-next-url"))) ||
@@ -7091,7 +7462,7 @@ var __bhqEngaged = false;
       // will not be fetched for a later page either.
       var onPage = {};
       try {
-        var links = document.querySelectorAll('#product-grid a[href*="/products/"]');
+        var links = document.querySelectorAll(liveGridSelector() + ' a[href*="/products/"]');
         for (var li = 0; li < links.length; li++) {
           var lm = (links[li].getAttribute("href") || "").match(/\/products\/([^/?#]+)/);
           if (lm) onPage[decodeURIComponent(lm[1]).toLowerCase()] = true;
@@ -7341,7 +7712,7 @@ var __bhqEngaged = false;
    *  wrong product as present. */
   function handleOnPage(handle) {
     try {
-      var links = document.querySelectorAll('#product-grid a[href*="/products/"]');
+      var links = document.querySelectorAll(liveGridSelector() + ' a[href*="/products/"]');
       for (var i = 0; i < links.length; i++) {
         var m = (links[i].getAttribute("href") || "").match(/\/products\/([^/?#]+)/);
         if (m && decodeURIComponent(m[1]).toLowerCase() === handle) return true;
@@ -7999,7 +8370,7 @@ var __bhqEngaged = false;
     // Shopify rendered does not carry one, which is exactly the case that
     // slipped through.
     try {
-      var links = document.querySelectorAll('#product-grid a[href*="/products/"]');
+      var links = document.querySelectorAll(liveGridSelector() + ' a[href*="/products/"]');
       for (var li = 0; li < links.length; li++) {
         var lm = (links[li].getAttribute("href") || "").match(/\/products\/([^/?#]+)/);
         if (lm) present[decodeURIComponent(lm[1]).toLowerCase()] = true;

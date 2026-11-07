@@ -269,10 +269,10 @@
       var onSale = e.strikeMinor > e.priceMinor;
       price.className = 'price' + (onSale ? ' price--on-sale' : '') + (e.soldOut ? ' price--sold-out' : '');
       price.querySelectorAll('.price-item--regular').forEach(function (el) {
-        el.textContent = money((onSale ? e.strikeMinor : e.priceMinor) / 100);
+        el.textContent = money(onSale ? e.strikeMinor : e.priceMinor);
       });
       price.querySelectorAll('.price-item--sale').forEach(function (el) {
-        el.textContent = money(e.priceMinor / 100);
+        el.textContent = money(e.priceMinor);
       });
     }
     // Marks the card as priced by the engine.
