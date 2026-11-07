@@ -7450,6 +7450,17 @@ var __bhqEngaged = false;
     return tpl.innerHTML;
   }
 
+  /** The colour a card was built for, from whichever ancestor holds it. */
+  function colorOfCard(node) {
+    for (var n = node; n; n = n.parentElement) {
+      if (n.getAttribute) {
+        var c = n.getAttribute("data-bhq-color");
+        if (c) return c;
+      }
+      if (n.tagName === "UL" || n.tagName === "BODY") break;
+    }
+    return null;
+  }
   function applyShopperOrder(wanted, batchOnly) {
     // Reuse the wishlist's card selectors: they already cover Dawn and the
     // other themes this app runs on, and they are maintained in one place.
@@ -7466,7 +7477,12 @@ var __bhqEngaged = false;
             // Present only on a colour card, so the ranking can score
             // each colour instead of giving a product's colours one
             // shared score and sorting them into a block.
-            color: root.getAttribute ? root.getAttribute("data-bhq-color") : null,
+            //
+            // Read from the nearest ancestor carrying it, not from the
+            // root: the attribute is set on the <li>, while cardRootOf
+            // returns a div several levels inside it, so reading the
+            // root alone always found null and the offset never applied.
+            color: colorOfCard(root),
           });
         }
       }
