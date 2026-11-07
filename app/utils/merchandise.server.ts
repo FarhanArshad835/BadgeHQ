@@ -962,7 +962,17 @@ export function buildColorOrder(
             p.finalMinor,
             // A badge discount beats a compare-at price: it is the one
             // the shopper actually sees struck through on the card.
-            p.strikeMinor || c.compareMinor,
+            //
+            // Dropped when it is not above the price being charged. Shopify
+            // lets a compare-at be entered below the price - this catalogue
+            // has one at 849 with a compare-at of 799 - and striking it would
+            // advertise a markup as a saving. Shopify's own themes suppress
+            // that case; the row has to, because nothing downstream re-checks
+            // it once the card is drawn from these numbers.
+            (() => {
+              const strike = p.strikeMinor || c.compareMinor;
+              return strike > p.finalMinor ? strike : 0;
+            })(),
             p.badges,
           ] as ColorCardRow;
         })(),
