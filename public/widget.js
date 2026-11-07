@@ -7462,6 +7462,14 @@ var __bhqEngaged = false;
     return tpl.innerHTML;
   }
 
+  /** Whether this card is a colour that cannot be bought. */
+  function soldOutCard(node) {
+    for (var n = node; n; n = n.parentElement) {
+      if (n.getAttribute && n.getAttribute("data-bhq-soldout")) return true;
+      if (n.tagName === "UL" || n.tagName === "BODY") break;
+    }
+    return false;
+  }
   /** The colour a card was built for, from whichever ancestor holds it. */
   function colorOfCard(node) {
     for (var n = node; n; n = n.parentElement) {
@@ -7495,6 +7503,7 @@ var __bhqEngaged = false;
             // returns a div several levels inside it, so reading the
             // root alone always found null and the offset never applied.
             color: colorOfCard(root),
+            soldOut: !!soldOutCard(root),
           });
         }
       }
@@ -7752,7 +7761,15 @@ var __bhqEngaged = false;
           standing +
           colorAdj +
           (byHandle[c.handle] || 0) -
-          (_outOfStock[c.handle] ? OOS_PENALTY : 0),
+          // A sold-out COLOUR sinks like a sold-out product.
+          //
+          // _outOfStock is keyed by handle, so it is only true when every
+          // variant of a product has gone. A bag has one variant per
+          // colour, so a dead colour is a dead card - and 32 of the 48
+          // cards on Bags for Women were greyed out while still sitting
+          // in the merchant's order, because the penalty never fired for
+          // them. buildColorCard already marked them; this reads it.
+          (_outOfStock[c.handle] || c.soldOut ? OOS_PENALTY : 0),
       };
     });
 
