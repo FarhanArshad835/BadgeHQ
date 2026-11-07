@@ -6050,13 +6050,18 @@ var __bhqEngaged = false;
       if (v.available) byColor[c].available = true;
       // The first image belonging to this colour wins.
       //
-      // Read from the variant's image_id against the product's images,
-      // not from featured_image: the Admin API sets that field, the
-      // storefront products.json this reads does NOT, so every colour
-      // fell through to the product's first photo and five colours were
-      // rendered as the same black sneaker under five different names.
-      if (!byColor[c].image && v.image_id && imageById[v.image_id]) {
-        byColor[c].image = imageById[v.image_id];
+      // Both shapes are read, because Shopify serves two and the colour
+      // is wrong under whichever one is missed:
+      //   /collections/<h>/products.json  -> variant.featured_image, no image_id
+      //   /products/<h>.json              -> variant.image_id, no featured_image
+      // This code runs on the collection feed, so featured_image is the
+      // one that matters here; image_id covers the other.
+      if (!byColor[c].image) {
+        if (v.featured_image && v.featured_image.src) {
+          byColor[c].image = v.featured_image.src;
+        } else if (v.image_id && imageById[v.image_id]) {
+          byColor[c].image = imageById[v.image_id];
+        }
       }
       // Prefer a buyable variant's id for the link, so the colour opens ready
       // to add rather than on a sold-out size.
