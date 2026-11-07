@@ -6192,21 +6192,50 @@ var __bhqEngaged = false;
    * the page itself, exactly as before. A wrong order is a blemish; a blank
    * or half-rendered grid is a dead collection page.
    */
+  /** Everything fetched of the list so far, and how far that reaches. */
+  var _colorListCards = [];
+  var _colorListBuiltAt = 0;
+  var _colorListTotal = 0;
+
   function loadColorList(handle, pageHandles, then) {
+    // Fetched in pages as the shopper goes deeper.
+    //
+    // One request for the first 240 is enough for the opening screens and
+    // nothing after: measured, batch 1 had a server position for all 73
+    // of its colour cards, batch 3 for 46 of 67, batch 5 for 23 of 72.
+    // Past that the ordering silently fell back to what this page could
+    // work out for itself, which is the thing the list exists to replace.
+    //
+    // A page is ~240 cards and about 20KB, so two or three of them cover
+    // a long scroll and the rest are never asked for.
+    var PAGE = 240;
+    if (_colorListCards.length >= _colorListTotal && _colorListTotal) {
+      return then(trusted(pageHandles));
+    }
     var url =
       API_ORIGIN +
       "/api/color-order?shop=" +
       encodeURIComponent(SHOP) +
       "&collection=" +
       encodeURIComponent(handle) +
-      "&limit=240";
+      "&limit=" +
+      PAGE +
+      "&offset=" +
+      _colorListCards.length;
     (window.__bhqRawFetch || window.fetch)(url)
       .then(function (r) {
         return r.ok ? r.json() : null;
       })
       .then(function (d) {
-        if (!d || !d.ok || !d.cards || !d.cards.length) return then(null);
+        if (!d || !d.ok || !d.cards || !d.cards.length) return then(trusted(pageHandles));
         if (!d.builtAt || Date.now() - d.builtAt > COLOR_LIST_MAX_AGE_MS) return then(null);
+        // A rebuild mid-scroll invalidates what came before: positions in
+        // the new list do not line up with the old one.
+        if (_colorListBuiltAt && d.builtAt !== _colorListBuiltAt) _colorListCards = [];
+        _colorListBuiltAt = d.builtAt;
+        _colorListTotal = d.total || d.cards.length;
+        _colorListCards = _colorListCards.concat(d.cards);
+        d = { ok: true, builtAt: _colorListBuiltAt, total: _colorListTotal, cards: _colorListCards };
 
         // Does the list know about the products Shopify actually sent?
         //
@@ -6229,8 +6258,20 @@ var __bhqEngaged = false;
         then({ cards: d.cards, total: d.total || d.cards.length, builtAt: d.builtAt });
       })
       .catch(function () {
-        then(null);
+        // A failed page does not discard the pages already in hand.
+        then(trusted(pageHandles));
       });
+  }
+
+  /** What has been fetched so far, if it still passes the guards. */
+  function trusted(pageHandles) {
+    if (!_colorListCards.length) return null;
+    if (!_colorListBuiltAt || Date.now() - _colorListBuiltAt > COLOR_LIST_MAX_AGE_MS) return null;
+    return {
+      cards: _colorListCards,
+      total: _colorListTotal,
+      builtAt: _colorListBuiltAt,
+    };
   }
 
   /** Put back the parts the engine stripped to keep the list small. */
