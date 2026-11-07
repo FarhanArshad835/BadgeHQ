@@ -85,6 +85,41 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const offset = Math.max(0, parseInt(String(url.searchParams.get("offset") || "0"), 10) || 0);
   const limit = Math.min(240, Math.max(1, parseInt(String(url.searchParams.get("limit") || "48"), 10) || 48));
 
+  // ?handles=a,b,c returns just those products' cards, wherever they sit.
+  //
+  // The storefront boosts the products a returning shopper engaged with,
+  // and it only ever holds the opening window of the list. A viewed product
+  // measured at position 922 of 2,907 was therefore invisible to the boost:
+  // the shopper came back to the collection and saw a stranger's grid.
+  //
+  // Answered here because the whole list is already in memory. The
+  // alternative - paging the collection until the handles turn up - is
+  // twelve requests and 1MB to place eight cards.
+  const handlesParam = String(url.searchParams.get("handles") || "").trim();
+  if (handlesParam) {
+    const want = new Set(
+      handlesParam
+        .split(",")
+        .map((h) => h.trim().toLowerCase())
+        .filter(Boolean)
+        .slice(0, 40),
+    );
+    const hit: unknown[] = [];
+    for (let i = 0; i < cards.length; i++) {
+      const entry = cards[i] as unknown[];
+      if (!Array.isArray(entry)) continue;
+      if (!want.has(String(entry[0] || "").toLowerCase())) continue;
+      // The position travels with the card: the storefront breaks ties on
+      // it, so a product's colours keep the order the engine ranked them.
+      hit.push({ at: i, card: entry });
+      if (hit.length >= 120) break;
+    }
+    return json(
+      { ok: true, builtAt: row.builtAt.getTime(), total: cards.length, matched: hit },
+      { headers: { ...CORS, ...CACHE } },
+    );
+  }
+
   return json(
     {
       ok: true,

@@ -6423,6 +6423,10 @@ var __bhqEngaged = false;
 
   // ---- 1. decide first: load the frozen list (first window) ----------------------
   var list = [], listTotal = null, listCursor = 0, tail = [], windowLoading = null;
+  // Keys lifted to the front by the boost. A lifted card can come from
+  // position 922, so it is still sitting in window 4 and would be drawn a
+  // second time when that window loads. Checked in nextEntries.
+  var __bhqLifted = null;
   // Fetch the next 240-card section of the list once, in the background, before it runs out.
   function ensureWindow() {
     if (windowLoading || listTotal === null || list.length >= listTotal) return windowLoading;
@@ -6465,12 +6469,15 @@ var __bhqEngaged = false;
   // reordered instead, while it is still data, so a boosted colour is drawn
   // in its boosted slot the first time it appears and never moves.
   //
-  // Only the first window is touched. Those are the cards this shopper is
-  // about to see; later windows arrive during the scroll, after earlier
-  // cards have been drawn, and reordering across that boundary would move
-  // something already seen. A boosted product deep in the collection keeps
-  // its engine position - the boost is for what is in reach, not a resort
-  // of 2,900 cards.
+  // The engaged products are looked up across the WHOLE list, not just the
+  // window in hand. Searching the window alone failed the ordinary case: a
+  // viewed product measured at position 922 of 2,907 never matched, so a
+  // returning shopper saw a grid identical to a stranger's.
+  //
+  // One request, by handle, because the list is only ever held 240 cards at
+  // a time and paging to position 922 would be four requests to place two
+  // cards. Entries found this way are lifted to the front and removed from
+  // wherever they sat, so no card is ever drawn twice.
   //
   // Scored by scoreBehaviour, the same helper the split path uses, so the
   // weights the merchant set and the recency decay apply identically and
@@ -6486,32 +6493,97 @@ var __bhqEngaged = false;
       });
       if (scored.length) {
         var boost = {};
+        var handles = [];
         for (var bi = 0; bi < scored.length; bi++) {
-          boost[String(scored[bi].handle).toLowerCase()] = scored[bi].score;
+          var bh = String(scored[bi].handle).toLowerCase();
+          boost[bh] = scored[bi].score;
+          handles.push(bh);
         }
-        // A stable sort on the window: boosted entries rise, everything
-        // else holds its engine order. Sold-out stays at the back whatever
-        // the shopper did - a colour they cannot buy is not a better card
-        // for having been looked at.
-        var head = list.slice(0, WINDOW);
-        var rest = list.slice(WINDOW);
-        var idx = {};
-        for (var hi = 0; hi < head.length; hi++) idx[hi] = hi;
-        var moved = 0;
-        head = head
-          .map(function (e, i) {
-            var b = e.soldOut ? 0 : boost[String(e.h).toLowerCase()] || 0;
-            if (b > 0) moved++;
-            return { e: e, i: i, b: b };
-          })
-          .sort(function (a, b2) {
-            if (a.e.soldOut !== b2.e.soldOut) return a.e.soldOut ? 1 : -1;
+        // Their cards, wherever they sit in the collection. Failure is not
+        // fatal: the grid then draws the merchandised order, which is what a
+        // shopper with no history sees.
+        var extra = [];
+        try {
+          var mr = await fetch(
+            API + '?shop=' + SHOP + '&collection=' + COL +
+            '&handles=' + encodeURIComponent(handles.slice(0, 20).join(',')),
+          );
+          if (mr.ok) {
+            var md = await mr.json();
+            var matched = (md && md.matched) || [];
+            for (var mi = 0; mi < matched.length; mi++) {
+              var c = matched[mi].card;
+              extra.push({
+                at: matched[mi].at,
+                h: c[0],
+                colour: c[1] || '',
+                img: c[2],
+                vid: String(c[3] || ''),
+                soldOut: !!c[4],
+                title: c[5] || '',
+                priceMinor: Number(c[6] || 0),
+                strikeMinor: Number(c[7] || 0),
+                badges: c[8] || []
+              });
+            }
+          }
+        } catch (e) {
+          S.log.push('boost lookup failed: ' + e.message);
+        }
+        // Boosted colours are LIFTED OUT of wherever they sit and placed
+        // at the front; everything else keeps engine order behind them.
+        //
+        // Searching only the first window was wrong, and wrong in the
+        // ordinary case: a shopper views a product, comes back to the
+        // collection, and expects to see it. Measured - the viewed product
+        // sat at list position 922 of 2,907, so a window-only pass reported
+        // "0 of 240 matched" and the grid was identical to a stranger's.
+        // The first test that passed only passed because that product
+        // happened to be at position 121.
+        //
+        // Sold-out colours are never lifted: a colour they cannot buy is
+        // not a better card for having been looked at.
+        //
+        // Capped, because the list is the whole collection: a shopper who
+        // browsed twelve products should not be handed a first screen made
+        // entirely of things they have already seen. The merchandised order
+        // still has to show them something new.
+        var LIFT_MAX = 8;
+        var lifted = [];
+        var takenKey = {};
+        for (var xi = 0; xi < extra.length; xi++) {
+          var ex = extra[xi];
+          if (ex.soldOut) continue;
+          if (lifted.length >= LIFT_MAX) break;
+          var kk = ex.h + '|' + ex.colour;
+          if (takenKey[kk]) continue;
+          takenKey[kk] = 1;
+          lifted.push({ e: ex, b: boost[String(ex.h).toLowerCase()] || 0, i: ex.at });
+        }
+        if (lifted.length) {
+          // Strongest engagement first; ties keep engine order, so a
+          // product's own colours stay in the order the engine ranked them.
+          lifted.sort(function (a, b2) {
             if (b2.b !== a.b) return b2.b - a.b;
             return a.i - b2.i;
-          })
-          .map(function (x) { return x.e; });
-        list = head.concat(rest);
-        S.log.push('boost: ' + moved + ' of ' + head.length + ' cards matched engagement');
+          });
+          // Dropped from where they sat, so a lifted card is never drawn
+          // twice. The window holds only the first 240 entries, so a card
+          // from deeper in the list simply is not here to remove - and
+          // nextEntries skips any key already placed.
+          var front = [], keep = [];
+          for (var fi2 = 0; fi2 < lifted.length; fi2++) {
+            lifted[fi2].e.__lift = true;
+            front.push(lifted[fi2].e);
+          }
+          for (var ki = 0; ki < list.length; ki++) {
+            if (takenKey[list[ki].h + '|' + list[ki].colour]) continue;
+            keep.push(list[ki]);
+          }
+          list = front.concat(keep);
+          __bhqLifted = takenKey;
+        }
+        S.log.push('boost: lifted ' + lifted.length + ' from ' + extra.length + ' matched cards');
       }
     } catch (e) {
       // A boost that throws must not cost the shopper the grid.
@@ -6650,6 +6722,11 @@ var __bhqEngaged = false;
       var live = await liveStock(take);
       for (var i = 0; i < take.length && out.length < n; i++) {
         var e = take[i]; listCursor++;
+        // A lifted colour appears twice in the list: once at the front
+        // where the boost put it, and once where the engine ranked it,
+        // inside a window that loads later. The front copy carries a flag;
+        // any other copy is skipped, so the grid never shows it twice.
+        if (!e.__lift && __bhqLifted && __bhqLifted[e.h + '|' + e.colour]) continue;
         if (colourFilter.length && colourFilter.indexOf(e.colour.toLowerCase()) < 0) continue;
         var avail = e.vid && live.hasOwnProperty(e.vid) ? live[e.vid] : !e.soldOut;
         if (!avail && !e.soldOut) { e.soldOut = true; tail.push(e); continue; } // sold out since run: to the tail
