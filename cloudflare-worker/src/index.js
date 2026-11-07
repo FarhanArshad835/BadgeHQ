@@ -364,6 +364,10 @@ export default {
       if (url.pathname === "/api/color-demand") {
         return proxyWithCache(request, "/api/color-demand", env);
       }
+      // The whole collection ordered as colour cards, built hourly.
+      if (url.pathname === "/api/color-order") {
+        return proxyWithCache(request, "/api/color-order", env);
+      }
     }
 
     return new Response("Not found", {

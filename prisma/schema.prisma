@@ -1223,3 +1223,22 @@ model ProductBehaviour {
   @@unique([shop, productId, day])
   @@index([shop, day])
 }
+
+/// The ordered colour-card list for one collection, built by the engine.
+///
+/// The storefront can only order the colours it has on screen, so a colour
+/// that belongs on page 5 still appears on page 1 and is pushed down when the
+/// next batch lands. Ordering across the whole collection needs the whole
+/// collection, which only the engine has.
+model CollectionColorOrder {
+  id        String   @id @default(cuid())
+  shop      String
+  handle    String
+  /// [[productHandle, colour, imageUrl, variantId, soldOut], ...], in order.
+  /// Written whole and read whole, never queried into - so JSON, not rows.
+  cards     String   @default("[]")
+  cardCount Int      @default(0)
+  builtAt   DateTime @default(now())
+
+  @@unique([shop, handle])
+}

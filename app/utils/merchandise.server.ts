@@ -141,6 +141,34 @@ export async function salesByVariant(shop: string, windowDays: number) {
   return map;
 }
 
+/** Units sold per product COLOUR, read from the colour in variantTitle. */
+async function salesByColor(shop: string, windowDays: number) {
+  const rows = await prisma.$queryRawUnsafe<
+    Array<{ handle: string; color: string; units: number }>
+  >(
+    `SELECT s.handle AS handle,
+            split_part(l."variantTitle", ' / ', 1) AS color,
+            SUM(l.quantity)::int AS units
+       FROM "OrderLineFinancials" l
+       JOIN "ProductScore" s ON s.shop = l.shop AND s."productId" = l."productId"
+      WHERE l.shop = $1
+        AND l."variantTitle" <> ''
+        AND s.handle <> ''
+        AND l."orderCreatedAt" >= NOW() - ($2 || ' days')::interval
+      GROUP BY 1, 2`,
+    shop,
+    String(windowDays),
+  );
+  const map = new Map<string, Map<string, number>>();
+  for (const r of rows) {
+    const c = String(r.color || "").trim().toLowerCase();
+    if (!c) continue;
+    let inner = map.get(r.handle);
+    if (!inner) map.set(r.handle, (inner = new Map()));
+    inner.set(c, (inner.get(c) || 0) + r.units);
+  }
+  return map;
+}
 async function salesByProduct(shop: string, windowDays: number) {
   const rows = await prisma.$queryRawUnsafe<Array<{ productId: string; units: number }>>(
     `SELECT "productId", SUM(quantity)::int AS units
@@ -243,6 +271,15 @@ type ProductFacts = {
   /** Ids of the variants a shopper can actually buy right now. Empty for a
    *  product that does not track inventory, which is handled by inStock. */
   buyableVariantIds: Set<string>;
+  /** One entry per colour, in the order Shopify lists them, carrying what
+   *  a card needs: its photo, a variant to link to, and whether any size
+   *  in that colour can still be bought. */
+  colorCards: Array<{
+    color: string;
+    image: string;
+    variantId: string;
+    soldOut: boolean;
+  }>;
 };
 
 /**
@@ -264,6 +301,40 @@ export async function fetchCollectionProducts(
 /** The same read, keeping the collection's own handle. The storefront names
  *  collections by handle and the public order route cannot resolve a GID, so
  *  the handle has to come from a run that holds admin access. */
+/**
+ * One card per colour for a product, from its variants.
+ *
+ * A colour is buyable when ANY size in it is, and takes the photo and the
+ * variant id of the first size that can actually be bought - so the link
+ * opens ready to add rather than on a sold-out size.
+ */
+function colorCardsOf(n: any): ProductFacts["colorCards"] {
+  const out: ProductFacts["colorCards"] = [];
+  const seen = new Map<string, number>();
+  for (const v of n?.variants?.nodes || []) {
+    const opt = (v?.selectedOptions || []).find((o: any) => /colou?r/i.test(o?.name || ""));
+    const color = String(opt?.value || "").trim();
+    if (!color) continue;
+    const live = !!v?.availableForSale && Number(v?.inventoryQuantity ?? 0) > 0;
+    let at = seen.get(color);
+    if (at === undefined) {
+      at = out.length;
+      seen.set(color, at);
+      out.push({ color, image: "", variantId: String(v?.id || ""), soldOut: true });
+    }
+    const card = out[at];
+    if (live) card.soldOut = false;
+    // Prefer a buyable variant's photo and id over a sold-out one's.
+    if (!card.image || (live && card.soldOut === false)) {
+      const url = String(v?.image?.url || "");
+      if (url && (!card.image || live)) card.image = url;
+    }
+    if (live && card.variantId !== String(v?.id || "")) {
+      card.variantId = String(v?.id || "");
+    }
+  }
+  return out;
+}
 export async function fetchCollection(
   admin: { graphql: (q: string, o?: any) => Promise<Response> },
   collectionId: string,
@@ -292,7 +363,17 @@ export async function fetchCollection(
               totalInventory
               reviews: metafield(namespace: "doran", key: "prReviewCount") { value }
               variants(first: 100) {
-                nodes { id availableForSale inventoryQuantity }
+                nodes {
+                  id
+                  availableForSale
+                  inventoryQuantity
+                  # Colour and its photo, so the engine can order COLOUR
+                  # cards rather than products. Read here because the
+                  # storefront otherwise fetches products.json per page
+                  # and can only order the colours already on screen.
+                  selectedOptions { name value }
+                  image { url }
+                }
               }
             }
           }
@@ -336,6 +417,7 @@ export async function fetchCollection(
             .filter((v: any) => v?.availableForSale && Number(v?.inventoryQuantity ?? 0) > 0)
             .map((v: any) => String(v.id)),
         ),
+        colorCards: colorCardsOf(n),
       });
     }
 
@@ -575,6 +657,64 @@ export function rankProducts(
  * batches because the mutation caps its move list, and sequentially because
  * each call queues an async job on Shopify's side.
  */
+/**
+ * The ordered colour-card list for a collection.
+ *
+ * Built here because ordering colours needs the WHOLE collection. The
+ * storefront only ever has the page it is on, so it splits those 24 products
+ * into every one of their colours - 73 cards - and a colour that belongs on
+ * page 5 sits on page 1 until the next batch pushes it down. Measured on this
+ * catalogue, 42 of 73 cards moved after a single scroll.
+ *
+ * A product's colours are spread by RANK: its best colour takes the product's
+ * own position, and each weaker colour is pushed back by a share of the
+ * collection, so the colours of one shoe never arrive together. Sold-out
+ * colours go to the end, keeping their order among themselves.
+ */
+export function buildColorOrder(
+  ordered: string[],
+  facts: ProductFacts[],
+  demand: Map<string, Map<string, number>>,
+): Array<[string, string, string, string, 0 | 1]> {
+  const byId = new Map(facts.map((f) => [f.productId, f]));
+  type Slot = { at: number; card: [string, string, string, string, 0 | 1] };
+  const live: Slot[] = [];
+  const dead: Slot[] = [];
+
+  // How far back the weakest colour of a product sits. A share of the whole
+  // collection rather than a fixed number, so it scales with the page size
+  // the shopper is actually scrolling through.
+  const spread = Math.max(8, Math.round(ordered.length / 12));
+
+  ordered.forEach((productId, position) => {
+    const f = byId.get(productId);
+    if (!f) return;
+    const cards = f.colorCards;
+    if (!cards.length) return;
+
+    // Best-selling colour first, so it inherits the product's own position.
+    const sold = demand.get(f.handle);
+    const ranked = cards.slice().sort((a, b) => {
+      const av = sold?.get(a.color.toLowerCase()) ?? -1;
+      const bv = sold?.get(b.color.toLowerCase()) ?? -1;
+      if (av !== bv) return bv - av;
+      // No sales either way: keep the merchant's own option order.
+      return cards.indexOf(a) - cards.indexOf(b);
+    });
+
+    ranked.forEach((c, rank) => {
+      const slot: Slot = {
+        at: position + (ranked.length > 1 ? (rank / (ranked.length - 1)) * spread : 0),
+        card: [f.handle, c.color, c.image, c.variantId, c.soldOut ? 1 : 0],
+      };
+      (c.soldOut ? dead : live).push(slot);
+    });
+  });
+
+  live.sort((a, b) => a.at - b.at);
+  dead.sort((a, b) => a.at - b.at);
+  return live.concat(dead).map((s) => s.card);
+}
 export async function applyOrder(
   admin: { graphql: (q: string, o?: any) => Promise<Response> },
   collectionId: string,
@@ -769,6 +909,10 @@ export async function runMerchandising(
   // Same window as the totals above: the discount has to be computed against
   // the demand the score is actually crediting, not a different period's.
   const variantSales = await salesByVariant(shop, s.salesWindowDays);
+  // Units per colour, so the colour list can lead with what sells. Read
+  // over a longer window than the score: a colour's standing changes far
+  // more slowly than a product's.
+  const colorDemand = await salesByColor(shop, 180);
   // Only ever used to order products that score nothing on the real signals,
   // so it is read once per run alongside the windowed figures.
   const lifetime = await lifetimeSalesByProduct(shop);
@@ -801,6 +945,33 @@ export async function runMerchandising(
       }
 
       const ordered = rankProducts(scored, s.sinkOutOfStock);
+
+      // The colour-card list, stored for the storefront to read whole.
+      // Best-effort: a collection with no colour options produces an
+      // empty list and the storefront falls back to splitting what it
+      // has, exactly as it does today.
+      if (handle) {
+        try {
+          const cards = buildColorOrder(ordered, facts, colorDemand);
+          await prisma.collectionColorOrder.upsert({
+            where: { shop_handle: { shop, handle } },
+            update: {
+              cards: JSON.stringify(cards),
+              cardCount: cards.length,
+              builtAt: new Date(),
+            },
+            create: {
+              shop,
+              handle,
+              cards: JSON.stringify(cards),
+              cardCount: cards.length,
+            },
+          });
+        } catch (e) {
+          console.error("[colorOrder]", handle, String((e as any)?.message || e).slice(0, 120));
+        }
+      }
+
       const applied = await applyOrder(admin, collectionId, ordered);
       results.push({
         id: collectionId,
