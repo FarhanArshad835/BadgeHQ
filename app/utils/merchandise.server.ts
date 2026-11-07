@@ -705,7 +705,17 @@ export function buildColorOrder(
     ranked.forEach((c, rank) => {
       const slot: Slot = {
         at: position + (ranked.length > 1 ? (rank / (ranked.length - 1)) * spread : 0),
-        card: [f.handle, c.color, c.image, c.variantId, c.soldOut ? 1 : 0],
+        // Stored stripped of the parts that are identical on every card.
+        // At ~2,900 cards the shared CDN path and the ProductVariant GID
+        // prefix are 238KB of a 604KB list - more than a third of it,
+        // repeated verbatim. The storefront puts them back.
+        card: [
+          f.handle,
+          c.color,
+          c.image.replace(/^https:\/\/cdn\.shopify\.com\/s\/files\//, "").replace(/\?v=\d+$/, ""),
+          c.variantId.replace(/^gid:\/\/shopify\/ProductVariant\//, ""),
+          c.soldOut ? 1 : 0,
+        ],
       };
       (c.soldOut ? dead : live).push(slot);
     });
