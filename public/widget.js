@@ -6471,8 +6471,20 @@ var __bhqEngaged = false;
     //
     // The local ordering above spaces a product's colours across THIS
     // page, which is all it can see. The engine spaced them across the
-    // whole collection, so a colour that belongs on page 5 is not on
-    // page 1 at all and never has to be pushed down later.
+    // whole collection, so the colours of one product are ordered the
+    // same way on every page rather than re-decided per batch.
+    //
+    // What this does NOT do is change WHICH products are on the page.
+    // Every card here is cloned from one Shopify rendered, so there is
+    // no template and no title, price or badges for a product Shopify
+    // did not send. The list is a better ordering of the page, not a
+    // replacement for it. Pulling a card in from further down the
+    // collection needs a card-data endpoint, which does not exist yet.
+    //
+    // It is also why a product unpublished since the run cannot reach
+    // the grid: the storefront products.json the split reads never
+    // returns drafts, so a stale entry in the list has nothing to
+    // attach to and is simply skipped.
     //
     // Cards the engine does not know about keep their local position -
     // a product added since the last run should still appear.
