@@ -6032,6 +6032,12 @@ var __bhqEngaged = false;
     var byColor = {};
     var order = [];
     var variants = product.variants || [];
+    // id -> src, so a variant's image_id resolves in one step.
+    var imageById = {};
+    var imgs = product.images || [];
+    for (var ii = 0; ii < imgs.length; ii++) {
+      if (imgs[ii] && imgs[ii].id) imageById[imgs[ii].id] = imgs[ii].src;
+    }
     for (var i = 0; i < variants.length; i++) {
       var v = variants[i];
       var c = variantColor(v, ci);
@@ -6042,10 +6048,15 @@ var __bhqEngaged = false;
       }
       // Available if ANY size in this colour can be bought.
       if (v.available) byColor[c].available = true;
-      // First image belonging to this colour wins; featured_image is set per
-      // variant by Shopify when the merchant has assigned one.
-      if (!byColor[c].image && v.featured_image && v.featured_image.src) {
-        byColor[c].image = v.featured_image.src;
+      // The first image belonging to this colour wins.
+      //
+      // Read from the variant's image_id against the product's images,
+      // not from featured_image: the Admin API sets that field, the
+      // storefront products.json this reads does NOT, so every colour
+      // fell through to the product's first photo and five colours were
+      // rendered as the same black sneaker under five different names.
+      if (!byColor[c].image && v.image_id && imageById[v.image_id]) {
+        byColor[c].image = imageById[v.image_id];
       }
       // Prefer a buyable variant's id for the link, so the colour opens ready
       // to add rather than on a sold-out size.
@@ -6058,7 +6069,14 @@ var __bhqEngaged = false;
     for (var k = 0; k < order.length; k++) {
       var g = byColor[order[k]];
       // Fall back to the product's own image rather than an empty tile.
-      if (!g.image) g.image = (product.images && product.images[0]) || "";
+      // The card still names its colour, so a product whose photos are
+      // not assigned to variants shows one picture across its colours -
+      // honest about the colour, imprecise about the photo, which beats
+      // an empty tile.
+      if (!g.image) {
+        var first = (product.images && product.images[0]) || "";
+        g.image = typeof first === "string" ? first : first.src || "";
+      }
       g.url = "/products/" + product.handle + "?variant=" + g.variantId;
       out.push(g);
     }
