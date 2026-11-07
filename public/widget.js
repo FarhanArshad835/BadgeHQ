@@ -6036,6 +6036,9 @@ var __bhqEngaged = false;
   /** handle -> { colour(lowercase) -> units sold }, from /api/color-demand. */
   var _colorDemand = {};
 
+  /** The engine's whole-collection colour order, when it could be trusted. */
+  var _serverColorList = null;
+
   /**
    * How far the weakest colour of a product sits below its strongest.
    *
@@ -6159,6 +6162,74 @@ var __bhqEngaged = false;
    * so every colour tile keeps the theme's markup, styling and the decoration
    * other apps add after load. Only the image, the link and the title change.
    */
+  /** How stale a server list may be before it is distrusted. The engine
+   *  rebuilds hourly, so two hours means it missed a run. */
+  var COLOR_LIST_MAX_AGE_MS = 2 * 60 * 60 * 1000;
+
+  /**
+   * The collection's colour cards, ordered across the WHOLE collection.
+   *
+   * The split that runs without this can only order the colours on the page
+   * it has, so a colour belonging on page 5 sits on page 1 until the next
+   * batch pushes it down - measured, 42 of 73 cards moved after one scroll.
+   * The engine orders every colour in the collection hourly; this reads that.
+   *
+   * Calls back with null whenever the list cannot be trusted - missing, stale,
+   * or not covering what Shopify actually sent - and the caller then splits
+   * the page itself, exactly as before. A wrong order is a blemish; a blank
+   * or half-rendered grid is a dead collection page.
+   */
+  function loadColorList(handle, pageHandles, then) {
+    var url =
+      API_ORIGIN +
+      "/api/color-order?shop=" +
+      encodeURIComponent(SHOP) +
+      "&collection=" +
+      encodeURIComponent(handle) +
+      "&limit=240";
+    (window.__bhqRawFetch || window.fetch)(url)
+      .then(function (r) {
+        return r.ok ? r.json() : null;
+      })
+      .then(function (d) {
+        if (!d || !d.ok || !d.cards || !d.cards.length) return then(null);
+        if (!d.builtAt || Date.now() - d.builtAt > COLOR_LIST_MAX_AGE_MS) return then(null);
+
+        // Does the list know about the products Shopify actually sent?
+        //
+        // Card COUNT cannot be the test - the page holds 24 products and the
+        // list covers the whole collection, so they never match. What matters
+        // is whether the collection has changed since the engine ran: if the
+        // products on screen are not in the list, it is describing a different
+        // collection and must not be used.
+        var known = {};
+        for (var i = 0; i < d.cards.length; i++) known[d.cards[i][0]] = true;
+        var miss = 0;
+        for (var p = 0; p < pageHandles.length; p++) {
+          if (!known[pageHandles[p]]) miss++;
+        }
+        // A few are expected: page 1 is 24 of 1,070 products and the first 240
+        // cards of the list need not contain all of them. A third missing is a
+        // different collection.
+        if (pageHandles.length && miss / pageHandles.length > 0.34) return then(null);
+
+        then({ cards: d.cards, total: d.total || d.cards.length, builtAt: d.builtAt });
+      })
+      .catch(function () {
+        then(null);
+      });
+  }
+
+  /** Put back the parts the engine stripped to keep the list small. */
+  function expandCard(c) {
+    return {
+      handle: c[0],
+      color: c[1],
+      image: c[2] ? "https://cdn.shopify.com/s/files/" + c[2] : "",
+      variantId: c[3] ? "gid://shopify/ProductVariant/" + c[3] : "",
+      soldOut: c[4] === 1,
+    };
+  }
   function renderColorCards(gs) {
     // The veil goes up at parse time for a colour collection, so EVERY
     // path out of here has to take it down again. Missing one leaves
@@ -6249,7 +6320,19 @@ var __bhqEngaged = false;
         var byHandle = {};
         var products = (data && data.products) || [];
         for (var i = 0; i < products.length; i++) byHandle[products[i].handle] = products[i];
-        splitCardsByColor(grid, byHandle);
+
+        // The server list first, the local split as the fallback.
+        //
+        // Both produce colour cards; they differ in how far they can see.
+        // The local split only knows the 24 products on this page, so it
+        // can only order the colours of those. The engine orders every
+        // colour in the collection, which is the whole point.
+        var pageHandles = [];
+        for (var ph = 0; ph < products.length; ph++) pageHandles.push(products[ph].handle);
+        loadColorList(here, pageHandles, function (list) {
+          if (list) _serverColorList = list;
+          splitCardsByColor(grid, byHandle);
+        });
       })
       .catch(function () {
         /* the grid stays exactly as the theme rendered it - but it
@@ -6383,6 +6466,39 @@ var __bhqEngaged = false;
     slots.sort(function (a, b) {
       return a.at - b.at;
     });
+
+    // Where the engine has an opinion, it wins.
+    //
+    // The local ordering above spaces a product's colours across THIS
+    // page, which is all it can see. The engine spaced them across the
+    // whole collection, so a colour that belongs on page 5 is not on
+    // page 1 at all and never has to be pushed down later.
+    //
+    // Cards the engine does not know about keep their local position -
+    // a product added since the last run should still appear.
+    if (_serverColorList) {
+      var rank = {};
+      for (var sl = 0; sl < _serverColorList.cards.length; sl++) {
+        var sc = _serverColorList.cards[sl];
+        rank[sc[0] + "|" + String(sc[1]).toLowerCase()] = sl;
+      }
+      slots.forEach(function (slot, i) {
+        var key = slot.entry.product.handle + "|" + String(slot.group.color).toLowerCase();
+        var at = rank[key];
+        slot.serverAt = typeof at === "number" ? at : null;
+        slot.localAt = i;
+      });
+      // Live stock beats the hourly snapshot: a colour that sold out
+      // since the run goes to the back, decided here, before anything is
+      // rendered, so no card on screen ever moves.
+      slots.sort(function (a, b) {
+        if (!!a.group.soldOut !== !!b.group.soldOut) return a.group.soldOut ? 1 : -1;
+        if (a.serverAt === null && b.serverAt === null) return a.localAt - b.localAt;
+        if (a.serverAt === null) return 1;
+        if (b.serverAt === null) return -1;
+        return a.serverAt - b.serverAt;
+      });
+    }
 
     // Build every card before touching the DOM: cloning from a card that
     // has already been removed yields nothing.
