@@ -147,7 +147,12 @@
   var stock = {};
   var stockPages = 0;
   var stockLoading = null;
+  // Latched when a page comes back empty. Without it the next batch asks for
+  // the same exhausted page number again - stockPages only advances on a
+  // non-empty read - so a deep scroll spends one dead request per batch.
+  var stockDone = false;
   function loadStockPage() {
+    if (stockDone) return Promise.resolve(0);
     if (stockLoading) return stockLoading;
     stockLoading = fetch(
       '/collections/' + COL + '/products.json?limit=250&page=' + (stockPages + 1),
@@ -163,19 +168,34 @@
           }
         }
         if (ps.length) stockPages++;
+        else stockDone = true;
         return ps.length;
       })
       .catch(function () { return 0; })
       .finally(function () { stockLoading = null; });
     return stockLoading;
   }
+  // The first screen never waits for stock.
+  //
+  // The feed page is ~337KB. Awaiting it before the opening cards means grey
+  // slots for as long as it takes, which on a slow connection is seconds - the
+  // exact stall this renderer exists to remove. The row's own sold-out flag is
+  // at most an hour old and is good enough for the first screen; the fetch is
+  // kicked off in parallel and the batch after it has the answer.
+  var stockWarmed = false;
   async function liveStock(entries) {
     // One more page, at most, per batch: enough to stay ahead of the shopper
     // without pulling the catalogue to draw 24 cards.
     var missing = entries.filter(function (e) {
       return e.vid && !stock.hasOwnProperty(e.vid);
     }).length;
-    if (missing) await loadStockPage();
+    if (missing && !stockWarmed) {
+      // Start it, don't await it: the shopper sees cards now.
+      stockWarmed = true;
+      loadStockPage();
+    } else if (missing) {
+      await loadStockPage();
+    }
     var out = {};
     for (var i = 0; i < entries.length; i++) {
       var id = entries[i].vid;
@@ -261,7 +281,7 @@
     li.style.height = slotH + 'px';
     slot.el.replaceWith(li);          // same slot, same size: nothing moves
     slot.el = li;
-    S.filled.push({ slot: slot.index, key: p.handle + '|' + e.colour, at: Math.round(performance.now()) });
+    S.filled.push({ slot: slot.index, key: e.h + '|' + e.colour, at: Math.round(performance.now()) });
   }
 
   // ---- 3 + 4. batches: placeholders now, fill when data is ready ------------------
