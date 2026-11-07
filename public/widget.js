@@ -1895,6 +1895,15 @@ var __bhqEngaged = false;
        */
       function applyCardPriceRule(img, rule, productData) {
         try {
+          // A card the engine already priced is left exactly as it was built.
+          //
+          // The ordered grid draws the final price into the card from the
+          // stored row, discount included. The guard below is __bhqPriceRule,
+          // a JS property, which a card created after that pass ran has never
+          // had - so without this check the discount would be taken a second
+          // time off a price that already had it. One implementation owns a
+          // card's price, and for these cards it is the engine.
+          if (img.closest && img.closest("[data-bhq-priced]")) return;
           // Walk out until an ancestor actually contains a price.
           //
           // closest() returns the NEAREST match, and [class*='card'] also

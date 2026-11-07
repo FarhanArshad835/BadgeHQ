@@ -275,6 +275,14 @@
         el.textContent = money(e.priceMinor / 100);
       });
     }
+    // Marks the card as priced by the engine.
+    //
+    // The widget's own price-rule pass rewrites a card's price from
+    // productData.price, guarded by a __bhqPriceRule JS property - which a
+    // card built here has never had. Without this attribute that pass would
+    // discount an already-discounted price, so the two implementations the
+    // engine was meant to replace would both run on the same card.
+    li.setAttribute('data-bhq-priced', '');
     li.setAttribute('data-bhq-slot', String(slot.index));
     li.setAttribute('data-bhq-key', e.h + '|' + e.colour);
     if (e.soldOut) li.setAttribute('data-bhq-soldout', '');
