@@ -6287,6 +6287,12 @@ var __bhqEngaged = false;
     var slots = [];
     for (var e2 = 0; e2 < entries.length; e2++) {
       var gs2 = entries[e2].groups;
+      // groups are already sorted best-selling first, and every colour
+      // of the product is in here whether it has ever sold or not.
+      for (var ri = 0; ri < gs2.length; ri++) {
+        gs2[ri].rank = ri;
+        gs2[ri].rankOf = gs2.length;
+      }
       var stride = totalCards / gs2.length;
       for (var gi = 0; gi < gs2.length; gi++) {
         slots.push({
@@ -6326,6 +6332,15 @@ var __bhqEngaged = false;
   function buildColorCard(templateLi, group, product) {
     var li = templateLi.cloneNode(true);
     li.setAttribute("data-bhq-color", group.color);
+    // Its place among ALL the product's colours, best-selling first.
+    // Written here because the ranker only sees the card, and a colour
+    // the product has never sold does not appear in the demand data at
+    // all - so ranking inside that data alone gave every unsold colour
+    // the best seller's offset and sat them on top of each other.
+    if (group.rank !== undefined) {
+      li.setAttribute("data-bhq-color-rank", String(group.rank));
+      li.setAttribute("data-bhq-color-count", String(group.rankOf || 1));
+    }
 
     // Every link points at this colour.
     var links = li.querySelectorAll('a[href*="/products/"]');
@@ -7462,6 +7477,17 @@ var __bhqEngaged = false;
     return tpl.innerHTML;
   }
 
+  /** An attribute from the nearest ancestor that has it, or null. */
+  function attrUp(node, name) {
+    for (var n = node; n; n = n.parentElement) {
+      if (n.getAttribute) {
+        var v = n.getAttribute(name);
+        if (v !== null && v !== "") return v;
+      }
+      if (n.tagName === "UL" || n.tagName === "BODY") break;
+    }
+    return null;
+  }
   /** Whether this card is a colour that cannot be bought. */
   function soldOutCard(node) {
     for (var n = node; n; n = n.parentElement) {
@@ -7503,6 +7529,12 @@ var __bhqEngaged = false;
             // returns a div several levels inside it, so reading the
             // root alone always found null and the offset never applied.
             color: colorOfCard(root),
+            // Number, not the raw attribute string: it is divided below.
+            colorRank: (function () {
+              var v = attrUp(root, "data-bhq-color-rank");
+              return v === null ? null : Number(v);
+            })(),
+            colorOf: Number(attrUp(root, "data-bhq-color-count")) || 1,
             soldOut: !!soldOutCard(root),
           });
         }
@@ -7725,7 +7757,11 @@ var __bhqEngaged = false;
       // colour keeps the product's own standing; weaker ones sit a
       // little below, so colours compete rather than travel as a lump.
       var colorAdj = 0;
-      if (c.color) {
+      if (c.color && c.colorRank !== null) {
+        // Even step per place across every colour the product has.
+        colorAdj =
+          c.colorOf > 1 ? -COLOR_SPREAD * (c.colorRank / (c.colorOf - 1)) : 0;
+      } else if (c.color) {
         var sold = _colorDemand[c.handle];
         if (sold) {
           // By RANK among the product's colours, not by units.
