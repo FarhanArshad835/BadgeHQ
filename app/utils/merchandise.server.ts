@@ -697,6 +697,79 @@ export function rankProducts(
  * batches because the mutation caps its move list, and sequentially because
  * each call queues an async job on Shopify's side.
  */
+/**
+ * The active badges, as the card builder needs them.
+ *
+ * Only badges that can appear on a collection card: a product-page-only
+ * badge has no bearing on a grid, and reading one would make the engine
+ * disagree with what a shopper sees.
+ */
+async function badgesForCards(shop: string): Promise<BadgeSpec[]> {
+  const rows = await prisma.productBadge.findMany({
+    where: { shop, isActive: true },
+    select: { text: true, targeting: true, priceRule: true, pages: true },
+  });
+  const out: BadgeSpec[] = [];
+  for (const r of rows) {
+    let pages: string[] = [];
+    try {
+      const p = JSON.parse(r.pages);
+      pages = Array.isArray(p) ? p.map(String) : [];
+    } catch {
+      pages = [];
+    }
+    if (pages.length && pages.indexOf("collection") === -1 && pages.indexOf("all") === -1) continue;
+
+    let t: any = {};
+    let pr: any = {};
+    try {
+      t = JSON.parse(r.targeting) || {};
+    } catch {
+      t = {};
+    }
+    try {
+      pr = JSON.parse(r.priceRule) || {};
+    } catch {
+      pr = {};
+    }
+
+    // Only an amount discount changes the price. A percentage or a markup
+    // would need the same rounding the storefront uses, and guessing at that
+    // is how the two end up disagreeing.
+    const amount =
+      pr.mode === "discount" && pr.discountType === "amount"
+        ? Math.round(Number(pr.discountValue || 0) * 100)
+        : 0;
+
+    out.push({
+      text: String(r.text || ""),
+      targetType: String(t.type || "all"),
+      targetValue: String(t.value || ""),
+      excludeValue: String(t.excludeCollection?.value || ""),
+      discountMinor: amount,
+    });
+  }
+  return out;
+}
+/**
+ * One card, as the storefront draws it. Positional, because at ~2,900 cards
+ * the key names cost more than the data they label.
+ *
+ * [handle, colour, imagePath, variantId, soldOut, title, priceMinor,
+ *  strikeMinor, badges]
+ */
+export type ColorCardRow = [
+  string,
+  string,
+  string,
+  string,
+  0 | 1,
+  string,
+  number,
+  number,
+  string[],
+];
+
 /** A badge as the storefront config describes it, trimmed to what a card needs. */
 export type BadgeSpec = {
   text: string;
@@ -822,9 +895,11 @@ export function buildColorOrder(
   ordered: string[],
   facts: ProductFacts[],
   demand: Map<string, Map<string, number>>,
-): Array<[string, string, string, string, 0 | 1]> {
+  badges: BadgeSpec[] = [],
+  membership: Map<string, Set<string>> = new Map(),
+): Array<ColorCardRow> {
   const byId = new Map(facts.map((f) => [f.productId, f]));
-  type Slot = { at: number; card: [string, string, string, string, 0 | 1] };
+  type Slot = { at: number; card: ColorCardRow };
   const live: Slot[] = [];
   const dead: Slot[] = [];
 
@@ -875,13 +950,22 @@ export function buildColorOrder(
         // At ~2,900 cards the shared CDN path and the ProductVariant GID
         // prefix are 238KB of a 604KB list - more than a third of it,
         // repeated verbatim. The storefront puts them back.
-        card: [
-          f.handle,
-          c.color,
-          c.image.replace(/^https:\/\/cdn\.shopify\.com\/s\/files\//, "").replace(/\?v=\d+$/, ""),
-          c.variantId.replace(/^gid:\/\/shopify\/ProductVariant\//, ""),
-          c.soldOut ? 1 : 0,
-        ],
+        card: (function () {
+          const p = cardPresentation(f.handle, c.priceMinor, badges, membership);
+          return [
+            f.handle,
+            c.color,
+            c.image.replace(/^https:\/\/cdn\.shopify\.com\/s\/files\//, "").replace(/\?v=\d+$/, ""),
+            c.variantId.replace(/^gid:\/\/shopify\/ProductVariant\//, ""),
+            c.soldOut ? 1 : 0,
+            f.title,
+            p.finalMinor,
+            // A badge discount beats a compare-at price: it is the one
+            // the shopper actually sees struck through on the card.
+            p.strikeMinor || c.compareMinor,
+            p.badges,
+          ] as ColorCardRow;
+        })(),
       };
       (c.soldOut ? dead : live).push(slot);
     });
@@ -1107,6 +1191,21 @@ export async function runMerchandising(
   // over a longer window than the score: a colour's standing changes far
   // more slowly than a product's.
   const colorDemand = await salesByColor(shop, 180);
+
+  // What each card will finally show. Read once per run, not per
+  // collection: the badges are shop-wide and their collections do not
+  // change between one managed collection and the next.
+  const cardBadges = await badgesForCards(shop);
+  const badgeCollections = Array.from(
+    new Set(
+      cardBadges
+        .flatMap((b) => [b.targetValue, b.excludeValue])
+        .filter((v) => !!v),
+    ),
+  );
+  const badgeMembers = badgeCollections.length
+    ? await badgeMembership(admin, badgeCollections)
+    : new Map<string, Set<string>>();
   // Only ever used to order products that score nothing on the real signals,
   // so it is read once per run alongside the windowed figures.
   const lifetime = await lifetimeSalesByProduct(shop);
@@ -1146,7 +1245,13 @@ export async function runMerchandising(
       // has, exactly as it does today.
       if (handle) {
         try {
-          const cards = buildColorOrder(ordered, facts, colorDemand);
+          const cards = buildColorOrder(
+            ordered,
+            facts,
+            colorDemand,
+            cardBadges,
+            badgeMembers,
+          );
           await prisma.collectionColorOrder.upsert({
             where: { shop_handle: { shop, handle } },
             update: {
