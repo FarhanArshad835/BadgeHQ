@@ -63,15 +63,36 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     return json({ ok: true, builtAt: 0, cards: [] }, { headers: { ...CORS, ...CACHE } });
   }
 
-  let cards: unknown = [];
+  let all: unknown = [];
   try {
-    cards = JSON.parse(row.cards);
+    all = JSON.parse(row.cards);
   } catch {
-    cards = [];
+    all = [];
   }
+  const cards = Array.isArray(all) ? all : [];
+
+  // Served a page at a time.
+  //
+  // The whole 2,941-card list is 80KB brotli on this collection, and 46KB
+  // of that is image paths: 2,889 of them are unique Shopify hashes, so
+  // they do not compress and no amount of prefix-stripping helps - both
+  // that and a handle index were measured at 79KB, against 80KB for the
+  // plain list.
+  //
+  // A shopper reads 24 cards at a time, so sending 2,941 to render 24 is
+  // the real waste. One page is a couple of KB, and the next is fetched
+  // while they scroll.
+  const offset = Math.max(0, parseInt(String(url.searchParams.get("offset") || "0"), 10) || 0);
+  const limit = Math.min(240, Math.max(1, parseInt(String(url.searchParams.get("limit") || "48"), 10) || 48));
 
   return json(
-    { ok: true, builtAt: row.builtAt.getTime(), cards: Array.isArray(cards) ? cards : [] },
+    {
+      ok: true,
+      builtAt: row.builtAt.getTime(),
+      total: cards.length,
+      offset,
+      cards: cards.slice(offset, offset + limit),
+    },
     { headers: { ...CORS, ...CACHE } },
   );
 };
