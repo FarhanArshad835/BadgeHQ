@@ -385,6 +385,11 @@ var __bhqEngaged = false;
     }
   })();
 
+  // Behaviour config, captured as soon as it arrives so the ordered grid
+  // can boost its list before drawing. See the note at the call site.
+  var __bhqBehaviourOn = false;
+  var __bhqBehaviourWeights = null;
+
   var __bhqVeiled = false;
   function veilGridNow() {
     if (__bhqVeiled) return;
@@ -568,6 +573,14 @@ var __bhqEngaged = false;
     var w = data.widgets || {};
     var currencySymbol = data.currencySymbol || "$";
     var page = detectPage();
+
+    // Recorded before the colour cards run, because the ordered grid
+    // applies the shopper boost to its list itself and is called below -
+    // well before reorderGridForShopper, which is where these normally
+    // enter. Reordering the grid after it is drawn is the one thing the
+    // ordered grid exists to avoid, so it has to boost before drawing.
+    __bhqBehaviourOn = !!w.behaviourTracking;
+    __bhqBehaviourWeights = w.behaviourWeights || null;
 
     // Before the badge pass: a split card is still a card, and the
     // badges, price rules and wishlist hearts that run after this all
@@ -6444,6 +6457,67 @@ var __bhqEngaged = false;
   }
   try { await loadWindow(0); }
   catch (e) { S.log.push('fallback: ' + e.message); return false; }
+
+  // ---- 1a. the returning shopper's boost, BEFORE anything is drawn ------------
+  //
+  // The split path boosts by reordering cards that are already on screen,
+  // which is the movement this renderer exists to remove. Here the list is
+  // reordered instead, while it is still data, so a boosted colour is drawn
+  // in its boosted slot the first time it appears and never moves.
+  //
+  // Only the first window is touched. Those are the cards this shopper is
+  // about to see; later windows arrive during the scroll, after earlier
+  // cards have been drawn, and reordering across that boundary would move
+  // something already seen. A boosted product deep in the collection keeps
+  // its engine position - the boost is for what is in reach, not a resort
+  // of 2,900 cards.
+  //
+  // Scored by scoreBehaviour, the same helper the split path uses, so the
+  // weights the merchant set and the recency decay apply identically and
+  // there is one definition of what engagement is worth.
+  if (__bhqBehaviourOn) {
+    try {
+      var bw = __bhqBehaviourWeights;
+      var scored = scoreBehaviour({
+        cart: num(bw && bw.cart, 12),
+        wish: num(bw && bw.wish, 10),
+        dwell: num(bw && bw.dwell, 5),
+        views: num(bw && bw.views, 1),
+      });
+      if (scored.length) {
+        var boost = {};
+        for (var bi = 0; bi < scored.length; bi++) {
+          boost[String(scored[bi].handle).toLowerCase()] = scored[bi].score;
+        }
+        // A stable sort on the window: boosted entries rise, everything
+        // else holds its engine order. Sold-out stays at the back whatever
+        // the shopper did - a colour they cannot buy is not a better card
+        // for having been looked at.
+        var head = list.slice(0, WINDOW);
+        var rest = list.slice(WINDOW);
+        var idx = {};
+        for (var hi = 0; hi < head.length; hi++) idx[hi] = hi;
+        var moved = 0;
+        head = head
+          .map(function (e, i) {
+            var b = e.soldOut ? 0 : boost[String(e.h).toLowerCase()] || 0;
+            if (b > 0) moved++;
+            return { e: e, i: i, b: b };
+          })
+          .sort(function (a, b2) {
+            if (a.e.soldOut !== b2.e.soldOut) return a.e.soldOut ? 1 : -1;
+            if (b2.b !== a.b) return b2.b - a.b;
+            return a.i - b2.i;
+          })
+          .map(function (x) { return x.e; });
+        list = head.concat(rest);
+        S.log.push('boost: ' + moved + ' of ' + head.length + ' cards matched engagement');
+      }
+    } catch (e) {
+      // A boost that throws must not cost the shopper the grid.
+      S.log.push('boost skipped: ' + e.message);
+    }
+  }
 
   // ---- template card: Shopify's own undecorated markup --------------------------
   var tpl = null;
