@@ -393,8 +393,8 @@ var __bhqEngaged = false;
       var st = document.createElement("style");
       st.id = "badgehq-veil";
       st.textContent =
-        "#product-grid,[id^='main-collection-product-grid'] ul{opacity:0}" +
-        ".badgehq-ready #product-grid,.badgehq-ready [id^='main-collection-product-grid'] ul{opacity:1;transition:opacity .18s ease}";
+        "#product-grid,[id^='main-collection-product-grid'] ul{opacity:0;transition:opacity .18s ease}" +
+        ".badgehq-ready #product-grid,.badgehq-ready [id^='main-collection-product-grid'] ul{opacity:1}";
       (document.head || document.documentElement).appendChild(st);
       // A hard ceiling. This now goes up before the first paint, so it has
       // to outlast fetching the ranked order - measured at ~480ms from the
@@ -413,8 +413,24 @@ var __bhqEngaged = false;
     }
   }
   function __bhqUnveil() {
-    if (!__bhqVeiled) return;
+    // Delete the veil itself. Do not rely on a class.
+    //
+    // This used to add "badgehq-ready" to <html> and leave the style
+    // tag in place, so the grid was only visible while that class
+    // survived. Something on this storefront rewrites the class list
+    // after the widget runs, and every collection went blank: the cards
+    // were all there at opacity 0, on every reload, for 25 seconds and
+    // counting. Both safety timers called this same function, so none of
+    // them could help.
+    //
+    // Removing the element cannot be undone by anything else on the
+    // page, which is the property this needs.
+    __bhqVeiled = false;
     try {
+      var v = document.getElementById("badgehq-veil");
+      if (v && v.parentNode) v.parentNode.removeChild(v);
+      // Kept for the fade: the grid carries its own transition, so
+      // removing the tag reveals it smoothly rather than snapping.
       var root = document.documentElement;
       if (root && root.className.indexOf("badgehq-ready") === -1) {
         root.className += " badgehq-ready";
