@@ -6912,6 +6912,19 @@ var __bhqEngaged = false;
         // This is the branch a first-time shopper takes, so this is exactly
         // the case where a later wishlist needs to warm its cards.
         __bhqOnEngage = onEngagement;
+
+        // Sold-out colour cards still have to sink here.
+        //
+        // This branch is taken by every shopper with no behaviour yet -
+        // most first visits - and it returned without ever calling
+        // applyShopperOrder, so nothing reordered the grid. "Push
+        // sold-out products down" therefore did nothing at all for them,
+        // which is how two sold-out bags sat in the first four cards.
+        //
+        // The sort itself needs no behaviour: with an empty bag every
+        // card keeps its merchandised standing and only the sold-out
+        // penalty moves anything.
+        if (!sortedOrFiltered) applyShopperOrder([]);
       });
       return release();
     }
@@ -7730,7 +7743,22 @@ var __bhqEngaged = false;
     // Nothing to do, so release whatever the parse-time check raised. An
     // engaged shopper whose order happens to match is still hidden at this
     // point and must not be left that way.
-    if (pageNeedsChange(cards, byHandle) === null) {
+    // A sold-out colour card is reason enough to re-sort.
+    //
+    // pageNeedsChange only asks whether a DIFFERENT product should be on
+    // this page. It has no notion of stock, so on a grid where nothing
+    // needs swapping in it returned null and the sort below never ran -
+    // which is why "Push sold-out products down" did nothing on Bags for
+    // Women, where 32 of 48 cards are sold-out colours and two of them
+    // sat in the first four.
+    var hasSoldOutCard = false;
+    for (var sc = 0; sc < cards.length; sc++) {
+      if (cards[sc].soldOut) {
+        hasSoldOutCard = true;
+        break;
+      }
+    }
+    if (!hasSoldOutCard && pageNeedsChange(cards, byHandle) === null) {
       __bhqUnveil();
       return true;
     }
