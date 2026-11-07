@@ -279,11 +279,17 @@ type ProductFacts = {
   live: boolean;
   /** The product's own photo, for a card that has no colour of its own. */
   featuredImage: string;
+  /** Its first variant's price, for the same reason. Minor units. */
+  priceMinor: number;
+  compareMinor: number;
   colorCards: Array<{
     color: string;
     image: string;
     variantId: string;
     soldOut: boolean;
+    /** Minor units, so the storefront never does currency maths. */
+    priceMinor: number;
+    compareMinor: number;
   }>;
 };
 
@@ -325,10 +331,24 @@ function colorCardsOf(n: any): ProductFacts["colorCards"] {
     if (at === undefined) {
       at = out.length;
       seen.set(color, at);
-      out.push({ color, image: "", variantId: String(v?.id || ""), soldOut: true });
+      out.push({
+        color,
+        image: "",
+        variantId: String(v?.id || ""),
+        soldOut: true,
+        priceMinor: 0,
+        compareMinor: 0,
+      });
     }
     const card = out[at];
     if (live) card.soldOut = false;
+    // A buyable variant's price wins: a colour is shown at a price the
+    // shopper can actually pay, not a sold-out size's.
+    const money = (x: unknown) => Math.round(Number(x || 0) * 100);
+    if (!card.priceMinor || live) {
+      card.priceMinor = money(v?.price);
+      card.compareMinor = money(v?.compareAtPrice);
+    }
     // Prefer a buyable variant's photo and id over a sold-out one's.
     if (!card.image || (live && card.soldOut === false)) {
       const url = String(v?.image?.url || "");
@@ -385,6 +405,10 @@ export async function fetchCollection(
                   # and can only order the colours already on screen.
                   selectedOptions { name value }
                   image { url }
+                  # The card shows a price per colour, and colours of one
+                  # product are not always priced alike.
+                  price
+                  compareAtPrice
                 }
               }
             }
@@ -431,6 +455,8 @@ export async function fetchCollection(
         ),
         live: String(n.status || "").toUpperCase() === "ACTIVE" && !!n.publishedAt,
         featuredImage: String(n.featuredImage?.url || ""),
+        priceMinor: Math.round(Number(n.variants?.nodes?.[0]?.price || 0) * 100),
+        compareMinor: Math.round(Number(n.variants?.nodes?.[0]?.compareAtPrice || 0) * 100),
         colorCards: colorCardsOf(n),
       });
     }
@@ -671,6 +697,113 @@ export function rankProducts(
  * batches because the mutation caps its move list, and sequentially because
  * each call queues an async job on Shopify's side.
  */
+/** A badge as the storefront config describes it, trimmed to what a card needs. */
+export type BadgeSpec = {
+  text: string;
+  targetType: string;
+  targetValue: string;
+  excludeValue: string;
+  discountMinor: number;
+};
+
+/**
+ * What a card finally shows: the price after any discount badge, and the
+ * badges themselves.
+ *
+ * Computed here, once an hour, rather than in the browser per card. The
+ * widget and this engine are different languages in different files, and a
+ * price that disagrees between them is worse than a card that moves - so
+ * there is one implementation and the storefront only renders what it is
+ * given.
+ */
+export function cardPresentation(
+  handle: string,
+  priceMinor: number,
+  badges: BadgeSpec[],
+  membership: Map<string, Set<string>>,
+): { finalMinor: number; strikeMinor: number; badges: string[] } {
+  const shown: string[] = [];
+  let discount = 0;
+
+  for (const b of badges) {
+    if (b.targetType === "collection") {
+      const members = membership.get(b.targetValue);
+      if (!members || !members.has(handle)) continue;
+    } else if (b.targetType !== "all") {
+      continue;
+    }
+    if (b.excludeValue) {
+      const excluded = membership.get(b.excludeValue);
+      if (excluded && excluded.has(handle)) continue;
+    }
+    if (b.text) shown.push(b.text);
+    // Discounts add up the same way the storefront applies them.
+    discount += b.discountMinor;
+  }
+
+  const finalMinor = Math.max(0, priceMinor - discount);
+  // The original price is struck through only when something came off it.
+  return { finalMinor, strikeMinor: discount > 0 ? priceMinor : 0, badges: shown };
+}
+/**
+ * Which of the badge-targeted collections each product belongs to.
+ *
+ * A badge is shown by collection membership - Special Price on save100,
+ * "Get it for Rs 649" on only-2-for-1300, and so on - and the discount that
+ * turns Rs 849 into Rs 749 rides on one of them. The storefront works this
+ * out per card today, which is why a card changes seconds after it is drawn.
+ *
+ * Read once per run: 991 memberships across six collections in about six
+ * seconds, inside a job that already takes thirty.
+ */
+async function badgeMembership(
+  admin: { graphql: (q: string, o?: any) => Promise<Response> },
+  handles: string[],
+): Promise<Map<string, Set<string>>> {
+  const out = new Map<string, Set<string>>();
+  for (const handle of handles) {
+    if (!handle) continue;
+    try {
+      const idRes = await admin.graphql(
+        `#graphql
+        query ColByHandle($q: String!) { collections(first: 1, query: $q) { nodes { id } } }`,
+        { variables: { q: `handle:${handle}` } },
+      );
+      const idBody: any = await idRes.json();
+      const id = idBody?.data?.collections?.nodes?.[0]?.id;
+      if (!id) continue;
+
+      const members = new Set<string>();
+      let cursor: string | null = null;
+      for (let page = 0; page < 10; page++) {
+        const res: Response = await admin.graphql(
+          `#graphql
+          query ColMembers($id: ID!, $cursor: String) {
+            collection(id: $id) {
+              products(first: 250, after: $cursor) {
+                pageInfo { hasNextPage endCursor }
+                nodes { handle }
+              }
+            }
+          }`,
+          { variables: { id, cursor } },
+        );
+        const body: any = await res.json();
+        const conn = body?.data?.collection?.products;
+        if (!conn) break;
+        for (const n of conn.nodes || []) if (n?.handle) members.add(String(n.handle));
+        if (!conn.pageInfo?.hasNextPage) break;
+        cursor = conn.pageInfo.endCursor;
+      }
+      out.set(handle, members);
+    } catch (e) {
+      // A collection that cannot be read simply contributes no badges, which
+      // is the same as it being empty - never a reason to fail the run.
+      console.error("[badgeMembership]", handle, String((e as any)?.message || e).slice(0, 100));
+    }
+  }
+  return out;
+}
 /**
  * The ordered colour-card list for a collection.
  *
@@ -712,7 +845,18 @@ export function buildColorOrder(
     // them vanish from the grid. One card, no colour suffix.
     const cards = f.colorCards.length
       ? f.colorCards
-      : [{ color: "", image: f.featuredImage, variantId: "", soldOut: !f.inStock }];
+      : [
+          {
+            color: "",
+            image: f.featuredImage,
+            variantId: "",
+            soldOut: !f.inStock,
+            // Its own first variant: a product with no colour option
+            // still has a price to show on its single card.
+            priceMinor: f.priceMinor,
+            compareMinor: f.compareMinor,
+          },
+        ];
 
     // Best-selling colour first, so it inherits the product's own position.
     const sold = demand.get(f.handle);
