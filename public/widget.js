@@ -6117,8 +6117,22 @@ var __bhqEngaged = false;
 
     var grid = document.querySelector("#product-grid");
     if (!grid) return;
-    if (grid.getAttribute("data-bhq-colorcards") === "1") return;
-    grid.setAttribute("data-bhq-colorcards", "1");
+
+    // Infinite scroll appends batches the theme rendered itself, so a
+    // one-shot guard on the grid left every page after the first
+    // unsplit: those cards kept the theme's own markup, which on this
+    // theme already carries a colour in the title. A card reading
+    // "Teddy Sneakers  - Peach" beside a green photo was one of those -
+    // never touched by this code, and impossible to find by auditing
+    // page 1, where every card was correct.
+    //
+    // Each card is marked instead, and the watcher below re-runs on new
+    // batches. splitCardsByColor skips anything already marked, so a
+    // card is never split twice.
+    if (!grid.getAttribute("data-bhq-colorcards")) {
+      grid.setAttribute("data-bhq-colorcards", "1");
+      watchGridForNewCards(grid, gs);
+    }
 
     // One request for the whole collection: variants, options and per-variant
     // images all arrive together, so no per-product round trips.
@@ -6175,6 +6189,21 @@ var __bhqEngaged = false;
    * product side by side, and it would throw away the ordering the
    * merchant chose.
    */
+  /** Re-split when infinite scroll appends a batch. Debounced, because the
+   *  theme inserts a page a card at a time. */
+  var _colorCardTimer = null;
+  function watchGridForNewCards(grid, gs) {
+    if (!window.MutationObserver) return;
+    new MutationObserver(function () {
+      clearTimeout(_colorCardTimer);
+      _colorCardTimer = setTimeout(function () {
+        var fresh = grid.querySelectorAll(
+          "li.grid__item:not([data-bhq-color]):not([data-bhq-seen])",
+        );
+        if (fresh.length) renderColorCards(gs);
+      }, 400);
+    }).observe(grid, { childList: true });
+  }
   function splitCardsByColor(grid, byHandle) {
     var items = grid.querySelectorAll("li.grid__item");
     var entries = [];
@@ -6182,6 +6211,9 @@ var __bhqEngaged = false;
 
     for (var i = 0; i < items.length; i++) {
       var li = items[i];
+      // Already a colour card, or already seen and left alone.
+      if (li.getAttribute("data-bhq-color") || li.getAttribute("data-bhq-seen")) continue;
+      li.setAttribute("data-bhq-seen", "1");
       var a = li.querySelector('a[href*="/products/"]');
       if (!a) continue;
       var h = (a.getAttribute("href") || "").split("/products/")[1];
