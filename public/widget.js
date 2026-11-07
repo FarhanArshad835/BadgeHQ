@@ -631,11 +631,24 @@ var __bhqEngaged = false;
   function setupCardRerenderWatch(data, page) {
     if (!window.MutationObserver) return;
     var w = data.widgets || {};
-    if (!(w.wishlist && w.wishlist.enabled && w.wishlist.showOnCards)) return;
+    var wantWishlist = !!(w.wishlist && w.wishlist.enabled && w.wishlist.showOnCards);
+    var wantBadges = !!(w.productBadges && w.productBadges.length);
+    if (!wantWishlist && !wantBadges) return;
     var debounce = null;
     var observer = new MutationObserver(function () {
       clearTimeout(debounce);
-      debounce = setTimeout(function () { wlDecorateCards(w.wishlist); }, 400);
+      debounce = setTimeout(function () {
+        if (wantWishlist) wlDecorateCards(w.wishlist);
+        // Colour cards are clones, and a clone only carries the markup
+        // its template had when it was copied. Badges are drawn per card
+        // after load, so a colour split that ran first left one colour
+        // with its badges - the "Get it for Rs 649" line among them -
+        // and its siblings without. Measured: 45 of 73 cards had it.
+        //
+        // Safe to repeat: the renderer reuses an existing info stack
+        // rather than adding a second one.
+        if (wantBadges) renderProductBadges(w.productBadges, page);
+      }, 400);
     });
     observer.observe(document.body, { childList: true, subtree: true });
     document.addEventListener("shopify:section:load", function () { wlDecorateCards(w.wishlist); });
