@@ -6413,7 +6413,15 @@ var __bhqEngaged = false;
     // upstream: the sort was real, it just ran against the wrong cards.
     if (typeof applyShopperOrder === "function") {
       try {
-        applyShopperOrder(_lastWanted || []);
+        // batchOnly on a grid that has already been settled, so cards
+        // the shopper has read are never moved. Without it this re-sort
+        // reordered the WHOLE grid on every scroll batch: measured, 42
+        // of the 73 cards on page 1 changed position after one scroll.
+        //
+        // The first pass has nothing settled yet, so it still sorts the
+        // whole grid and the opening screen is correct.
+        var settled = grid.querySelector("[data-badgehq-settled]");
+        applyShopperOrder(_lastWanted || [], !!settled);
       } catch (e) {
         /* a grid that cannot be sorted still renders */
       }
