@@ -6306,9 +6306,24 @@ var __bhqEngaged = false;
     // shown and the colour read were taken from different places.
     // There is only one source now, so the name beside a photo is the
     // name of the variant that photo belongs to, by construction.
-    var title = li.querySelector(".card__heading a, .card-information a, h3 a");
-    if (title) {
-      title.textContent = String(product.title || "").trim() + " - " + group.color;
+    // EVERY heading, not the first one.
+    //
+    // A Dawn card carries two: a hidden div.card__heading above the
+    // media and the visible h3.card__heading below it. querySelector
+    // returns the first in DOCUMENT order, which is the hidden one - so
+    // every card was correctly renamed where nobody could see it while
+    // the visible heading kept the template colour, and all five
+    // sneakers read "- Peach" on the page.
+    //
+    // This is also why checking the DOM for the colour kept passing:
+    // the selector that set the title was the selector that read it.
+    var newTitle = String(product.title || "").trim() + " - " + group.color;
+    var heads = li.querySelectorAll(".card__heading, .card-information__text");
+    for (var hi = 0; hi < heads.length; hi++) {
+      var link = heads[hi].querySelector("a");
+      // Write to the link where there is one, so the heading keeps its
+      // anchor; otherwise to the heading itself.
+      (link || heads[hi]).textContent = newTitle;
     }
     if (!group.available) {
       li.setAttribute("data-bhq-soldout", "1");

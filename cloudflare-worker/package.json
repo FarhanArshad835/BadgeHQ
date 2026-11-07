@@ -11,6 +11,6 @@
     "dev": "npm run build && wrangler dev"
   },
   "devDependencies": {
-    "wrangler": "^3.78.0"
+    "wrangler": "^4.158.0"
   }
 }
