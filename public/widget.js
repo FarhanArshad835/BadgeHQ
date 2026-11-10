@@ -5897,7 +5897,8 @@ var __bhqEngaged = false;
    */
   /** A finite, non-negative number, or the fallback. */
   function num(v, dflt) {
-    var n = Number(v);
+  if (v === null || v === undefined || v === '') return dflt;
+  var n = Number(v);
     return isFinite(n) && n >= 0 ? n : dflt;
   }
 
@@ -6670,6 +6671,119 @@ var __bhqEngaged = false;
   // position 922, so it is still sitting in window 4 and would be drawn a
   // second time when that window loads. Checked in nextEntries.
   var __bhqLifted = null;
+  // ---- mid-scroll boost: similar products of what the shopper engages with --------
+  //
+  // The load-time boost runs once, before anything is drawn, and lifts the engaged
+  // products themselves. This adds the products MOST LIKE them, while the shopper
+  // scrolls, at the front of the next batch that has not been drawn yet. Nothing
+  // already on screen moves; the prepared batch is merged, never discarded.
+  var __bhqBoostSeen = {};   // engaged handles already expanded into similar products
+  var __bhqPending = [];     // similar-product rows waiting for the next undrawn batch
+  var __bhqCarry = [];       // rows a boosted batch pushed out, drawn first next time
+  var __bhqNbPromise = null; // handle -> similar handles, loaded on first engagement
+  var __bhqCheckAt = 0;
+  function __bhqDrawnKeys() {
+    var k = {};
+    (S.filled || []).forEach(function (f) { k[f.key] = 1; });
+    return k;
+  }
+  // _neighbours is only filled on the old reorder path, which stands aside when this
+  // grid draws, so the lists are loaded here, once, and only after an engagement.
+  function __bhqLoadNeighbours() {
+    if (!__bhqNbPromise) {
+      __bhqNbPromise = fetch(API_ORIGIN + '/api/order?shop=' + encodeURIComponent(SHOP))
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+          var map = {}, order = (d && d.order) || [], nb = (d && d.neighbours) || [];
+          for (var i = 0; i < order.length; i++) {
+            var row = nb[i];
+            if (row && row.length) map[String(order[i]).toLowerCase()] = row.map(function (x) { return typeof x === 'number' ? order[x] : x; });
+          }
+          S.log.push('boost+: similar lists for ' + Object.keys(map).length + ' products');
+          return map;
+        })
+        .catch(function (e) { S.log.push('boost+: similar lists failed: ' + e.message); return {}; });
+    }
+    return __bhqNbPromise;
+  }
+  // The patch this came from carried a window.__bhqBoostDbg counter for its own
+  // test harness. Dropped: it ran on every check and built an array of scored
+  // handles each time, on a path that fires per scroll and per batch.
+  function __bhqExit() {}
+  function __bhqCheckEngagement() {
+    try {
+      if (typeof __bhqBehaviourOn === 'undefined' || !__bhqBehaviourOn) return __bhqExit('behaviour off');
+      var now = Date.now();
+      if (now - __bhqCheckAt < 300) return __bhqExit('throttled');
+      __bhqCheckAt = now;
+      var bw = __bhqBehaviourWeights;
+      var scored = scoreBehaviour({
+        cart: num(bw && bw.cart, 12),
+        wish: num(bw && bw.wish, 10),
+        dwell: num(bw && bw.dwell, 5),
+        views: num(bw && bw.views, 1),
+      });
+      var fresh = [];
+      for (var i = 0; i < scored.length; i++) {
+        var h = String(scored[i].handle).toLowerCase();
+        if (!__bhqBoostSeen[h]) { __bhqBoostSeen[h] = 1; fresh.push(h); }
+      }
+      if (!fresh.length) return __bhqExit(scored.length ? 'nothing new' : 'no engagement scored');
+      S.log.push('boost+: engaged ' + fresh.join(','));
+      __bhqLoadNeighbours().then(function (map) {
+        var want = [];
+        fresh.forEach(function (h) {
+          (map[h] || []).forEach(function (n) { n = String(n).toLowerCase(); if (want.indexOf(n) < 0 && fresh.indexOf(n) < 0) want.push(n); });
+        });
+        want = want.slice(0, 20);
+        if (!want.length) { S.log.push('boost+: no similar products for ' + fresh.join(',')); return; }
+        return fetch(API + '?shop=' + SHOP + '&collection=' + COL + '&handles=' + encodeURIComponent(want.join(',')))
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (md) {
+            var matched = (md && md.matched) || [];
+            var best = {};
+            matched.forEach(function (m) {
+              var c = m.card;
+              if (!c || c[4]) return; // sold out: never boosted
+              var hh = String(c[0]).toLowerCase();
+              if (!best[hh] || m.at < best[hh].at) best[hh] = { at: m.at, card: c };
+            });
+            var drawn = __bhqDrawnKeys(), queued = {}, added = 0;
+            __bhqPending.forEach(function (e) { queued[e.h + '|' + e.colour] = 1; });
+            want.forEach(function (hh) {
+              var b = best[hh];
+              if (!b || added >= 8) return;
+              var c = b.card;
+              var e = { at: b.at, h: c[0], colour: c[1] || '', img: c[2], vid: String(c[3] || ''), soldOut: false,
+                title: c[5] || '', priceMinor: Number(c[6] || 0), strikeMinor: Number(c[7] || 0), badges: c[8] || [], __lift: true };
+              var key = e.h + '|' + e.colour;
+              if (drawn[key] || queued[key]) return;
+              __bhqPending.push(e); queued[key] = 1; added++;
+            });
+            S.log.push('boost+: ' + added + ' similar queued (' + matched.length + ' rows matched of ' + want.length + ' asked)');
+          });
+      }).catch(function (e) { S.log.push('boost+: failed: ' + e.message); });
+    } catch (e) { __bhqExit('threw: ' + e.message); S.log.push('boost+: check failed: ' + e.message); }
+  }
+  // Queued rows go in front of the batch about to be drawn. The batch was prepared
+  // earlier and is kept: whatever no longer fits is carried to the next batch.
+  function __bhqMergeBoost(entries) {
+    if (!__bhqPending.length) return entries;
+    var drawn = __bhqDrawnKeys(), front = [], frontKey = {};
+    while (__bhqPending.length) {
+      var e = __bhqPending.shift(), k = e.h + '|' + e.colour;
+      if (drawn[k] || frontKey[k]) continue;
+      front.push(e); frontKey[k] = 1;
+    }
+    if (!front.length) return entries;
+    __bhqLifted = __bhqLifted || {};
+    front.forEach(function (fe) { __bhqLifted[fe.h + '|' + fe.colour] = 1; }); // natural copies skipped later
+    var rest = entries.filter(function (re) { return !frontKey[re.h + '|' + re.colour]; });
+    var merged = front.concat(rest);
+    __bhqCarry = merged.slice(BATCH).concat(__bhqCarry);
+    S.log.push('boost+: placed ' + front.length + ' similar at the front of batch ' + Math.ceil(slots.length / BATCH));
+    return merged.slice(0, BATCH);
+  }
   // Fetch the next 240-card section of the list once, in the background, before it runs out.
   function ensureWindow() {
     if (windowLoading || listTotal === null || list.length >= listTotal) return windowLoading;
@@ -7045,6 +7159,7 @@ var __bhqEngaged = false;
   // ---- 1b. prepare the next n entries: live stock decides BEFORE drawing ------------
   async function nextEntries(n) {
     var out = [];
+    while (__bhqCarry.length && out.length < n) out.push(__bhqCarry.shift());
     while (out.length < n) {
       if (list.length - listCursor < 80) ensureWindow();            // read ahead, don't wait
       if (listCursor >= list.length) {
@@ -7182,6 +7297,8 @@ var __bhqEngaged = false;
     }
     var entries = await prepare();
     prepared = null;
+    __bhqCheckEngagement();
+    entries = __bhqMergeBoost(entries);
     batch.forEach(function (slot, i) {
       if (entries[i]) fill(slot, entries[i]);
       else { slot.el.remove(); done = true; }
@@ -7191,7 +7308,7 @@ var __bhqEngaged = false;
     if (!done) prepare();                       // get the following batch ready in the background
     maybeLoad();
   }
-  function maybeLoad() { if (!busy && !done && nearEnd()) addBatch(); }
+  function maybeLoad() { __bhqCheckEngagement(); if (!busy && !done && nearEnd()) addBatch(); }
   // An IntersectionObserver only reports when the marker ENTERS the zone; a shopper already
   // inside the zone (e.g. at the very bottom) gets no new report, so also check on scroll.
   new IntersectionObserver(function (es) { if (es[0].isIntersecting) maybeLoad(); },
