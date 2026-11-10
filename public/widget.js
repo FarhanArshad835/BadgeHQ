@@ -2703,9 +2703,29 @@ var __bhqEngaged = false;
       // product id, is read only by badges targeting specific products,
       // and this shop has none; a card still falls back to its own
       // /products/{handle}.json when something needs more.
-      bulkPrefetchInventory(function () {
-        findAndAttach();
-      });
+      // Only when a badge actually asks about inventory, and never blocking.
+      //
+      // This feed is the whole catalogue - 179KB compressed, 1,153KB decoded,
+      // measured at 41s on a real throttled load - and it was fetched on
+      // every page with any badge at all, with findAndAttach waiting on it.
+      // So no badge appeared until it landed, including the seven on this
+      // shop that never look at inventory. Only "Trending"
+      // (inventory_count > 700) does.
+      //
+      // When one does need it, the fetch runs alongside the badge pass and
+      // re-attaches on arrival: an inventory badge appears a moment later
+      // instead of holding back every other badge on the page.
+      var needsInventory = false;
+      for (var ic = 0; ic < eligible.length; ic++) {
+        var cnd = eligible[ic].conditions || eligible[ic].condition;
+        if (cnd && cnd.type === "inventory_count") { needsInventory = true; break; }
+      }
+      if (needsInventory) {
+        bulkPrefetchInventory(function () {
+          findAndAttach();
+        });
+      }
+      findAndAttach();
 
       // Initial pass on whatever's already in the DOM, plus a few short retries
       // for theme JS (lazy-loaders, image reveal animations) that mutates after
