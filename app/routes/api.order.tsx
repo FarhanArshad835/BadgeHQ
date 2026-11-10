@@ -65,6 +65,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       isEnabled: true,
       collectionIds: true,
       collectionHandles: true,
+      badgeMembers: true,
       lastRunAt: true,
     },
   });
@@ -105,6 +106,35 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           return Array.isArray(h) ? h.map(String) : [];
         } catch {
           return [];
+        }
+      })(),
+      // Which products belong to each badge-targeted collection.
+      //
+      // A collection-scoped badge has to answer "is this product in that
+      // collection?", and the storefront's only way was to download the
+      // collection and read the handles out of it. Measured on a real
+      // throttled load of this store: six such fetches, 25.2MB of
+      // products.json decoded, the largest taking 95 seconds, every byte but
+      // the handles thrown away.
+      //
+      // The engine already builds this map each run to decide which badges a
+      // colour card shows, so it costs nothing extra to send. About 9KB
+      // compressed against 25MB of catalogue.
+      //
+      // Sent on the slim payload too: it is what removes the fetches, so
+      // holding it back for the full one would leave them on the critical
+      // path, which is the thing being fixed.
+      badgeMembers: (() => {
+        try {
+          const m = JSON.parse(settings.badgeMembers);
+          if (!m || typeof m !== "object" || Array.isArray(m)) return {};
+          const out: Record<string, string[]> = {};
+          for (const k of Object.keys(m)) {
+            if (Array.isArray(m[k])) out[k] = m[k].map(String);
+          }
+          return out;
+        } catch {
+          return {};
         }
       })(),
       // When the engine last rebuilt this ranking.

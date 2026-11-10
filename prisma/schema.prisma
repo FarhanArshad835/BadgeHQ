@@ -1087,6 +1087,17 @@ model MerchandiseSettings {
   /// no way to tell a managed collection from the other 46 and reordered them
   /// all - overriding the merchant's own Best selling / alphabetical sort.
   collectionHandles String @default("[]")
+  /// Which products belong to each badge-targeted collection, as
+  /// {"<collection handle>": ["<product handle>", ...]}. Written by each run.
+  ///
+  /// A collection-scoped badge has to answer "is this product in that
+  /// collection?", and the storefront's only way was to download the
+  /// collection and read the handles out. On a real throttled load of this
+  /// store that was six fetches and 25.2MB of products.json, the largest
+  /// taking 95 seconds, with everything but the handles discarded. The run
+  /// already computes this through the Admin API; storing it turns those
+  /// fetches into about 9KB on a response the storefront already asks for.
+  badgeMembers String @default("{}")
 
   /// Signal weights. Sales dominates by default: a product with 2,000 units
   /// sold and one with 3 must not rank together because both happen to be in

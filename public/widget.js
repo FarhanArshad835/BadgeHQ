@@ -1433,6 +1433,10 @@ var __bhqEngaged = false;
   // Targeted-collection badges need this — Shopify's /products/{h}.json doesn't
   // return which collections a product belongs to, so we have to flip it around
   // and fetch each TARGETED collection's product list.
+  /** Collection membership from the engine, {collection: [product handles]}.
+   *  Filled when the ranking lands; empty until then, which simply means the
+   *  fetch below still runs, as it always did. */
+  var _badgeMembers = null;
   var _collectionMembers = {};
   var _collectionLoading = {};
   /**
@@ -1474,7 +1478,25 @@ var __bhqEngaged = false;
       // and products.json for it would claim the whole catalogue belongs,
       // which is true and therefore useless as a filter.
       if (!h || h === 'all') return;
-      prefetchCollectionMembers(h);
+      // Held until the ranking lands, because that is what carries the
+      // membership map. Starting now would mean downloading this entire
+      // collection - 5.35MB decoded on the largest one here - moments before
+      // the answer arrives in about 9KB. The ranking fetch is already in
+      // flight at this point, so the wait is short and bounded: if it fails,
+      // this falls through to the fetch exactly as it did before.
+      var go = function () { prefetchCollectionMembers(h); };
+      if (__bhqOrderPromise) {
+        // Read straight off the payload rather than waiting for
+        // loadOrderRank to store it: both are .then handlers on the same
+        // promise and this one can run first, which would read an empty map
+        // and fetch the collection anyway - the exact cost being removed.
+        __bhqOrderPromise.then(function (d) {
+          if (d && d.badgeMembers && typeof d.badgeMembers === "object" && !_badgeMembers) {
+            _badgeMembers = d.badgeMembers;
+          }
+          go();
+        }, go);
+      } else go();
     } catch (e) {
       /* membership stays unknown, which lets everything through */
     }
@@ -1498,6 +1520,25 @@ var __bhqEngaged = false;
     if (!collectionHandle) { if (onComplete) onComplete(); return; }
 
     if (_collectionMembers[collectionHandle] && _collectionMembers[collectionHandle].loaded) {
+      if (onComplete) onComplete();
+      return;
+    }
+    // The engine already knows who is in this collection.
+    //
+    // Every miss below downloads a full products.json page to keep nothing
+    // but the handles. On a real throttled load of this store that was six
+    // fetches and 25.2MB decoded, the largest taking 95 seconds, while the
+    // grid was waiting. /api/order now carries the same map in about 9KB,
+    // built from the Admin API during the hourly run.
+    //
+    // Read synchronously from what the ranking already put in memory: by the
+    // time a badge asks about a collection the ranking is normally in hand,
+    // and when it is not this falls through to the fetch exactly as before.
+    if (_badgeMembers && _badgeMembers[collectionHandle]) {
+      var fromEngine = {};
+      var listE = _badgeMembers[collectionHandle];
+      for (var mi = 0; mi < listE.length; mi++) fromEngine[listE[mi]] = true;
+      _collectionMembers[collectionHandle] = { products: fromEngine, loaded: true };
       if (onComplete) onComplete();
       return;
     }
@@ -5942,6 +5983,11 @@ var __bhqEngaged = false;
         var sc = (d && d.scores) || [];
         var nb = (d && d.neighbours) || [];
         _managedCollections = (d && d.managed) || [];
+        // Collection membership, so a collection-targeted badge does not have
+        // to download the collection to find out who is in it.
+        if (d && d.badgeMembers && typeof d.badgeMembers === "object") {
+          _badgeMembers = d.badgeMembers;
+        }
         _neighbours = {};
         for (var ni = 0; ni < list.length; ni++) {
           if (nb[ni] && nb[ni].length) _neighbours[list[ni]] = nb[ni];

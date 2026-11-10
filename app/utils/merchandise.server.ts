@@ -1316,6 +1316,22 @@ export async function runMerchandising(
       // collection must not blank the list and hand the storefront a licence
       // to reorder everything again.
       ...(handles.length ? { collectionHandles: JSON.stringify(handles) } : {}),
+      // Saved rather than discarded. This is computed above for the colour
+      // cards and then dropped, while the storefront downloads the same
+      // collections itself to rebuild it - 25.2MB of products.json on a real
+      // throttled load, for a few thousand handles.
+      //
+      // Only written when there is something to write: a run with no
+      // collection-targeted badges must not wipe a map a previous run built.
+      ...(badgeMembers.size
+        ? {
+            badgeMembers: JSON.stringify(
+              Object.fromEntries(
+                Array.from(badgeMembers.entries()).map(([col, set]) => [col, Array.from(set)]),
+              ),
+            ),
+          }
+        : {}),
       lastRunStatus: results.every((r) => r.reordered || r.products === 0)
         ? `ok: ${results.length} collections`
         : `partial: ${results.filter((r) => r.error).length} failed`,
