@@ -127,8 +127,22 @@ ${grid}
     // appears.
     var g = document.querySelector("#product-grid");
     if (!g) return;
-    var cards = g.querySelectorAll("li.grid__item");
-    if (cards.length < 2 || !cards[0].querySelector("img")) return;
+    // With a template kept from the last visit there is nothing to copy, so
+    // the grid element is all this needs. That is what removes the 726ms the
+    // theme's grid spends on screen on Slow 3G: the whole of it was spent
+    // waiting for Shopify to parse the card we were going to copy.
+    var haveCached = false;
+    try {
+      haveCached = !!localStorage.getItem(
+        "bhq-tpl:" + (location.pathname.split("/collections/")[1] || "").split("/")[0],
+      );
+    } catch (e) {
+      haveCached = false;
+    }
+    if (!haveCached) {
+      var cards = g.querySelectorAll("li.grid__item");
+      if (cards.length < 2 || !cards[0].querySelector("img")) return;
+    }
     started = true;
     if (obs) obs.disconnect();
     clearInterval(poll);
