@@ -351,6 +351,32 @@
     __bhqRestore.done = true;
     try { window.scrollTo(0, __bhqRestore.y || 0); } catch (e) {}
   }
+  /** Collection membership from the engine, {collection: [product handles]}.
+   *
+   *  Declared here, above its first write, not beside the other collection
+   *  state further down. `var _badgeMembers = null` executes in file order,
+   *  so a declaration below this point would run AFTER an early-resolving
+   *  ranking had already stored the map and would wipe it. */
+  var _badgeMembers = null;
+
+  /** Take the membership map off the ranking the moment it lands.
+   *
+   *  Stored here rather than in loadOrderRank, which is where the rest of the
+   *  payload is read. On a real throttled load the badge pass asked about a
+   *  collection at 53,495ms while loadOrderRank was still running, so the map
+   *  was not set yet and the pass fell through to downloading the collection -
+   *  5.28MB for a map that was already in the response. Both are handlers on
+   *  the same promise and either can run first; this one only assigns, so it
+   *  is safe to run as early as possible. */
+  function takeBadgeMembers(d) {
+    try {
+      if (d && d.badgeMembers && typeof d.badgeMembers === "object" && !_badgeMembers) {
+        _badgeMembers = d.badgeMembers;
+      }
+    } catch (e) {
+      /* membership stays unknown, which only means the old fetch runs */
+    }
+  }
   (function prefetchOrder() {
     try {
       if (!SHOP) return;
@@ -364,7 +390,7 @@
       // need - those are fetched separately, after the ordering is in hand.
       if (window.__bhqRankPromise) {
         __bhqOrderPromise = window.__bhqRankPromise;
-        __bhqOrderPromise.catch(function () {});
+        __bhqOrderPromise.then(takeBadgeMembers, function () {});
         return;
       }
       __bhqOrderPromise = fetch(
@@ -372,6 +398,7 @@
       ).then(function (r) {
         return r.json();
       });
+      __bhqOrderPromise.then(takeBadgeMembers, function () {});
       // A rejection here must not surface as an unhandled promise; the
       // consumer re-attaches its own handlers and falls back to fetching.
       __bhqOrderPromise.catch(function () {});
@@ -1433,10 +1460,6 @@ var __bhqEngaged = false;
   // Targeted-collection badges need this — Shopify's /products/{h}.json doesn't
   // return which collections a product belongs to, so we have to flip it around
   // and fetch each TARGETED collection's product list.
-  /** Collection membership from the engine, {collection: [product handles]}.
-   *  Filled when the ranking lands; empty until then, which simply means the
-   *  fetch below still runs, as it always did. */
-  var _badgeMembers = null;
   var _collectionMembers = {};
   var _collectionLoading = {};
   /**
