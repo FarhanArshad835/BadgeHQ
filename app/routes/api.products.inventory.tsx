@@ -27,13 +27,19 @@ type Inventory = {
   created_at: string;
   product_type: string;
   vendor: string;
-  tags: string[];
+  /** Omitted when the caller passes ?tags=0; see the note at the assignment. */
+  tags?: string[];
 };
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const reqUrl = new URL(request.url);
   const shop = reqUrl.searchParams.get("shop");
   if (!shop) return json({ error: "Missing shop parameter" }, { status: 400 });
+
+  // ?tags=0 drops the tag lists, which are 87% of this response. The widget
+  // asks for them only when a badge targets a tag; nothing else reads them.
+  // Defaults to including them, so an older widget is unaffected.
+  const withTags = reqUrl.searchParams.get("tags") !== "0";
 
   // Pull the most-recent offline session for this shop. The widget runs on
   // the storefront and doesn't carry auth — we rely on the merchant having
@@ -96,7 +102,20 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         created_at: p.created_at,
         product_type: p.product_type || "",
         vendor: p.vendor || "",
-        tags: Array.isArray(p.tags) ? p.tags : (p.tags || "").split(",").map((t: string) => t.trim()).filter(Boolean),
+        // Tags only when something will read them.
+        //
+        // They are 1,001KB of this feed's 1,155KB - 87% - and only a
+        // tag-targeted badge ever looks at one. This shop has none: every
+        // badge targets a collection or all products. The storefront keeps
+        // the whole feed in sessionStorage, so those tags were written,
+        // re-read and JSON-parsed on every page view, at 1.1MB.
+        ...(withTags
+          ? {
+              tags: Array.isArray(p.tags)
+                ? p.tags
+                : (p.tags || "").split(",").map((t: string) => t.trim()).filter(Boolean),
+            }
+          : {}),
       };
       collected++;
       if (collected >= MAX_PRODUCTS) break;

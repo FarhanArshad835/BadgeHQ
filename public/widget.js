@@ -1643,6 +1643,15 @@ var __bhqEngaged = false;
   // /search?view=shinetrust.product-handles endpoint, just hosted on our
   // backend instead of inside the merchant's theme — no Asset API write,
   // no scope changes for the merchant, just one fetch.
+  /** Whether any configured badge targets a product tag.
+   *
+   *  Set by renderProductBadges before it asks for the feed. Tags are 1,001KB
+   *  of that feed's 1,155KB and the whole response is kept in sessionStorage
+   *  - measured at 1,153KB written, re-read and JSON-parsed on every page
+   *  view. This shop's eight badges all target a collection or all products,
+   *  so none of it was ever read. Defaults to true, so a path that has not
+   *  set it behaves as before. */
+  var _bhqNeedTags = true;
   var _inventoryLoading = false;
   function bulkPrefetchInventory(onComplete) {
     if (!INVENTORY_API_URL || window.__badgehq_inventory_done || _inventoryLoading) {
@@ -1668,7 +1677,13 @@ var __bhqEngaged = false;
       }
     } catch (e) {}
 
-    fetch(INVENTORY_API_URL, { credentials: "omit" })
+    // Tags only when a badge targets one.
+    //
+    // They are 1,001KB of this feed's 1,155KB and the whole response is kept
+    // in sessionStorage - measured at 1,153KB written, re-read and parsed on
+    // every page view. This shop's eight badges all target a collection or
+    // all products, so none of it was ever read.
+    fetch(INVENTORY_API_URL + (_bhqNeedTags ? "" : "&tags=0"), { credentials: "omit" })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (body) {
         if (!body || !body.products) {
@@ -2716,9 +2731,17 @@ var __bhqEngaged = false;
       // re-attaches on arrival: an inventory badge appears a moment later
       // instead of holding back every other badge on the page.
       var needsInventory = false;
+      _bhqNeedTags = false;
       for (var ic = 0; ic < eligible.length; ic++) {
         var cnd = eligible[ic].conditions || eligible[ic].condition;
-        if (cnd && cnd.type === "inventory_count") { needsInventory = true; break; }
+        if (cnd && cnd.type === "inventory_count") needsInventory = true;
+        var tgt = eligible[ic].targeting || {};
+        if (
+          tgt.type === "tag" ||
+          (tgt.excludeCollection && tgt.excludeCollection.type === "tag")
+        ) {
+          _bhqNeedTags = true;
+        }
       }
       if (needsInventory) {
         bulkPrefetchInventory(function () {
