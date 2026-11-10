@@ -558,6 +558,32 @@
       img.style.opacity = '1';
       img.setAttribute('loading', 'lazy');
     });
+    // The theme's blur-up placeholder, repointed at this card's own photo.
+    //
+    // Dawn puts a 40px-wide copy of the product's image as an inline
+    // background on div.media, so the box is never empty while the real photo
+    // loads. It is in the server HTML, so the card this template was copied
+    // from brought its own along - every drawn card showed a stretched, blurry
+    // Bow Slingback heel until its real photo arrived. Measured: 24 of 24.
+    //
+    // Invisible on a fast connection, where the photo covers it in
+    // milliseconds. On 3G it is on screen for the whole download, which is
+    // what the shopper actually sees.
+    //
+    // Repointed rather than removed, so the blur-up still does its job - it
+    // just shows the right product. Includes the root itself, since a theme
+    // may carry the background on the <li> rather than inside it.
+    try {
+      var bgSmall = "url('" + src + "?width=40')";
+      if ((li.getAttribute('style') || '').indexOf('background-image') > -1) {
+        li.style.backgroundImage = bgSmall;
+      }
+      li.querySelectorAll('[style*="background-image"]').forEach(function (el) {
+        el.style.backgroundImage = bgSmall;
+      });
+    } catch (e) {
+      /* a theme without the placeholder simply has nothing to repoint */
+    }
     var price = li.querySelector('.price');
     if (price) {
       // The FINAL price, already discounted by the engine. The storefront
