@@ -57,6 +57,41 @@
         });
       window.__bhqRankPromise = req;
 
+      // The colour list, started here rather than inside widget.js.
+      //
+      // Measured on a warm load, every download about 1ms: widget.js is
+      // requested at 350ms, it then asks for the config at 627ms, and only
+      // then the colour list at 709ms. Each step waits for the one before,
+      // so the list - which the ordered grid cannot draw a single card
+      // without - arrives last on a chain of three.
+      //
+      // It needs nothing from the config: the shop comes from Shopify's own
+      // global and the collection from the URL. Starting it alongside the
+      // ranking removes two links of that chain, the same way the ranking
+      // fetch above already does.
+      //
+      // widget.js reads this promise if it is here and fetches as before if
+      // it is not, so an older widget or a theme without this embed is
+      // unaffected.
+      var m = location.pathname.match(/\/collections\/([^/?#]+)/);
+      if (m) {
+        var col = decodeURIComponent(m[1]).toLowerCase();
+        var qs = location.search;
+        // Skip the cases the ordered grid steps aside for anyway: an explicit
+        // sort, or a filter other than colour. Fetching for those would be a
+        // request nobody reads.
+        var sorted = /[?&]sort_by=(?!manual)/.test(qs);
+        var otherFilter = /[?&]filter\./.test(qs) && !/[?&]filter\.v\.option\.color=/.test(qs);
+        if (!sorted && !otherFilter) {
+          window.__bhqColorListPromise = fetch(
+            API + "/api/color-order?shop=" + encodeURIComponent(SHOP) +
+              "&collection=" + encodeURIComponent(col) + "&offset=0&limit=240"
+          )
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .catch(function () { return null; });
+        }
+      }
+
       var beh = null;
       try {
         beh = JSON.parse(sessionStorage.getItem("badgehq-behaviour") || "null");
