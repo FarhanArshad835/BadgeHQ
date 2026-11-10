@@ -6719,6 +6719,25 @@ var __bhqEngaged = false;
       cand.removeAttribute('data-bhq-color-count');
       cand.removeAttribute('data-bhq-priced');
       // Only usable if it still has the parts every card is built from.
+      // Drop the photo the template came with.
+      //
+      // A clone of a LOADED <img> inherits its decoded pixels, and assigning a
+      // new src does not clear them: the element reports complete=false while
+      // still holding naturalWidth=214 and painting the old picture until the
+      // new file arrives. Verified by cloning a loaded card and reading the
+      // element across the swap. Cached, that is a few ms; on a slow
+      // connection it is the whole download, so every card showed the
+      // template product's photo under its own name.
+      //
+      // The section-fetch template never had this - that HTML was parsed
+      // fresh, so its images had never loaded. Removing the attributes here
+      // puts the copy in the same state: no pixels to inherit.
+      cand.querySelectorAll('img').forEach(function (im) {
+        im.removeAttribute('src');
+        im.removeAttribute('srcset');
+        im.removeAttribute('data-src');
+        im.removeAttribute('data-srcset');
+      });
       if (cand.querySelector('img') && cand.querySelector('.card__heading') && cand.querySelector('.price')) {
         tpl = cand;
         S.log.push('template: from a card on the page');
