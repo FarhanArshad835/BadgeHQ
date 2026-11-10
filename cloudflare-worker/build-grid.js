@@ -107,7 +107,12 @@ ${grid}
     if (obs) obs.disconnect();
     clearInterval(poll);
     try {
-      renderOrderedGrid().then(
+      // Through the wrapper, so this bundle records its answer as
+      // window.__bhqGridDecision. widget.js arrives later, hits the re-entry
+      // guard, and waits for that answer instead of reading a bare false as
+      // "the grid declined" - which is what made it split Shopify's hidden
+      // grid and fire two wasted color-demand requests.
+      __bhqRunGrid().then(
         function () {},
         function () {},
       );

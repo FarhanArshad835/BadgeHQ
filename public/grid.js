@@ -96,9 +96,30 @@
    * Returns true when it has taken over the grid, false when it touched
    * nothing at all.
    */
+  /** Start the grid, or wait for the bundle that already started it.
+   *  The first caller records its final answer (drawn or declined) as
+   *  window.__bhqGridDecision; renderOrderedGrid's re-entry guard hands that
+   *  answer to any later caller instead of a bare false. */
+  function __bhqRunGrid() {
+    var first = !window.__bhqOrdered;
+    var p = renderOrderedGrid(); // sets __bhqOrdered synchronously, before its first await
+    if (first) {
+      window.__bhqGridDecision = Promise.resolve(p).then(
+        function (t) { return !!t; },
+        function () { return false; },
+      );
+    }
+    return p;
+  }
   async function renderOrderedGrid() {
   'use strict';
-  if (window.__bhqOrdered) return false;
+  if (window.__bhqOrdered) {
+    // Another bundle started the grid. Its answer decides, not this guard:
+    // 'other' (truthy) when it drew the grid, false when it declined.
+    return window.__bhqGridDecision
+      ? window.__bhqGridDecision.then(function (t) { return t ? 'other' : false; })
+      : false;
+  }
   window.__bhqOrdered = { log: [], filled: [], startedAt: performance.now() };
   var S = window.__bhqOrdered;
 
@@ -831,7 +852,12 @@
     if (obs) obs.disconnect();
     clearInterval(poll);
     try {
-      renderOrderedGrid().then(
+      // Through the wrapper, so this bundle records its answer as
+      // window.__bhqGridDecision. widget.js arrives later, hits the re-entry
+      // guard, and waits for that answer instead of reading a bare false as
+      // "the grid declined" - which is what made it split Shopify's hidden
+      // grid and fire two wasted color-demand requests.
+      __bhqRunGrid().then(
         function () {},
         function () {},
       );
