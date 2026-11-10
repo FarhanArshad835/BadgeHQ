@@ -292,6 +292,60 @@
    *  Nothing here depends on the config, so it runs alongside it instead and
    *  the order is usually in hand before the config has finished. */
   var __bhqOrderPromise = null;
+  /** Fix 2: the ordered grid's card template, fetched at parse time.
+   *  It used to be fetched only after the config (~0.5s) and the colour
+   *  list, and it was the slowest step before the grid could draw. */
+  var __bhqTplPromise = null;
+  // widget.js loads async from <head>, so it can run before the grid has
+  // been parsed. Then this waits for DOMContentLoaded, which still lands
+  // well before the config does.
+  (function prefetchCardTemplateWhenReady() {
+    if (!/\/collections\//.test(location.pathname)) return;
+    if (!document.querySelector('#product-grid') && document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', prefetchCardTemplate, { once: true });
+    } else prefetchCardTemplate();
+  })();
+  function prefetchCardTemplate() {
+    try {
+      var p = new URLSearchParams(location.search);
+      var sort = p.get('sort_by');
+      if (sort && sort !== 'manual') return;
+      var other = Array.from(p.keys()).some(function (k) {
+        return k.indexOf('filter.') === 0 && k !== 'filter.v.option.color';
+      });
+      if (other) return;
+      var g = document.querySelector('#product-grid');
+      var sec = g && g.closest('[id^="shopify-section-"]');
+      if (!sec) return;
+      var sid = sec.id.replace('shopify-section-', '');
+      __bhqTplPromise = fetch(location.pathname + '?section_id=' + sid)
+        .then(function (r) { return r.ok ? r.text() : null; })
+        .catch(function () { return null; });
+    } catch (e) { __bhqTplPromise = null; }
+  }
+  /** Fix 4: coming Back to a collection. This store is never restored
+   *  from the bfcache (GoKwik's KwikPass frame and Shopify's pixel
+   *  sandbox block it), so Back is a full reload and the ordered grid
+   *  restarts with 24 cards. The position saved on pagehide lets it
+   *  redraw to the same depth and put the shopper back where they were. */
+  var __bhqRestore = null;
+  (function readGridPosition() {
+    try {
+      var nav = performance.getEntriesByType && performance.getEntriesByType('navigation')[0];
+      if (!nav || nav.type !== 'back_forward') return;
+      var raw = sessionStorage.getItem('bhq-grid-pos:' + location.pathname + location.search);
+      if (!raw) return;
+      var pos = JSON.parse(raw);
+      if (!pos || !pos.n || Date.now() - pos.t > 30 * 60 * 1000) return;
+      __bhqRestore = pos;
+      if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+    } catch (e) { __bhqRestore = null; }
+  })();
+  function __bhqRestoreScroll() {
+    if (!__bhqRestore || __bhqRestore.done) return;
+    __bhqRestore.done = true;
+    try { window.scrollTo(0, __bhqRestore.y || 0); } catch (e) {}
+  }
   (function prefetchOrder() {
     try {
       if (!SHOP) return;
@@ -348,7 +402,7 @@ var __bhqEngaged = false;
       // the split replaces every card on the grid, so without this the
       // shopper reads one order and then watches it become another.
       try {
-        var cc = JSON.parse(sessionStorage.getItem("badgehq-colorcards") || "[]");
+        var cc = JSON.parse(sessionStorage.getItem("badgehq-colorcards") || (function () { try { return localStorage.getItem("badgehq-colorcards"); } catch (e) { return null; } })() || "[]");
         var hh = (location.pathname.match(/\/collections\/([^/?#]+)/) || [])[1];
         if (hh && cc.indexOf(decodeURIComponent(hh).toLowerCase()) >= 0) {
           __bhqEngaged = true;
@@ -412,12 +466,19 @@ var __bhqEngaged = false;
       // any path that calls __bhqUnveil, but a veil that survives every
       // one of them shows an empty collection - the worst failure this
       // code can produce, and worse than any ordering it protects.
-      setTimeout(__bhqUnveil, 1200);
+      setTimeout(function () { __bhqUnveil(true); }, 1200);
     } catch (e) {
       /* never let this be why a grid stays blank */
     }
   }
-  function __bhqUnveil() {
+  function __bhqUnveil(force) {
+    // Fix 1: while a colour-card collection is being decided, only the
+    // colour pipeline (or the 1.2s backstop) may show the grid. The old
+    // shopper reorder used to lift the veil ~0.4s before the ordered
+    // grid had drawn, which is what let shoppers watch it reshuffle.
+    if (window.__bhqVeilHeld && force !== true) return;
+    window.__bhqVeilHeld = false;
+    if (force === true) __bhqRestoreScroll();
     // Delete the veil itself. Do not rely on a class.
     //
     // This used to add "badgehq-ready" to <html> and leave the style
@@ -6594,7 +6655,7 @@ var __bhqEngaged = false;
   // ---- template card: Shopify's own undecorated markup --------------------------
   var tpl = null;
   try {
-    var html = await (await fetch(location.pathname + '?section_id=' + sectionId)).text();
+    var html = (__bhqTplPromise && (await __bhqTplPromise)) || (await (await fetch(location.pathname + '?section_id=' + sectionId)).text());
     var doc = new DOMParser().parseFromString(html, 'text/html');
     tpl = doc.querySelector('#product-grid li.grid__item');
   } catch (e) { /* fall through */ }
@@ -6613,8 +6674,21 @@ var __bhqEngaged = false;
   var hide = document.createElement('style');
   hide.id = 'bhq-ordered-hide';
   hide.textContent = '#product-grid,.collection__infinite-scroll-trigger,.jm-pagination{display:none!important}' +
-    '#bhq-ordered-grid>li{height:' + slotH + 'px;overflow:hidden}' +
-    '.bhq-ph{height:100%;border-radius:8px;background:linear-gradient(90deg,#f1f1f1 25%,#e7e7e7 37%,#f1f1f1 63%);background-size:400% 100%;animation:bhqsh 1.2s ease infinite}' +
+    // min-height, not height, and no overflow clip.
+    //
+    // slotH is measured from one of Shopify's own cards, which carries no
+    // badges and no "Get it for" line. A card drawn here does: measured
+    // at 497px against a 471px slot, so overflow:hidden sliced the last
+    // line in half on 15 of 24 cards.
+    //
+    // The placeholder still reserves slotH so the page keeps its length
+    // while a batch is being filled; a filled card is simply allowed to
+    // be as tall as it is. The grid is a CSS grid, so a taller card grows
+    // its own row rather than overlapping the next one.
+    '#bhq-ordered-grid>li{min-height:' + slotH + 'px}' +
+    // height:100% needs a definite parent height, and the slot now only has
+    // a minimum - so the placeholder carries slotH itself.
+    '.bhq-ph{height:' + slotH + 'px;border-radius:8px;background:linear-gradient(90deg,#f1f1f1 25%,#e7e7e7 37%,#f1f1f1 63%);background-size:400% 100%;animation:bhqsh 1.2s ease infinite}' +
     '@keyframes bhqsh{0%{background-position:100% 50%}100%{background-position:0 50%}}';
   document.head.appendChild(hide);
   // The theme hides empty <div>s (div:empty{display:none}), so the marker must not be empty,
@@ -6787,7 +6861,10 @@ var __bhqEngaged = false;
     li.setAttribute('data-bhq-slot', String(slot.index));
     li.setAttribute('data-bhq-key', e.h + '|' + e.colour);
     if (e.soldOut) li.setAttribute('data-bhq-soldout', '');
-    li.style.height = slotH + 'px';
+    // No fixed height: the card sets its own, and the slot's min-height
+    // keeps the reserved space. Pinning it here is what cropped the
+    // "Get it for" line.
+    li.style.minHeight = slotH + 'px';
     slot.el.replaceWith(li);          // same slot, same size: nothing moves
     slot.el = li;
     S.filled.push({ slot: slot.index, key: e.h + '|' + e.colour, at: Math.round(performance.now()) });
@@ -6834,6 +6911,25 @@ var __bhqEngaged = false;
   }, { passive: true });
 
   await addBatch();
+  // Fix 4: back from a product page, draw as many cards as were loaded
+  // before leaving, then put the shopper back at the same scroll position.
+  if (__bhqRestore && !__bhqRestore.done) {
+    var wantSlots = Math.min(__bhqRestore.n, 480);
+    while (!done && slots.length < wantSlots) {
+      while (busy) await new Promise(function (r) { setTimeout(r, 16); });
+      if (done || slots.length >= wantSlots) break;
+      await addBatch();
+    }
+    while (busy) await new Promise(function (r) { setTimeout(r, 16); });
+    __bhqRestoreScroll();
+    S.log.push('restored ' + slots.length + ' slots, scroll ' + __bhqRestore.y);
+  }
+  addEventListener('pagehide', function () {
+    try {
+      sessionStorage.setItem('bhq-grid-pos:' + location.pathname + location.search,
+        JSON.stringify({ n: slots.length, y: Math.round(window.scrollY), t: Date.now() }));
+    } catch (e) {}
+  });
   S.log.push('frozen list ' + listTotal + ' cards, slot height ' + slotH + 'px');
   return true;
   }
@@ -6847,6 +6943,7 @@ var __bhqEngaged = false;
     // which collections split by colour from a previous visit.
     try {
       sessionStorage.setItem("badgehq-colorcards", JSON.stringify(cols));
+      try { localStorage.setItem("badgehq-colorcards", JSON.stringify(cols)); } catch (e2) {}
     } catch (e) {
       /* private mode - the grid simply paints unveiled */
     }
@@ -6856,9 +6953,13 @@ var __bhqEngaged = false;
     }
     var here = currentCollectionHandle();
     if (!here || cols.indexOf(here) === -1) {
-      __bhqUnveil();
+      __bhqUnveil(true);
       return;
     }
+    // Fix 1: from here until the ordered grid or the split is final,
+    // nothing else may reorder these cards or reveal the grid.
+    window.__bhqColorPhase = 'deciding';
+    window.__bhqVeilHeld = true;
 
     // The ordered grid first, the split only if it declines.
     //
@@ -6875,21 +6976,31 @@ var __bhqEngaged = false;
     // rather than leaving the page unsplit.
     renderOrderedGrid().then(function (took) {
       if (took) {
-        __bhqUnveil();
+        window.__bhqColorPhase = 'ordered';
+        __bhqUnveil(true);
         return;
       }
+      window.__bhqColorPhase = 'split';
       splitPath(gs, here);
     }, function () {
       // A throw here must not be the reason a grid stays veiled.
+      window.__bhqColorPhase = 'split';
       splitPath(gs, here);
     });
   }
 
   /** The original split: one card per colour, from the cards on the page. */
+  function __bhqShowUnsplit(grid) {
+    try {
+      grid.querySelectorAll('li.grid__item:not([data-bhq-color]):not([data-bhq-seen])').forEach(function (li) {
+        li.setAttribute('data-bhq-seen', '1');
+      });
+    } catch (e) {}
+  }
   function splitPath(gs, here) {
     var grid = document.querySelector("#product-grid");
     if (!grid) {
-      __bhqUnveil();
+      __bhqUnveil(true);
       return;
     }
 
@@ -6906,6 +7017,15 @@ var __bhqEngaged = false;
     // card is never split twice.
     if (!grid.getAttribute("data-bhq-colorcards")) {
       grid.setAttribute("data-bhq-colorcards", "1");
+      // Fix 5: once page 1 has been split, a batch the theme appends is
+      // held invisible (its space kept) until it has been split too, so
+      // the shopper never sees Shopify's cards turn into colour cards.
+      try {
+        var hold = document.createElement('style');
+        hold.id = 'bhq-split-hold';
+        hold.textContent = '#product-grid[data-bhq-split-ready] > li.grid__item:not([data-bhq-color]):not([data-bhq-seen]){visibility:hidden}';
+        (document.head || document.documentElement).appendChild(hold);
+      } catch (e) {}
       watchGridForNewCards(grid, gs, here);
     }
 
@@ -6974,10 +7094,11 @@ var __bhqEngaged = false;
         });
       })
       .catch(function () {
+        __bhqShowUnsplit(grid);
         /* the grid stays exactly as the theme rendered it - but it
            must still be SHOWN, or a failed fetch hides the whole
            collection. */
-        __bhqUnveil();
+        __bhqUnveil(true);
       });
   }
 
@@ -7006,6 +7127,9 @@ var __bhqEngaged = false;
     if (!window.MutationObserver) return;
     new MutationObserver(function () {
       clearTimeout(_colorCardTimer);
+      // Fix 5 safety: a batch the split cannot handle is shown as Shopify
+      // rendered it after 4s rather than staying invisible.
+      setTimeout(function () { __bhqShowUnsplit(grid); }, 4000);
       _colorCardTimer = setTimeout(function () {
         var fresh = grid.querySelectorAll(
           "li.grid__item:not([data-bhq-color]):not([data-bhq-seen])",
@@ -7018,6 +7142,7 @@ var __bhqEngaged = false;
     }).observe(grid, { childList: true });
   }
   function splitCardsByColor(grid, byHandle) {
+    grid.setAttribute("data-bhq-split-ready", "1");
     var items = grid.querySelectorAll("li.grid__item");
     var entries = [];
     var maxColors = 0;
@@ -7042,7 +7167,7 @@ var __bhqEngaged = false;
       if (groups.length > maxColors) maxColors = groups.length;
     }
     if (!entries.length) {
-      __bhqUnveil();
+      __bhqUnveil(true);
       return;
     }
 
@@ -7197,7 +7322,7 @@ var __bhqEngaged = false;
       }
     }
     // The grid is final now, so show it.
-    __bhqUnveil();
+    __bhqUnveil(true);
   }
 
   function buildColorCard(templateLi, group, product) {
@@ -8400,6 +8525,11 @@ var __bhqEngaged = false;
   var _lastWanted = null;
 
   function applyShopperOrder(wanted, batchOnly) {
+    // Fix 1: the ordered grid draws in its final order and the split sorts
+    // its own cards once they exist. Sorting Shopify's 24 cards first only
+    // produced an order the shopper saw and then lost (cards 1 and 2
+    // swapped, then swapped back). True = handled, so callers stop retrying.
+    if (window.__bhqColorPhase === 'deciding' || window.__bhqColorPhase === 'ordered') return true;
     _lastWanted = wanted;
     // Reuse the wishlist's card selectors: they already cover Dawn and the
     // other themes this app runs on, and they are maintained in one place.
