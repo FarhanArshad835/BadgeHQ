@@ -73,6 +73,32 @@ const out = `/**
   var __bhqBehaviourOn = true;
   var __bhqBehaviourWeights = null;
 
+  // Price-rule colours by badge text, shared with widget.js.
+  //
+  // A price rule can recolour the price of a card it matches, and the cards
+  // this bundle draws are skipped by the rule's own pass - they carry
+  // data-bhq-priced so it cannot discount an already-discounted price. The
+  // colour is applied at draw time instead, matched on the badge names in the
+  // row. This bundle draws before the config arrives, so it asks for the
+  // colours itself; whichever file fills the shared map first wins.
+  var __bhqPriceColors = (window.__bhqPriceColors = window.__bhqPriceColors || {});
+  // Started here and awaited once, just before the first cards are written.
+  // Letting the draw race it meant the opening batch was written with an
+  // empty map and stayed the theme's colour while later batches were red.
+  // It is a 2KB request already in flight by then.
+  var __bhqColorsReady = fetch(API_ORIGIN + "/api/widgets?shop=" + encodeURIComponent(SHOP))
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (d) {
+      var pbs = (d && d.widgets && d.widgets.productBadges) || [];
+      for (var i = 0; i < pbs.length; i++) {
+        var pr = pbs[i].priceRule;
+        if (pr && pr.priceColor && pbs[i].text) __bhqPriceColors[String(pbs[i].text)] = pr.priceColor;
+      }
+    })
+    .catch(function () {
+      /* the theme's own price colour stands */
+    });
+
 ${num}
 ${scoreBehaviour}
 ${grid}

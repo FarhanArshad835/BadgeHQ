@@ -35,6 +35,32 @@
   var __bhqBehaviourOn = true;
   var __bhqBehaviourWeights = null;
 
+  // Price-rule colours by badge text, shared with widget.js.
+  //
+  // A price rule can recolour the price of a card it matches, and the cards
+  // this bundle draws are skipped by the rule's own pass - they carry
+  // data-bhq-priced so it cannot discount an already-discounted price. The
+  // colour is applied at draw time instead, matched on the badge names in the
+  // row. This bundle draws before the config arrives, so it asks for the
+  // colours itself; whichever file fills the shared map first wins.
+  var __bhqPriceColors = (window.__bhqPriceColors = window.__bhqPriceColors || {});
+  // Started here and awaited once, just before the first cards are written.
+  // Letting the draw race it meant the opening batch was written with an
+  // empty map and stayed the theme's colour while later batches were red.
+  // It is a 2KB request already in flight by then.
+  var __bhqColorsReady = fetch(API_ORIGIN + "/api/widgets?shop=" + encodeURIComponent(SHOP))
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (d) {
+      var pbs = (d && d.widgets && d.widgets.productBadges) || [];
+      for (var i = 0; i < pbs.length; i++) {
+        var pr = pbs[i].priceRule;
+        if (pr && pr.priceColor && pbs[i].text) __bhqPriceColors[String(pbs[i].text)] = pr.priceColor;
+      }
+    })
+    .catch(function () {
+      /* the theme's own price colour stands */
+    });
+
   function num(v, dflt) {
   if (v === null || v === undefined || v === '') return dflt;
   var n = Number(v);
@@ -333,6 +359,17 @@
   try { await loadWindow(0); }
   catch (e) { S.log.push('fallback: ' + e.message); return false; }
 
+  // The price rule's colours, before the first card is written.
+  //
+  // grid.js starts this request as it loads and leaves the promise here;
+  // widget.js already has the config by the time it gets this far, so
+  // there is nothing to wait for. Without the wait the opening batch was
+  // written against an empty colour map and kept the theme's colour while
+  // every later batch was red.
+  if (typeof __bhqColorsReady !== 'undefined' && __bhqColorsReady) {
+    try { await __bhqColorsReady; } catch (e) { /* theme colour stands */ }
+  }
+
   // ---- 1a. the returning shopper's boost, BEFORE anything is drawn ------------
   //
   // The split path boosts by reordering cards that are already on screen,
@@ -519,6 +556,29 @@
       // The section-fetch template never had this - that HTML was parsed
       // fresh, so its images had never loaded. Removing the attributes here
       // puts the copy in the same state: no pixels to inherit.
+      // Price styling the price rule left on the template card.
+      //
+      // A "Sale" price rule carries a priceColor and writes it inline with
+      // !important onto the card it matched. The template is copied from a
+      // live card, so once that pass has run, every card drawn from it
+      // inherits the colour - measured as rgb(255,72,0) on all 24, including
+      // products at 1,199 and 499 that do not match the rule's price == 849
+      // condition. The rule was right; the copy carried its result.
+      //
+      // Cleared so each card starts from the theme's own colour. A card that
+      // genuinely matches is coloured by the price pass itself, as before.
+      cand.querySelectorAll('.price-item, .price__regular, .price__sale, .price').forEach(function (pe) {
+        pe.removeAttribute('style');
+      });
+      cand.querySelectorAll('[data-badgehq-pay]').forEach(function (pe) {
+        pe.removeAttribute('data-badgehq-pay');
+      });
+      // The struck original the price rule inserts, which belongs to the
+      // template's product, not to every card copied from it. fill() writes
+      // the strike from the row.
+      cand.querySelectorAll('[data-badgehq-struck]').forEach(function (pe) {
+        pe.remove();
+      });
       cand.querySelectorAll('img').forEach(function (im) {
         im.removeAttribute('src');
         im.removeAttribute('srcset');
@@ -753,8 +813,24 @@
       price.querySelectorAll('.price-item--regular').forEach(function (el) {
         el.textContent = money(onSale ? e.strikeMinor : e.priceMinor);
       });
+      // The price rule's own colour, for the cards that actually earned it.
+      //
+      // The rule's pass skips these cards by design - they carry
+      // data-bhq-priced so it cannot discount an already-discounted price -
+      // so the colour has to be applied here. Matched on the badge names the
+      // engine stored with the row, which is how a card knows which rule it
+      // satisfied. A card that satisfied none keeps the theme's colour.
+      var ruleColor = '';
+      try {
+        var bl = e.badges || [];
+        for (var bci = 0; bci < bl.length && !ruleColor; bci++) {
+          var cand2 = window.__bhqPriceColors && window.__bhqPriceColors[bl[bci]];
+          if (cand2) ruleColor = cand2;
+        }
+      } catch (e2) { ruleColor = ''; }
       price.querySelectorAll('.price-item--sale').forEach(function (el) {
         el.textContent = money(e.priceMinor);
+        if (ruleColor) el.style.setProperty('color', ruleColor, 'important');
       });
     }
     // Marks the card as priced by the engine.
