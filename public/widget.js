@@ -6701,7 +6701,7 @@ var __bhqEngaged = false;
   var __bhqBoostSeen = {};   // engaged handles already expanded into similar products
   var __bhqPending = [];     // similar-product rows waiting for the next undrawn batch
   var __bhqCarry = [];       // rows a boosted batch pushed out, drawn first next time
-  var __bhqNbPromise = null; // handle -> similar handles, loaded on first engagement
+  // Similar lists are cached per handle in __bhqNbCache, below.
   var __bhqCheckAt = 0;
   function __bhqDrawnKeys() {
     var k = {};
@@ -6709,23 +6709,40 @@ var __bhqEngaged = false;
     return k;
   }
   // _neighbours is only filled on the old reorder path, which stands aside when this
-  // grid draws, so the lists are loaded here, once, and only after an engagement.
-  function __bhqLoadNeighbours() {
-    if (!__bhqNbPromise) {
-      __bhqNbPromise = fetch(API_ORIGIN + '/api/order?shop=' + encodeURIComponent(SHOP))
-        .then(function (r) { return r.ok ? r.json() : null; })
-        .then(function (d) {
-          var map = {}, order = (d && d.order) || [], nb = (d && d.neighbours) || [];
-          for (var i = 0; i < order.length; i++) {
-            var row = nb[i];
-            if (row && row.length) map[String(order[i]).toLowerCase()] = row.map(function (x) { return typeof x === 'number' ? order[x] : x; });
-          }
-          S.log.push('boost+: similar lists for ' + Object.keys(map).length + ' products');
-          return map;
-        })
-        .catch(function (e) { S.log.push('boost+: similar lists failed: ' + e.message); return {}; });
-    }
-    return __bhqNbPromise;
+  // grid draws, so the lists are loaded here, only after an engagement.
+  //
+  // One product at a time, not the whole catalogue. The full payload carries
+  // the neighbours of all 1,084 products - 476KB decoded, 57KB over the wire -
+  // to answer a question about one. That cost landed on the tap, which is why
+  // the boosted cards arrived a batch later than they could have.
+  //
+  // Prefetching it instead would only move the cost onto every shopper,
+  // including the great majority who never engage; on 3G that is about a
+  // second of line time against the first screen's photos.
+  var __bhqNbCache = {};
+  function __bhqLoadNeighbours(handle) {
+    var h = String(handle || '').toLowerCase();
+    if (!h) return Promise.resolve({});
+    if (__bhqNbCache[h]) return __bhqNbCache[h];
+    __bhqNbCache[h] = fetch(
+      API_ORIGIN + '/api/order?shop=' + encodeURIComponent(SHOP) +
+      '&neighbours=' + encodeURIComponent(h),
+    )
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        var map = {};
+        var near = (d && d.neighbours) || [];
+        if (near.length) map[h] = near.map(String);
+        S.log.push('boost+: ' + near.length + ' similar for ' + h);
+        return map;
+      })
+      .catch(function (e) {
+        S.log.push('boost+: similar lookup failed: ' + e.message);
+        // Not cached as a failure: the next engagement may well succeed.
+        delete __bhqNbCache[h];
+        return {};
+      });
+    return __bhqNbCache[h];
   }
   // The patch this came from carried a window.__bhqBoostDbg counter for its own
   // test harness. Dropped: it ran on every check and built an array of scored
@@ -6751,7 +6768,12 @@ var __bhqEngaged = false;
       }
       if (!fresh.length) return __bhqExit(scored.length ? 'nothing new' : 'no engagement scored');
       S.log.push('boost+: engaged ' + fresh.join(','));
-      __bhqLoadNeighbours().then(function (map) {
+      // One lookup per engaged product, run together. Usually there is just
+      // one: this fires on the first tap, and anything earlier was already
+      // handled by the load-time boost.
+      Promise.all(fresh.map(__bhqLoadNeighbours)).then(function (maps) {
+        var map = {};
+        maps.forEach(function (m) { for (var k in m) map[k] = m[k]; });
         var want = [];
         fresh.forEach(function (h) {
           (map[h] || []).forEach(function (n) { n = String(n).toLowerCase(); if (want.indexOf(n) < 0 && fresh.indexOf(n) < 0) want.push(n); });

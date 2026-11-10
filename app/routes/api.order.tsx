@@ -73,6 +73,37 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     return json({ ok: true, order: [] }, { headers: { ...CORS, ...CACHE } });
   }
 
+  // ?neighbours=<handle> returns just that product's similar list.
+  //
+  // The storefront needs this the moment a shopper engages with something,
+  // and the only way to get it was the full payload - 476KB decoded, 57KB
+  // over the wire, carrying the neighbours of all 1,084 products to read one.
+  // Prefetching that on every collection load would make every shopper pay
+  // for it, including the great majority who never engage at all; on 3G it is
+  // about a second of line time against the first screen's photos.
+  //
+  // One row, a few hundred bytes, fetched only when there is a tap to answer.
+  const neighbourOf = String(url.searchParams.get("neighbours") || "")
+    .trim()
+    .toLowerCase();
+  if (neighbourOf) {
+    const row = await prisma.productScore.findFirst({
+      where: { shop, handle: neighbourOf },
+      select: { neighbours: true },
+    });
+    let near: string[] = [];
+    try {
+      const n = JSON.parse(row?.neighbours || "[]");
+      if (Array.isArray(n)) near = n.map(String);
+    } catch {
+      near = [];
+    }
+    return json(
+      { ok: true, handle: neighbourOf, neighbours: near },
+      { headers: { ...CORS, ...CACHE } },
+    );
+  }
+
   // Scores are per shop, not per collection: a product has one standing and
   // each collection is a subset of it. Ordering the whole catalogue once and
   // letting the storefront intersect it with what it is showing is both
