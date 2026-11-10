@@ -12,7 +12,26 @@
 // minutes (~12/hour = 288/day) instead of one per pageview. That's a
 // >99% reduction in Vercel edge requests for these dynamic endpoints.
 
-import { WIDGET_SOURCE, WIDGET_HASH, WIDGET_BUILT_AT } from "./widget-source.generated.js";
+import {
+  WIDGET_SOURCE,
+  WIDGET_HASH,
+  WIDGET_BUILT_AT,
+  WIDGET_BROTLI_B64,
+} from "./widget-source.generated.js";
+
+/** The build's brotli bytes, decoded once at module scope rather than per
+ *  request: a worker isolate serves many requests and this never changes. */
+const WIDGET_BROTLI = (() => {
+  try {
+    const bin = atob(WIDGET_BROTLI_B64);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  } catch {
+    // Serving the plain string is always correct, just larger.
+    return null;
+  }
+})();
 
 // Where the actual Remix app + Postgres + Shopify Admin API integration lives.
 // The worker only proxies; all data still comes from here, just cached.
@@ -56,7 +75,15 @@ const HEADERS_JS = {
   "Content-Type": "application/javascript; charset=utf-8",
   "Cache-Control": "public, max-age=300, s-maxage=3600, must-revalidate",
   ETag: '"' + WIDGET_HASH + '"',
+  // The br and identity bodies differ, so a cache must key on the request's
+  // encoding or it will hand compressed bytes to a client that cannot read
+  // them.
+  Vary: "Accept-Encoding",
   "Access-Control-Allow-Origin": "*",
+  // Without this the browser hides connection and size timings cross-origin,
+  // which is what makes a slow load impossible to attribute to connection
+  // setup versus download.
+  "Timing-Allow-Origin": "*",
   "Cross-Origin-Resource-Policy": "cross-origin",
   "X-Source": "cloudflare-worker",
   "X-Widget-Hash": WIDGET_HASH,
@@ -337,6 +364,20 @@ export default {
       if (inm && inm.replace(/^W\//, "") === HEADERS_JS.ETag) {
         return new Response(null, { status: 304, headers: HEADERS_JS });
       }
+      // Serving our own brotli bytes was tried here and reverted.
+      //
+      // The build can compress to 97KB where Cloudflare's on-the-fly brotli
+      // produces 119KB, which looked like 22KB free. But Cloudflare rewrites
+      // the response on the way out: it stripped the Content-Encoding header
+      // and passed the compressed body through unchanged, so a client sending
+      // "Accept-Encoding: identity" received raw brotli bytes labelled as
+      // JavaScript - verified on a cache-busted request. That breaks the
+      // widget outright for any client that cannot take br, which is a worse
+      // trade than 22KB.
+      //
+      // Getting this back would need the edge told not to re-encode (a
+      // Transform Rule, or Cache Rules with compression off for this path),
+      // not a change here.
       return new Response(request.method === "HEAD" ? null : WIDGET_SOURCE, {
         status: 200,
         headers: HEADERS_JS,
