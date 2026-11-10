@@ -186,6 +186,28 @@
     }
   })();
 </script>
+{%- comment -%}
+  Two files, smallest first.
+
+  grid.js is the ordered grid alone, about 10KB compressed, and it is the
+  only thing a collection page needs to draw its cards. widget.js is 124KB
+  and carries everything else - badges, wishlist, chat, bundles, order
+  management.
+
+  Measured on Slow 3G: widget.js took 35.1 seconds to arrive, of which 31.8
+  was download, because 156 other files and 955KB were sharing a 400kbps
+  line. The grid's own data was ready at 8s and then waited 28s for the code.
+  Asking for a tenth of the bytes is what changes that; being faster on the
+  same line is not available.
+
+  fetchpriority="high" because an async script is low priority by default and
+  this one decides what the shopper sees. widget.js stays as it was: it finds
+  the grid already drawn and leaves it alone.
+{%- endcomment -%}
+{%- if request.path contains '/collections/' -%}
+  <link rel="preconnect" href="https://badgehq-widget.badgehq.workers.dev" crossorigin>
+  <script src="https://badgehq-widget.badgehq.workers.dev/grid.js" async fetchpriority="high"></script>
+{%- endif -%}
 <script src="https://badgehq-widget.badgehq.workers.dev/widget.js" async></script>
 
 {% schema %}

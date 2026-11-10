@@ -17,6 +17,8 @@ import {
   WIDGET_HASH,
   WIDGET_BUILT_AT,
   WIDGET_BROTLI_B64,
+  GRID_SOURCE,
+  GRID_HASH,
 } from "./widget-source.generated.js";
 
 /** The build's brotli bytes, decoded once at module scope rather than per
@@ -351,6 +353,26 @@ export default {
           },
         }
       );
+    }
+
+    // The grid-only bundle. Same renderer as widget.js, about a tenth the
+    // size, so a collection page can draw its grid without waiting for the
+    // full file - measured at 35.1s on Slow 3G against 955KB of competing
+    // downloads.
+    if (
+      (request.method === "GET" || request.method === "HEAD") &&
+      GRID_SOURCE &&
+      (url.pathname === "/grid.js" || url.pathname.endsWith("/grid.js"))
+    ) {
+      const headers = { ...HEADERS_JS, ETag: '"' + GRID_HASH + '"' };
+      const inm = request.headers.get("If-None-Match");
+      if (inm && inm.replace(/^W\//, "") === headers.ETag) {
+        return new Response(null, { status: 304, headers });
+      }
+      return new Response(request.method === "HEAD" ? null : GRID_SOURCE, {
+        status: 200,
+        headers,
+      });
     }
 
     // Static widget.js — embedded into the worker bundle

@@ -16,6 +16,15 @@ const widgetPath = resolve(__dirname, "..", "public", "widget.js");
 const outPath = resolve(__dirname, "src", "widget-source.generated.js");
 
 const source = readFileSync(widgetPath, "utf8");
+// The grid-only bundle, built first by build-grid.js. Optional: a checkout
+// that has not run it yet still deploys a working widget, just without the
+// fast path.
+let gridSource = "";
+try {
+  gridSource = readFileSync(resolve(__dirname, "..", "public", "grid.js"), "utf8");
+} catch {
+  gridSource = "";
+}
 const stat = statSync(widgetPath);
 const hash = createHash("sha256").update(source).digest("hex").slice(0, 12);
 const builtAt = new Date().toISOString();
@@ -45,6 +54,11 @@ export const WIDGET_BUILT_AT = ${JSON.stringify(builtAt)};
 /** The same source, brotli quality 11, base64-encoded. Served as-is to any
  *  client that accepts br, so the edge never has to compress it. */
 export const WIDGET_BROTLI_B64 = ${JSON.stringify(brotliB64)};
+/** The grid-only bundle served at /grid.js, and its own hash for ETag use. */
+export const GRID_SOURCE = ${JSON.stringify(gridSource)};
+export const GRID_HASH = ${JSON.stringify(
+  gridSource ? createHash("sha256").update(gridSource).digest("hex").slice(0, 12) : "",
+)};
 `;
 
 writeFileSync(outPath, out, "utf8");

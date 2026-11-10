@@ -7217,6 +7217,19 @@ var __bhqEngaged = false;
     // or no template - every case where it cannot guarantee that. The
     // split is what shoppers see today, so it stays as the fallback
     // rather than leaving the page unsplit.
+    // grid.js may already have drawn this page.
+    //
+    // It is the same renderer, extracted into a ~10KB bundle so the grid can
+    // draw on a slow line without waiting for this 124KB file - measured at
+    // 35.1s on Slow 3G. When it has run, renderOrderedGrid below returns
+    // false (its own "already running" guard), and falling through to
+    // splitPath would then split the hidden Shopify grid for nothing:
+    // measured at 76 cards of wasted work.
+    if (window.__bhqOrdered && document.getElementById("bhq-ordered-grid")) {
+      window.__bhqColorPhase = "ordered";
+      __bhqUnveil(true);
+      return;
+    }
     renderOrderedGrid().then(function (took) {
       if (took) {
         window.__bhqColorPhase = 'ordered';
