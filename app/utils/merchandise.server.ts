@@ -1234,6 +1234,20 @@ export async function runMerchandising(
     try {
       const { handle, facts } = await fetchCollection(admin, collectionId);
       if (handle) handles.push(handle);
+      // A managed collection's membership, taken from the products this run
+      // has already read rather than asked for again.
+      //
+      // badgeMembership above only covers collections a badge targets, but
+      // the storefront asks about whichever collection the shopper is on -
+      // and a miss there costs a full products.json walk, measured at four
+      // pages and 1.39MB for this one collection. These products are in hand,
+      // so recording them is free.
+      if (handle && facts.length) {
+        badgeMembers.set(
+          handle,
+          new Set(facts.map((f) => f.handle).filter(Boolean)),
+        );
+      }
       if (!facts.length) {
         results.push({ id: collectionId, products: 0, reordered: false, error: "empty or missing" });
         continue;
