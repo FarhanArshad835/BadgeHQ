@@ -318,6 +318,11 @@
       var sec = g && g.closest('[id^="shopify-section-"]');
       if (!sec) return;
       var sid = sec.id.replace('shopify-section-', '');
+      // Nothing to prefetch when a card on the page can serve as the template,
+      // which is the normal case. This fetch is 23KB and the grid no longer
+      // waits for it, so firing it anyway spends a request on every collection
+      // load for a result nothing reads.
+      if (g.querySelector('li.grid__item img')) return;
       __bhqTplPromise = fetch(location.pathname + '?section_id=' + sid)
         .then(function (r) { return r.ok ? r.text() : null; })
         .catch(function () { return null; });
@@ -6653,12 +6658,47 @@ var __bhqEngaged = false;
   }
 
   // ---- template card: Shopify's own undecorated markup --------------------------
+  //
+  // Taken from a card already on the page, which costs nothing. Re-fetching
+  // the collection as a section was measured at 151ms and 23KB on a warm
+  // load, and it sat between the colour list and the first card being drawn -
+  // the slowest step before the grid could appear.
+  //
+  // The clone is stripped of anything BadgeHQ may already have added, since
+  // the badge pass can run before this does and a template carrying one
+  // product's badges would stamp them onto every card.
+  //
+  // The section fetch stays as the fallback: a theme that renders its grid
+  // entirely client-side would have no card to copy.
   var tpl = null;
   try {
-    var html = (__bhqTplPromise && (await __bhqTplPromise)) || (await (await fetch(location.pathname + '?section_id=' + sectionId)).text());
-    var doc = new DOMParser().parseFromString(html, 'text/html');
-    tpl = doc.querySelector('#product-grid li.grid__item');
-  } catch (e) { /* fall through */ }
+    var onPage = oldGrid.querySelector('li.grid__item');
+    if (onPage) {
+      var cand = onPage.cloneNode(true);
+      cand.querySelectorAll('.badgehq-info-stack, [class*="badgehq-"], [data-badgehq-pay]').forEach(function (n) {
+        if (n.hasAttribute('data-badgehq-pay')) n.removeAttribute('data-badgehq-pay');
+        else n.remove();
+      });
+      cand.removeAttribute('data-bhq-color');
+      cand.removeAttribute('data-bhq-seen');
+      cand.removeAttribute('data-bhq-color-rank');
+      cand.removeAttribute('data-bhq-color-count');
+      cand.removeAttribute('data-bhq-priced');
+      // Only usable if it still has the parts every card is built from.
+      if (cand.querySelector('img') && cand.querySelector('.card__heading') && cand.querySelector('.price')) {
+        tpl = cand;
+        S.log.push('template: from a card on the page');
+      }
+    }
+  } catch (e) { tpl = null; }
+  if (!tpl) {
+    try {
+      var html = (__bhqTplPromise && (await __bhqTplPromise)) || (await (await fetch(location.pathname + '?section_id=' + sectionId)).text());
+      var doc = new DOMParser().parseFromString(html, 'text/html');
+      tpl = doc.querySelector('#product-grid li.grid__item');
+      S.log.push('template: from a section fetch');
+    } catch (e) { /* fall through */ }
+  }
   if (!tpl) { S.log.push('fallback: no template'); return false; }
   tpl.querySelectorAll('.badge, .card__badge').forEach(function (b) { b.remove(); });
 
