@@ -134,7 +134,7 @@ ${grid}
     var haveCached = false;
     try {
       haveCached = !!localStorage.getItem(
-        "bhq-tpl:" + (location.pathname.split("/collections/")[1] || "").split("/")[0],
+        "bhq-tpl2:" + (location.pathname.split("/collections/")[1] || "").split("/")[0],
       );
     } catch (e) {
       haveCached = false;

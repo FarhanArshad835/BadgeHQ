@@ -181,6 +181,12 @@
   // Session-persisted under the key the theme used, so a shopper who clicks
   // an ad and then browses keeps the pin, and a shopper mid-session when this
   // shipped keeps whatever the theme had already stored for them.
+  // Versioned: a template cached by an older build carries whatever the
+  // scrub list did not remove then. v2 drops the review app's star rating,
+  // which was showing one product's score on every card. Bumping the key
+  // abandons the old copies rather than trusting them; they fall out of
+  // localStorage on their own.
+  var TPL_KEY = 'bhq-tpl2:';
   var PIN_KEY = 'jm_pin_tees';
   var pinKey = null;   // read by the boost, to keep its hands off pinned keys
   var pinParam = params.get('pin');
@@ -663,7 +669,7 @@
   // Only the markup is reused; every value on it is overwritten per card, and
   // the first visit still takes the live card and stores it.
   try {
-    var cached = localStorage.getItem('bhq-tpl:' + COL);
+    var cached = localStorage.getItem(TPL_KEY + COL);
     if (cached) {
       var holder = document.createElement('div');
       holder.innerHTML = cached;
@@ -703,6 +709,29 @@
           ".wishlist-hero-custom-button, .wishlist-btn, [data-wishlist-hero], " +
           "[class*='wishlist'], [class*='Wishlist']",
       ).forEach(function (n) { n.remove(); });
+      // The review app's star rating, for the same reason as the heart above.
+      //
+      // Doran Product Reviews mounts into a host element that carries the
+      // product it belongs to:
+      //
+      //   querySelectorAll('[data-dr="rating-widget"][data-product-id]')
+      //   widgetProduct[el.getAttribute('data-product-id')]
+      //
+      // The lookup is by that attribute alone and has no fallback. The
+      // template is copied from one live card, and fill() rewrites the href,
+      // the title, the images and every id - but not this - so all 24 cards
+      // carried the DONOR product's id and Doran stamped that one product's
+      // score on the grid: 4.7 with 7 reviews on every card, including
+      // products rated differently and products with no reviews at all.
+      //
+      // Removed rather than repointed: the colour-order row has no numeric
+      // product id to repoint it to (handle, colour, image, variant, title,
+      // price, badges - no product id), and a wrong rating is worse than
+      // none, both for the shopper and because a displayed rating has to
+      // correspond to the product. Restoring these means carrying the
+      // product id on the row; until then the grid shows no stars.
+      cand.querySelectorAll('[data-dr], [data-product-id], .doran-review-stars')
+        .forEach(function (n) { n.remove(); });
       cand.removeAttribute('data-bhq-color');
       cand.removeAttribute('data-bhq-seen');
       cand.removeAttribute('data-bhq-color-rank');
@@ -760,7 +789,7 @@
         // replaces it, and the whole of that is this wait. A stripped card is
         // about 4KB.
         try {
-          localStorage.setItem('bhq-tpl:' + COL, cand.outerHTML);
+          localStorage.setItem(TPL_KEY + COL, cand.outerHTML);
         } catch (e) {
           /* private mode, or the quota is full: next visit waits as before */
         }
@@ -1127,7 +1156,7 @@
     var haveCached = false;
     try {
       haveCached = !!localStorage.getItem(
-        "bhq-tpl:" + (location.pathname.split("/collections/")[1] || "").split("/")[0],
+        "bhq-tpl2:" + (location.pathname.split("/collections/")[1] || "").split("/")[0],
       );
     } catch (e) {
       haveCached = false;
