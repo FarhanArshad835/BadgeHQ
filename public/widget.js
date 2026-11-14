@@ -6722,6 +6722,7 @@ var __bhqEngaged = false;
   // an ad and then browses keeps the pin, and a shopper mid-session when this
   // shipped keeps whatever the theme had already stored for them.
   var PIN_KEY = 'jm_pin_tees';
+  var pinKey = null;   // read by the boost, to keep its hands off pinned keys
   var pinParam = params.get('pin');
   if (pinParam) {
     try { sessionStorage.setItem(PIN_KEY, pinParam); } catch (e) { /* private mode */ }
@@ -6983,7 +6984,8 @@ var __bhqEngaged = false;
       // A sold-out colour is not pinned: an ad that lands the shopper on a
       // colour they cannot buy is worse than the ordinary order. The rest of
       // the pins still apply.
-      var pinFront = [], pinKey = {};
+      var pinFront = [];
+      pinKey = {};
       pins.forEach(function (p) {
         var best = null;
         for (var i = 0; i < pinRows.length; i++) {
@@ -6998,6 +7000,7 @@ var __bhqEngaged = false;
         if (pinKey[k]) return;
         pinKey[k] = 1;
         best.__lift = true;   // nextEntries skips the engine-ordered copy
+        best.__pin = true;    // and the boost inserts itself behind these
         pinFront.push(best);
       });
       if (pinFront.length) {
@@ -7133,12 +7136,40 @@ var __bhqEngaged = false;
             lifted[fi2].e.__lift = true;
             front.push(lifted[fi2].e);
           }
-          for (var ki = 0; ki < list.length; ki++) {
+          // Behind the pins, not in front of them.
+          //
+          // An ad pin is an explicit instruction from the link the shopper
+          // clicked; the boost is inferred from their browsing. A returning
+          // shopper who clicks an ad has both, and concatenating the boost
+          // onto the front of the list put its cards above the pinned one,
+          // so the ad landed on someone else's product.
+          //
+          // The pinned entries are held aside and keep is built from the
+          // REST of the list, not all of it: building it from the whole list
+          // kept the pin's own entry and then re-prepended the held slice,
+          // so the pinned card appeared twice - and both copies carried
+          // __lift, so nextEntries' dedup could not drop either one.
+          var pinHeld = 0;
+          while (pinHeld < list.length && list[pinHeld].__pin) pinHeld++;
+          var pinSlice = list.slice(0, pinHeld);
+          for (var ki = pinHeld; ki < list.length; ki++) {
             if (takenKey[list[ki].h + '|' + list[ki].colour]) continue;
             keep.push(list[ki]);
           }
-          list = front.concat(keep);
-          __bhqLifted = takenKey;
+          // A pinned colour the boost also matched stays pinned and is not
+          // lifted a second time.
+          var frontNoPin = [];
+          for (var fj = 0; fj < front.length; fj++) {
+            var fk = front[fj].h + '|' + front[fj].colour;
+            if (pinKey && pinKey[fk]) continue;
+            frontNoPin.push(front[fj]);
+          }
+          list = pinSlice.concat(frontNoPin, keep);
+          // Merged, not assigned. Assigning dropped the pin keys, so a
+          // pinned card's engine-ordered copy was no longer skipped and the
+          // card was drawn a second time further down the grid.
+          __bhqLifted = __bhqLifted || {};
+          for (var tk in takenKey) __bhqLifted[tk] = 1;
         }
         S.log.push('boost: lifted ' + lifted.length + ' from ' + extra.length + ' matched cards');
       }
