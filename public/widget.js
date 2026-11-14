@@ -6704,6 +6704,38 @@ var __bhqEngaged = false;
   if ((sort && sort !== 'manual') || otherFilter) return false;
   var colourFilter = params.getAll('filter.v.option.color').map(function (c) { return c.toLowerCase(); });
 
+  // ---- ad pins: ?pin=handle[:colour], comma separated ----------------------------
+  //
+  // The theme had its own pin script, which moved cards to the front of
+  // #product-grid. This renderer does not reorder that grid - it builds its
+  // own and hides the original - so those moves happened in a grid nobody
+  // could see, and an ad link landed on the plain merchandised order. Worse,
+  // a pin whose card was not on the first page had its skeleton and its
+  // section fetch land there too, so every ad click paid for a card that was
+  // never shown.
+  //
+  // Read here instead, and applied to the list while it is still data, which
+  // is the same reason the behaviour boost moved here: a pinned card is drawn
+  // in its pinned slot the first time it appears and never moves.
+  //
+  // Session-persisted under the key the theme used, so a shopper who clicks
+  // an ad and then browses keeps the pin, and a shopper mid-session when this
+  // shipped keeps whatever the theme had already stored for them.
+  var PIN_KEY = 'jm_pin_tees';
+  var pinParam = params.get('pin');
+  if (pinParam) {
+    try { sessionStorage.setItem(PIN_KEY, pinParam); } catch (e) { /* private mode */ }
+  } else {
+    try { pinParam = sessionStorage.getItem(PIN_KEY); } catch (e) { pinParam = null; }
+  }
+  // Capped at 4, as the theme's script was: the pins occupy the top slots
+  // outright, and a first screen made entirely of ad targets leaves the
+  // merchandised order nothing to show.
+  var pins = (pinParam || '').split(',').map(function (p) {
+    var bits = p.trim().toLowerCase().split(':');
+    return { handle: bits[0], colour: (bits[1] || '').trim() };
+  }).filter(function (p) { return p.handle; }).slice(0, 4);
+
   var oldGrid = document.querySelector('#product-grid');
   if (!oldGrid || !COL) return false;
   var sectionEl = oldGrid.closest('[id^="shopify-section-"]');
@@ -6908,6 +6940,83 @@ var __bhqEngaged = false;
   // every later batch was red.
   if (typeof __bhqColorsReady !== 'undefined' && __bhqColorsReady) {
     try { await __bhqColorsReady; } catch (e) { /* theme colour stands */ }
+  }
+
+  // ---- 1a-pre. ad pins take the top slots, ahead of the boost -------------------
+  //
+  // Before the behaviour boost on purpose. Both lift cards to the front; the
+  // pin is an explicit instruction from the link the shopper clicked, so it
+  // outranks what we infer from their browsing. Running first means the boost
+  // then lifts its own cards in behind the pins rather than on top of them.
+  //
+  // A pinned colour is looked up by handle across the WHOLE collection, not
+  // the window in hand, for the same reason the boost is: the window holds
+  // 240 cards and a pinned product can sit anywhere in the list.
+  if (pins.length) {
+    try {
+      var pinHandles = [];
+      pins.forEach(function (p) { if (pinHandles.indexOf(p.handle) < 0) pinHandles.push(p.handle); });
+      var pr = await fetch(
+        API + '?shop=' + SHOP + '&collection=' + COL +
+        '&handles=' + encodeURIComponent(pinHandles.join(',')),
+      );
+      var pinRows = [];
+      if (pr.ok) {
+        var pd = await pr.json();
+        ((pd && pd.matched) || []).forEach(function (m) {
+          var c = m.card;
+          if (!c) return;
+          pinRows.push({
+            at: m.at, h: c[0], colour: c[1] || '', img: c[2], vid: String(c[3] || ''),
+            soldOut: !!c[4], title: c[5] || '', priceMinor: Number(c[6] || 0),
+            strikeMinor: Number(c[7] || 0), badges: c[8] || [],
+          });
+        });
+      }
+      // One card per pin, in the order the link asked for.
+      //
+      // ?pin=handle:silver names a colour; a bare handle takes that product's
+      // best-ranked colour, which is the row the engine put first. Matched on
+      // a substring, as the theme's script did, so 'silver' still finds
+      // 'Silver Grey'.
+      //
+      // A sold-out colour is not pinned: an ad that lands the shopper on a
+      // colour they cannot buy is worse than the ordinary order. The rest of
+      // the pins still apply.
+      var pinFront = [], pinKey = {};
+      pins.forEach(function (p) {
+        var best = null;
+        for (var i = 0; i < pinRows.length; i++) {
+          var r = pinRows[i];
+          if (String(r.h).toLowerCase() !== p.handle) continue;
+          if (r.soldOut) continue;
+          if (p.colour && String(r.colour).toLowerCase().indexOf(p.colour) < 0) continue;
+          if (!best || r.at < best.at) best = r;
+        }
+        if (!best) return;
+        var k = best.h + '|' + best.colour;
+        if (pinKey[k]) return;
+        pinKey[k] = 1;
+        best.__lift = true;   // nextEntries skips the engine-ordered copy
+        pinFront.push(best);
+      });
+      if (pinFront.length) {
+        var pinKeep = [];
+        for (var pk = 0; pk < list.length; pk++) {
+          if (pinKey[list[pk].h + '|' + list[pk].colour]) continue;
+          pinKeep.push(list[pk]);
+        }
+        list = pinFront.concat(pinKeep);
+        // Merged, not replaced: the boost sets this too, and whichever runs
+        // second must not drop the other's keys or its card is drawn twice.
+        __bhqLifted = __bhqLifted || {};
+        for (var pkk in pinKey) __bhqLifted[pkk] = 1;
+      }
+      S.log.push('pin: ' + pinFront.length + ' of ' + pins.length + ' placed (' + pinRows.length + ' rows matched)');
+    } catch (e) {
+      // A pin that fails must not cost the shopper the grid.
+      S.log.push('pin skipped: ' + e.message);
+    }
   }
 
   // ---- 1a. the returning shopper's boost, BEFORE anything is drawn ------------
