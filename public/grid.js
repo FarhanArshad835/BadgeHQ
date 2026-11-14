@@ -732,6 +732,27 @@
       // product id on the row; until then the grid shows no stars.
       cand.querySelectorAll('[data-dr], [data-product-id], .doran-review-stars')
         .forEach(function (n) { n.remove(); });
+      // The theme's own star overlay, which is the one actually on these cards.
+      //
+      // It is a bare <div> inside .card__media with everything inline and no
+      // class, id or data attribute to match on:
+      //
+      //   <div style="position:absolute;bottom:8px;left:8px;...">
+      //     <span>4.8</span><span>&#9733;</span><span>|</span><span>74</span>
+      //
+      // Nothing above matched it and fill() rewrites the href, the title, the
+      // images and every id but not this, so all 48 cards carried the donor
+      // card's numbers - 4.7 with 7 reviews stamped across the grid while the
+      // products' real ratings ran from 4.7/7 to 4.8/74.
+      //
+      // Matched on the one thing that identifies it: a star character inside
+      // an absolutely positioned child of the media box. Removed rather than
+      // repointed because the colour-order row carries no rating to repoint
+      // it to; restoring these means carrying rating and count on the row.
+      cand.querySelectorAll('.card__media div[style]').forEach(function (n) {
+        if (n.querySelector('*') && n.textContent.indexOf('★') > -1 &&
+            n.getAttribute('style').indexOf('position:absolute') > -1) n.remove();
+      });
       cand.removeAttribute('data-bhq-color');
       cand.removeAttribute('data-bhq-seen');
       cand.removeAttribute('data-bhq-color-rank');
