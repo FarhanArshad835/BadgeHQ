@@ -65,6 +65,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     backInStockSettings,
     aiReplySettings,
     merchSettings,
+    discountRules,
   ] = await Promise.all([
     prisma.trustBadge.findMany({ where: { shop, isEnabled: true } }),
     prisma.productBadge.findMany({ where: { shop, isActive: true }, orderBy: [{ priority: "desc" }, { createdAt: "desc" }] }),
@@ -91,6 +92,26 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         weightWish: true,
         weightDwell: true,
         weightViews: true,
+      },
+    }),
+    // ACTIVE only. A scheduled or expired rule must never price a card, and
+    // unsupported rules ARE included: the storefront needs to know a rule it
+    // cannot model exists, so it can decline to quote rather than show a
+    // figure that ignores it.
+    prisma.discountRule.findMany({
+      where: { shop, status: "ACTIVE" },
+      select: {
+        title: true,
+        kind: true,
+        amount: true,
+        percent: true,
+        perItem: true,
+        minQty: true,
+        minSubtotal: true,
+        allItems: true,
+        products: true,
+        collections: true,
+        unsupported: true,
       },
     }),
   ]);
@@ -145,6 +166,27 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       borderWidth: b.borderWidth,
       customCSS: b.customCSS,
     })),
+    // The shop's automatic discount rules, for badges that quote a saving.
+    //
+    // Served only when a badge actually asks for them: every other shop pays
+    // nothing for a feature it does not use, and the payload stays small.
+    // Shape matches the cart page's pricer exactly (kind amount|percent,
+    // percent as 0..1, money in rupees) so one algorithm prices both.
+    discountRules: productBadges.some((b) => b.badgeType === "tiered")
+      ? discountRules.map((r) => ({
+          title: r.title,
+          kind: r.kind,
+          amount: r.amount,
+          percent: r.percent,
+          perItem: r.perItem,
+          minQty: r.minQty,
+          minSubtotal: r.minSubtotal,
+          allItems: r.allItems,
+          products: JSON.parse(r.products),
+          collections: JSON.parse(r.collections),
+          unsupported: r.unsupported,
+        }))
+      : [],
     announcementBars: announcementBars.map((b) => ({
       id: b.id,
       messages: JSON.parse(b.messages),

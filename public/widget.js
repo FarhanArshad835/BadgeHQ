@@ -359,6 +359,25 @@
    *  ranking had already stored the map and would wipe it. */
   var _badgeMembers = null;
 
+  /**
+   * The shop's automatic discount rules, as served by /api/widgets.
+   *
+   * Empty unless a "tiered" badge is configured, so no shop pays for rules it
+   * does not use. Read by tierFor() below; never written anywhere else.
+   */
+  var _discountRules = [];
+
+  /**
+   * The store's currency symbol, as served by /api/widgets.
+   *
+   * Module-level because the money tokens are resolved deep inside the badge
+   * pass, far from where the payload is read. Defaults to the rupee rather
+   * than the dollar: the dollar was hardcoded here and printed "$499" on a
+   * rupee store, which is exactly the kind of wrong number a badge must not
+   * show. The served value overrides it on the first payload either way.
+   */
+  var _currencySymbol = "₹";
+
   /** Take the membership map off the ranking the moment it lands.
    *
    *  Stored here rather than in loadOrderRank, which is where the rest of the
@@ -372,6 +391,7 @@
     try {
       if (d && d.badgeMembers && typeof d.badgeMembers === "object" && !_badgeMembers) {
         _badgeMembers = d.badgeMembers;
+            if (d.discountRules) _discountRules = d.discountRules;
       }
     } catch (e) {
       /* membership stays unknown, which only means the old fetch runs */
@@ -679,7 +699,8 @@ var __bhqEngaged = false;
     injectCustomCSS(gs);
     applyPriceDisplay(gs);
     var w = data.widgets || {};
-    var currencySymbol = data.currencySymbol || "$";
+    var currencySymbol = data.currencySymbol || _currencySymbol;
+    if (data.currencySymbol) _currencySymbol = data.currencySymbol;
     var page = detectPage();
 
     // Recorded before the colour cards run, because the ordered grid
@@ -804,7 +825,8 @@ var __bhqEngaged = false;
     if (!window.MutationObserver) return;
     var gs = data.globalSettings || {};
     var w = data.widgets || {};
-    var currencySymbol = data.currencySymbol || "$";
+    var currencySymbol = data.currencySymbol || _currencySymbol;
+    if (data.currencySymbol) _currencySymbol = data.currencySymbol;
 
     function missing(id) {
       return !document.getElementById(id);
@@ -1357,6 +1379,230 @@ var __bhqEngaged = false;
   }
 
   // Replace dynamic text placeholders with product data
+  /* ---- Tiered-saving pricing -------------------------------------------
+   *
+   * Ported from the cart page's jm-cart-pricer.js, NOT rewritten: bestOff()
+   * and inScope() are the same algorithm that prices the live cart, verified
+   * there at 5/5 carts exact. One algorithm means a collection card and the
+   * cart cannot quote different savings for the same offer, which is the
+   * whole point - a badge the checkout contradicts is worse than no badge.
+   *
+   * Two differences, both forced by context: scope matches on product HANDLE
+   * (what a grid card exposes; most themes put no variant id in card markup),
+   * and there is no cart, so this answers "what does the next tier save"
+   * rather than "what does this add to my bag".
+   */
+  /** Does this line fall inside the rule's scope? Handle-keyed. */
+  function inScope(rule, line, members) {
+    if (rule.allItems) return true;
+
+    // Named products. Shopify gives these as numeric product ids, and a grid
+    // card knows its handle, so a product-scoped rule can only be matched
+    // when the caller supplied the id too (the product page does; a card
+    // normally does not). Checked before collections because it is cheaper.
+    var prods = rule.products || [];
+    if (prods.length && line.productId) {
+      for (var k = 0; k < prods.length; k++) {
+        if (String(prods[k]) === String(line.productId)) return true;
+      }
+    }
+
+    var cols = rule.collections || [];
+    for (var i = 0; i < cols.length; i++) {
+      var m = members[cols[i]];
+      // An unloaded collection is NOT an empty one. Returning false here
+      // would quote a saving that ignores a rule which does apply, so the
+      // caller is told to wait instead (see membershipReady).
+      if (m && m.products && m.products[line.handle]) return true;
+    }
+    return false;
+  }
+
+  /**
+   * The single best discount for these lines.
+   *
+   * Every automatic discount on this store has combinesWith all false, so
+   * Shopify applies one at a time and the largest wins - confirmed against
+   * the Admin API rather than assumed. If that ever changes, this becomes
+   * wrong in the safe direction (it under-quotes), which is why the sync
+   * stores the combines flags even though nothing reads them yet.
+   */
+  function bestOff(lines, data) {
+    var best = 0;
+    var rules = data.rules || [];
+    var members = data.members || {};
+
+    for (var i = 0; i < rules.length; i++) {
+      var rule = rules[i];
+      if (rule.unsupported) continue;
+      var qty = 0, sub = 0, any = false;
+
+      for (var k = 0; k < lines.length; k++) {
+        if (!inScope(rule, lines[k], members)) continue;
+        any = true;
+        qty += lines[k].qty;
+        sub += lines[k].qty * lines[k].price;
+      }
+      if (!any) continue;
+      if (rule.minQty && qty < rule.minQty) continue;
+      if (rule.minSubtotal && sub < rule.minSubtotal) continue;
+
+      var off;
+      if (rule.kind === "percent") off = sub * rule.percent;
+      else if (rule.perItem) off = rule.amount * qty;
+      else off = rule.amount;
+
+      // A discount never takes more than the qualifying items are worth.
+      if (off > sub) off = sub;
+      if (off > best) best = off;
+    }
+    return best;
+  }
+
+  /**
+   * Which rule, if any, this product could reach by buying MORE of it.
+   *
+   * Returns the smallest qty above 1 that unlocks a discount, because that is
+   * the offer worth putting on a card: "buy 2" beats "buy 7" even if 7 saves
+   * more in absolute terms. Quantity gates are read straight off the rule;
+   * subtotal gates are converted into the qty that clears them AT THIS
+   * PRODUCT'S PRICE, which is why two Rs799 items reach a Rs1500 gate and two
+   * Rs649 items do not.
+   *
+   * Capped at MAX_TIER: a gate needing six of one item is not a message that
+   * helps anyone on a collection card.
+   */
+  var MAX_TIER = 4;
+
+  function nextTier(line, data) {
+    var rules = data.rules || [];
+    var members = data.members || {};
+    var bestQty = 0;
+
+    for (var i = 0; i < rules.length; i++) {
+      var rule = rules[i];
+      if (rule.unsupported) continue;
+      if (!inScope(rule, line, members)) continue;
+
+      var need = 0;
+      if (rule.minQty) need = rule.minQty;
+      if (rule.minSubtotal) {
+        // Units of THIS product needed to clear the subtotal gate.
+        var byValue = Math.ceil(rule.minSubtotal / line.price);
+        if (byValue > need) need = byValue;
+      }
+      // A rule with no gate already applies at qty 1, so it is not a tier.
+      if (need < 2) continue;
+      if (need > MAX_TIER) continue;
+      if (!bestQty || need < bestQty) bestQty = need;
+    }
+    return bestQty;
+  }
+
+  /**
+   * Is enough membership loaded to answer honestly about THIS product?
+   *
+   * Not "is every collection loaded". A rule whose collections have all
+   * loaded and which does not contain this product cannot change its answer,
+   * so waiting on unrelated collections would blank the whole grid whenever
+   * one collection was slow - the common case on a page where badges target
+   * several collections at once.
+   *
+   * A rule is undecidable only when it names a collection that has NOT
+   * loaded AND no loaded collection of that rule already matched. One of
+   * those could still bring the product into scope, so the honest answer is
+   * to wait rather than quote a figure that ignores it.
+   */
+  function membershipReady(line, data) {
+    var rules = data.rules || [];
+    var members = data.members || {};
+
+    for (var i = 0; i < rules.length; i++) {
+      var rule = rules[i];
+      if (rule.unsupported) continue;
+      // Already in scope by a decided path: nothing pending can change that.
+      if (inScope(rule, line, members)) continue;
+
+      var cols = rule.collections || [];
+      for (var k = 0; k < cols.length; k++) {
+        var m = members[cols[k]];
+        if (!m || !m.loaded) return false;
+      }
+    }
+    return true;
+  }
+
+  function tierFor(line, data, compareAt) {
+      if (!line || !(line.price > 0)) return null;
+      if (!data || !data.rules || !data.rules.length) return null;
+
+      var price = Number(line.price);
+      var one = [{ handle: line.handle, productId: line.productId, price: price, qty: 1 }];
+      if (!membershipReady(one[0], data)) return null;
+
+      // Saving on a single unit: any rule that already applies at qty 1, plus
+      // the compare-at gap. Kept separate so a card can show either.
+      var ruleOff1 = bestOff(one, data);
+      var cmp = Number(compareAt) || 0;
+      var gap1 = cmp > price ? cmp - price : 0;
+
+      var qty = nextTier(line, data);
+      if (!qty) {
+        // No reachable tier. Still useful if the product has a qty-1 rule or a
+        // compare-at gap, so report those and let the caller decide.
+        if (ruleOff1 <= 0 && gap1 <= 0) return null;
+        return {
+          tierQty: 0,
+          save1: ruleOff1 + gap1,
+          saveTier: 0,
+          tierTotal: 0,
+          tierEach: 0,
+          extraSave: 0,
+        };
+      }
+
+      var many = [{ handle: line.handle, productId: line.productId, price: price, qty: qty }];
+      var gross = price * qty;
+      var ruleOffN = bestOff(many, data);
+      var tierTotal = gross - ruleOffN;
+
+      // Sanity: a tier must cost something, must not cost more than list, and
+      // must beat buying the same units without it. Anything else means the
+      // model disagrees with reality - say nothing.
+      if (!(tierTotal > 0) || tierTotal > gross + 0.01) return null;
+      if (ruleOffN <= 0) return null;
+
+      var saveTier = ruleOffN + gap1 * qty;
+
+      return {
+        tierQty: qty,
+        /** Saving on one unit: qty-1 rule plus any compare-at gap. */
+        save1: ruleOff1 + gap1,
+        /** Total saving when buying the tier, including compare-at gaps. */
+        saveTier: saveTier,
+        /** What the tier costs in total, after the rule. */
+        tierTotal: tierTotal,
+        /** Effective per-unit price at the tier. */
+        tierEach: tierTotal / qty,
+        /** Extra saved by taking the tier rather than qty-1 pricing. */
+        extraSave: saveTier - (ruleOff1 + gap1) * qty,
+      };
+  }
+
+  /**
+   * Money, as a shopper reads it.
+   *
+   * Whole rupees, because ".00" on every badge is noise and these figures are
+   * always whole on this catalogue; a fractional tier price (998/3) is shown
+   * to two places rather than rounded, since rounding a per-unit price down
+   * would advertise a price the cart will not honour.
+   */
+  function fmtMoney(n) {
+    var v = Number(n) || 0;
+    var whole = Math.abs(v - Math.round(v)) < 0.005;
+    return _currencySymbol + (whole ? String(Math.round(v)) : v.toFixed(2));
+  }
+
   function resolveDynamicText(text, productData) {
     if (!productData) return text;
     var p = productData;
@@ -1368,8 +1614,46 @@ var __bhqEngaged = false;
       .replace(/\{\{discount\}\}/g, String(discount))
       .replace(/\{\{inventory\}\}/g, String(p.inventory_quantity || 0))
       .replace(/\{\{sold\}\}/g, String(p.sold || 0))
-      .replace(/\{\{price\}\}/g, "$" + (p.price || 0).toFixed(2))
-      .replace(/\{\{compare_price\}\}/g, "$" + (p.compare_at_price || 0).toFixed(2));
+      // Was a hardcoded "$", which printed "$499.00" on a rupee store.
+      .replace(/\{\{price\}\}/g, fmtMoney(p.price || 0))
+      .replace(/\{\{compare_price\}\}/g, fmtMoney(p.compare_at_price || 0));
+  }
+
+  /**
+   * Resolve a tiered badge's text, or return null to render nothing.
+   *
+   * Null is a real answer and must be honoured: it means the rules cannot
+   * price this product honestly (no reachable tier, membership still loading,
+   * or a figure outside a sane range). A badge that guesses in that situation
+   * is the failure this whole feature exists to avoid.
+   */
+  function resolveTieredText(text, productData, handle) {
+    if (!handle || !productData || !(productData.price > 0)) return null;
+    if (!_discountRules.length) return null;
+
+    var t = tierFor(
+      { handle: handle, productId: productData.id, price: productData.price },
+      { rules: _discountRules, members: _collectionMembers },
+      productData.compare_at_price || 0,
+    );
+    if (!t) return null;
+
+    // A badge whose text asks about a tier has nothing to say when there is
+    // no tier - "Buy 0 save 0" is worse than silence.
+    var wantsTier = /\{\{(tierQty|saveTier|tierTotal|tierEach|extraSave)\}\}/.test(text);
+    if (wantsTier && !t.tierQty) return null;
+
+    var out = text
+      .replace(/\{\{tierQty\}\}/g, String(t.tierQty))
+      .replace(/\{\{save1\}\}/g, fmtMoney(t.save1))
+      .replace(/\{\{saveTier\}\}/g, fmtMoney(t.saveTier))
+      .replace(/\{\{tierTotal\}\}/g, fmtMoney(t.tierTotal))
+      .replace(/\{\{tierEach\}\}/g, fmtMoney(t.tierEach))
+      .replace(/\{\{extraSave\}\}/g, fmtMoney(t.extraSave));
+
+    // Any remaining token is a product one; reuse the existing resolver so a
+    // tiered badge can also say {{price}} or {{discount}}.
+    return resolveDynamicText(out, productData);
   }
 
   // Per-product data cache keyed by handle — avoids duplicate fetches for same product
@@ -1539,6 +1823,7 @@ var __bhqEngaged = false;
         __bhqOrderPromise.then(function (d) {
           if (d && d.badgeMembers && typeof d.badgeMembers === "object" && !_badgeMembers) {
             _badgeMembers = d.badgeMembers;
+            if (d.discountRules) _discountRules = d.discountRules;
           }
           go();
         }, go);
@@ -2016,6 +2301,20 @@ var __bhqEngaged = false;
         collectionsToPrefetch[et.excludeCollection.value] = true;
       }
     }
+    // A tiered badge needs membership for every collection the DISCOUNT RULES
+    // name, not just the ones its own targeting names: whether "2 FOR 649"
+    // applies to this card depends on whether the card is in `tees`, which no
+    // badge may be targeting at all. Without this the pricer correctly
+    // refuses to quote (membershipReady is false) and no badge ever draws.
+    for (var di = 0; di < eligible.length; di++) {
+      if (eligible[di].badgeType !== "tiered") continue;
+      for (var dr = 0; dr < _discountRules.length; dr++) {
+        var dcols = _discountRules[dr].collections || [];
+        for (var dc = 0; dc < dcols.length; dc++) collectionsToPrefetch[dcols[dc]] = true;
+      }
+      break;
+    }
+
     Object.keys(collectionsToPrefetch).forEach(function (collectionHandle) {
       prefetchCollectionMembers(collectionHandle, function () {
         // Each collection's data lands independently; re-attach so any cards
@@ -2516,6 +2815,23 @@ var __bhqEngaged = false;
             applyCardPriceRule(img, { mode: "hide" }, productData);
           }
 
+          // A tiered badge is resolved HERE, before any element exists,
+          // because it is allowed to say nothing. tierFor() returns null when
+          // the rules cannot price this product honestly - no reachable tier,
+          // collection membership still loading, or a figure outside a sane
+          // range - and the only correct response is to draw no badge at all.
+          // Resolving it later, after the wrapper and corner stack had been
+          // created, would leave an empty badge on the card.
+          var tieredText = null;
+          if (badge.badgeType === "tiered") {
+            tieredText = resolveTieredText(
+              badge.text,
+              productData,
+              getHandleFromImg(img),
+            );
+            if (tieredText == null) return;
+          }
+
           // Info-area placement: render in the product info area, NOT on the image.
           // Respects merchant choice — does not fall through to image placement on failure.
           if (badge.placement === "info") {
@@ -2566,9 +2882,11 @@ var __bhqEngaged = false;
                 (badge.customCSS || "");
               setBadgeText(
                 infoEl,
-                badge.badgeType === "dynamic"
-                  ? resolveDynamicText(badge.text, productData)
-                  : badge.text,
+                tieredText != null
+                  ? tieredText
+                  : badge.badgeType === "dynamic"
+                    ? resolveDynamicText(badge.text, productData)
+                    : badge.text,
               );
             }
             infoEl.className = "badgehq-product-badge badgehq-pb-" + badge.id;
@@ -2659,9 +2977,11 @@ var __bhqEngaged = false;
 
           setBadgeText(
             el,
-            badge.badgeType === "dynamic"
-              ? resolveDynamicText(badge.text, productData)
-              : badge.text,
+            tieredText != null
+              ? tieredText
+              : badge.badgeType === "dynamic"
+                ? resolveDynamicText(badge.text, productData)
+                : badge.text,
           );
 
           cornerStack.appendChild(el);
@@ -6077,6 +6397,7 @@ var __bhqEngaged = false;
         // to download the collection to find out who is in it.
         if (d && d.badgeMembers && typeof d.badgeMembers === "object") {
           _badgeMembers = d.badgeMembers;
+            if (d.discountRules) _discountRules = d.discountRules;
         }
         _neighbours = {};
         for (var ni = 0; ni < list.length; ni++) {
