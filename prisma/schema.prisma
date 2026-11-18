@@ -42,20 +42,20 @@ model TrustBadge {
 }
 
 model ProductBadge {
-  id         String  @id @default(cuid())
-  shop       String
-  text       String  @default("Sale")
-  badgeType  String  @default("text")
-  shape      String  @default("rectangle")
-  badgeColor String  @default("#e74c3c")
-  textColor  String  @default("#ffffff")
-  position   String  @default("top-left")
-  placement  String  @default("image")
+  id               String  @id @default(cuid())
+  shop             String
+  text             String  @default("Sale")
+  badgeType        String  @default("text")
+  shape            String  @default("rectangle")
+  badgeColor       String  @default("#e74c3c")
+  textColor        String  @default("#ffffff")
+  position         String  @default("top-left")
+  placement        String  @default("image")
   // Where in the product info area the badge sits, when placement is
   // "info": above-title | below-title | above-price | below-price.
   // Defaults to above-price, which is where info badges rendered before
   // this was configurable.
-  infoPosition String @default("above-price")
+  infoPosition     String  @default("above-price")
   // Hide the struck-through compare-at price on cards this badge applies
   // to. A badge already carries targeting, conditions, pages and a
   // schedule, so expressing this as a badge property gives the price rule
@@ -68,9 +68,9 @@ model ProductBadge {
   //                price still shows a saving.
   //   roundTo:     round the shown figure to the nearest N, so it reads as
   //                a price rather than an arithmetic result.
-  priceRule String @default("{\"mode\":\"hide\",\"markupPct\":0,\"roundTo\":0}")
-  targeting  String  @default("{\"type\":\"all\"}")
-  isActive   Boolean @default(false)
+  priceRule        String  @default("{\"mode\":\"hide\",\"markupPct\":0,\"roundTo\":0}")
+  targeting        String  @default("{\"type\":\"all\"}")
+  isActive         Boolean @default(false)
 
   // ShineTrust-level features
   condition      String @default("{\"type\":\"none\"}")
@@ -87,14 +87,14 @@ model ProductBadge {
   borderWidth    Int    @default(0)
   // Badge padding, in px. Defaults match the 4px 8px that was hardcoded,
   // so existing badges keep the size they have.
-  padTop    Int @default(4)
-  padRight  Int @default(8)
-  padBottom Int @default(4)
-  padLeft   Int @default(8)
+  padTop         Int    @default(4)
+  padRight       Int    @default(8)
+  padBottom      Int    @default(4)
+  padLeft        Int    @default(8)
   // Empty means inherit: the global setting, or failing that the theme.
-  fontFamily String @default("")
+  fontFamily     String @default("")
   // 700 was hardcoded on every badge.
-  fontWeight Int    @default(700)
+  fontWeight     Int    @default(700)
   customCSS      String @default("")
 
   createdAt DateTime @default(now())
@@ -1080,7 +1080,7 @@ model MerchandiseSettings {
   /// allow-list: a reorder is a write against a live storefront, and the store
   /// has 48 collections of which 18 hold 250+ products. Nothing is touched
   /// until it is named here.
-  collectionIds String @default("[]")
+  collectionIds     String @default("[]")
   /// The same collections as handles, which is how the storefront names them.
   /// Written by each engine run: /api/order is public and unauthenticated, so
   /// it cannot ask Shopify to resolve a GID, and without this the widget had
@@ -1097,7 +1097,7 @@ model MerchandiseSettings {
   /// taking 95 seconds, with everything but the handles discarded. The run
   /// already computes this through the Admin API; storing it turns those
   /// fetches into about 9KB on a response the storefront already asks for.
-  badgeMembers String @default("{}")
+  badgeMembers      String @default("{}")
 
   /// Signal weights. Sales dominates by default: a product with 2,000 units
   /// sold and one with 3 must not rank together because both happen to be in
@@ -1179,7 +1179,7 @@ model ProductScore {
   /// collection page identifies a card by the handle in its own link - there
   /// is no product id in the markup on most themes - so an order expressed in
   /// GIDs cannot be applied client-side.
-  handle    String @default("")
+  handle String @default("")
 
   /// The handles most similar to this one, best first, as JSON.
   /// Precomputed because similarity is pairwise: a thousand products is half
@@ -1252,4 +1252,65 @@ model CollectionColorOrder {
   builtAt   DateTime @default(now())
 
   @@unique([shop, handle])
+}
+
+/// Mirror of the shop's automatic discount rules, read from Shopify.
+///
+/// The rules are NEVER hardcoded. An earlier approach of baking them into the
+/// storefront JS went stale the day a rule changed, and cards then quoted a
+/// saving the checkout would not honour - worse than showing nothing. This
+/// table is rebuilt from Shopify on a timer so the badge maths and the
+/// checkout cannot drift apart for longer than one sync interval.
+///
+/// Field names and units deliberately mirror the contract already proven on
+/// the cart page (jm-cart-pricer.js), so the SAME bestOff() logic can price a
+/// collection card and a cart line and get the same answer. Diverging here
+/// would mean two models of one set of rules, which is how a card and the
+/// checkout start disagreeing.
+model DiscountRule {
+  id   String @id @default(cuid())
+  shop String
+
+  /// Shopify's node id, so a re-sync updates in place instead of churning rows.
+  nodeId String
+  title  String @default("")
+
+  /// ACTIVE | SCHEDULED | EXPIRED, straight from Shopify. Only ACTIVE rules
+  /// are served to the storefront, but the others are kept so the admin can
+  /// see why a badge is not showing.
+  status String @default("")
+
+  /// "amount" | "percent" - the cart pricer's own vocabulary, not Shopify's.
+  kind    String  @default("amount")
+  /// Rupees, for kind "amount". Float to match the pricer, which compares it
+  /// against prices derived from Shopify's own decimal strings.
+  amount  Float   @default(0)
+  /// 0..1 (NOT 0..100), for kind "percent". Shopify returns a fraction here
+  /// and the pricer multiplies by it directly.
+  percent Float   @default(0)
+  /// Shopify's appliesOnEachItem: when true the discount is PER qualifying
+  /// item rather than once per order, which changes the tier maths entirely.
+  perItem Boolean @default(false)
+
+  /// Gates: the rule fires only once met. Zero means no gate.
+  minQty      Int   @default(0)
+  minSubtotal Float @default(0)
+
+  /// Scope, exactly as the pricer's inScope() expects it. allItems wins; else
+  /// a product id list or a collection handle list, as JSON arrays.
+  allItems    Boolean @default(false)
+  products    String  @default("[]")
+  collections String  @default("[]")
+
+  /// True for discount classes the maths cannot model honestly - Buy-X-get-Y
+  /// and app-function discounts. Stored rather than dropped so a badge can
+  /// stay SILENT on products these touch, instead of quoting a figure that
+  /// ignores them.
+  unsupported     Boolean @default(false)
+  unsupportedKind String  @default("")
+
+  syncedAt DateTime @default(now())
+
+  @@unique([shop, nodeId])
+  @@index([shop, status])
 }
