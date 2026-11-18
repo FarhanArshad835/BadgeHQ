@@ -31,6 +31,47 @@ const PRESET_BADGES = [
   "Trending", "Limited", "Sold Out", "Free Shipping", "Exclusive",
 ];
 
+// Tokens resolved from the shop's OWN automatic discount rules, mirrored from
+// Shopify. Deliberately offering both framings: absolute saving reads stronger
+// on a cheap item, per-unit price on a multi-buy, and which wins differs by
+// collection - so the merchant picks rather than us.
+/**
+ * Fill a badge template with sample values for the admin preview.
+ *
+ * The tiered sample is one real offer from this store ("2 FOR 649" on a Rs499
+ * tee) rather than round numbers, so the merchant sees the shape the figures
+ * actually take - including the per-unit price landing on paise, which round
+ * sample data would hide.
+ */
+function previewText(badgeType: string, text: string, currencySymbol: string) {
+  if (badgeType === "tiered") {
+    return text
+      .replace(/\{\{tierQty\}\}/g, "2")
+      .replace(/\{\{tierTotal\}\}/g, `${currencySymbol}649`)
+      .replace(/\{\{tierEach\}\}/g, `${currencySymbol}324.50`)
+      .replace(/\{\{save1\}\}/g, `${currencySymbol}0`)
+      .replace(/\{\{saveTier\}\}/g, `${currencySymbol}349`)
+      .replace(/\{\{extraSave\}\}/g, `${currencySymbol}349`)
+      .replace(/\{\{discount\}\}/g, "25")
+      .replace(/\{\{price\}\}/g, `${currencySymbol}499`)
+      .replace(/\{\{compare_price\}\}/g, `${currencySymbol}799`);
+  }
+  if (badgeType !== "dynamic") return text;
+  return text
+    .replace(/\{\{discount\}\}/g, "25")
+    .replace(/\{\{inventory\}\}/g, "3")
+    .replace(/\{\{sold\}\}/g, "142")
+    .replace(/\{\{price\}\}/g, `${currencySymbol}29.99`)
+    .replace(/\{\{compare_price\}\}/g, `${currencySymbol}39.99`);
+}
+
+const TIERED_TEXT_PRESETS = [
+  { label: "{{tierQty}} for {{tierTotal}}", description: "e.g. 2 for Rs649" },
+  { label: "Buy {{tierQty}} save {{saveTier}}", description: "e.g. Buy 2 save Rs349" },
+  { label: "{{tierEach}} each on {{tierQty}}", description: "e.g. Rs324.50 each on 2" },
+  { label: "Save {{save1}} now, {{saveTier}} on {{tierQty}}", description: "Both tiers" },
+];
+
 const DYNAMIC_TEXT_PRESETS = [
   { label: "{{discount}}% OFF", description: "Shows discount percentage" },
   { label: "Save {{discount}}%", description: "Shows savings" },
@@ -315,7 +356,7 @@ function EditProductBadgeForm() {
       }} />
     ) : (
       <div style={{ ...previewStyle, position: "static", display: "inline-flex", marginTop: 6 }}>
-        {<BadgeLabel text={badgeType === "dynamic" ? text.replace(/\{\{discount\}\}/g, "25").replace(/\{\{inventory\}\}/g, "3").replace(/\{\{sold\}\}/g, "142").replace(/\{\{price\}\}/g, `${currencySymbol}29.99`).replace(/\{\{compare_price\}\}/g, `${currencySymbol}39.99`) : text} />}
+        {<BadgeLabel text={previewText(badgeType, text, currencySymbol)} />}
       </div>
     );
 
@@ -349,6 +390,7 @@ function EditProductBadgeForm() {
                     { label: "Text Badge", value: "text" },
                     { label: "Image Badge", value: "image" },
                     { label: "Dynamic Badge (auto-generated)", value: "dynamic" },
+                    { label: "Tiered Saving (from your discounts)", value: "tiered" },
                     { label: "Price Rule (no visible badge)", value: "price" },
                   ]}
                   value={badgeType}
@@ -369,6 +411,25 @@ function EditProductBadgeForm() {
                 {badgeType === "image" && (
                   <TextField label="Badge Image URL" value={imageUrl} onChange={setImageUrl} autoComplete="off"
                     helpText="URL to a badge image (PNG, SVG, or GIF). Recommended size: 200x80px." placeholder="https://example.com/badge.png" />
+                )}
+                {badgeType === "tiered" && (
+                  <>
+                    <TextField
+                      label="Tiered Saving Text"
+                      value={text}
+                      onChange={setText}
+                      autoComplete="off"
+                      helpText="Use {{tierQty}}, {{tierTotal}}, {{tierEach}}, {{save1}}, {{saveTier}}, {{extraSave}}. Figures come from your own Shopify automatic discounts, so they match what checkout charges."
+                    />
+                    <Text as="p" variant="bodyMd" tone="subdued">Template presets:</Text>
+                    <InlineGrid columns={{ xs: 1, sm: 2 }} gap="200">
+                      {TIERED_TEXT_PRESETS.map((preset) => (
+                        <Button key={preset.label} size="slim" pressed={text === preset.label} onClick={() => setText(preset.label)}>
+                          {preset.description}
+                        </Button>
+                      ))}
+                    </InlineGrid>
+                  </>
                 )}
                 {badgeType === "dynamic" && (
                   <>
@@ -788,7 +849,7 @@ function EditProductBadgeForm() {
                       }} />
                     ) : (
                       <div style={previewStyle}>
-                        {<BadgeLabel text={badgeType === "dynamic" ? text.replace(/\{\{discount\}\}/g, "25").replace(/\{\{inventory\}\}/g, "3").replace(/\{\{sold\}\}/g, "142").replace(/\{\{price\}\}/g, `${currencySymbol}29.99`).replace(/\{\{compare_price\}\}/g, `${currencySymbol}39.99`) : text} />}
+                        {<BadgeLabel text={previewText(badgeType, text, currencySymbol)} />}
                       </div>
                     )
                   )}
