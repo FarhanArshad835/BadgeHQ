@@ -1654,6 +1654,28 @@ var __bhqEngaged = false;
     var wantsTier = /\{\{(tierQty|saveTier|tierTotal|tierEach|extraSave)\}\}/.test(text);
     if (wantsTier && !t.tierQty) return null;
 
+    // Zero is not a saving. Two tees are priced at their own compare-at and
+    // sit in no qty-1 rule, so "Save Rs0 on 1" would have gone on the card -
+    // a worse claim than saying nothing, because it reads as a broken badge
+    // rather than a product that simply has no single-unit offer.
+    //
+    // Drop the whole clause the figure sits in rather than the figure alone,
+    // or the card reads "Save  on 1 | Any 2 for Rs1249". A clause is a
+    // separator-delimited run, so the tier half survives on its own. If the
+    // text is ONLY about the qty-1 saving, there is nothing left to say and
+    // the badge does not draw.
+    if (!(t.save1 > 0) && /\{\{save1\}\}/.test(text)) {
+      var kept = text
+        .split(/\s*(?:\||·|•|–|—|,|;)\s*/)
+        .filter(function (part) {
+          return part && !/\{\{save1\}\}/.test(part);
+        });
+      if (!kept.length) return null;
+      text = kept.join(" | ");
+      // Nothing but literal words left (no tokens): not worth a badge.
+      if (!/\{\{[a-zA-Z0-9_]+\}\}/.test(text)) return null;
+    }
+
     var out = text
       .replace(/\{\{tierQty\}\}/g, String(t.tierQty))
       .replace(/\{\{save1\}\}/g, fmtMoney(t.save1))
