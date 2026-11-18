@@ -1545,20 +1545,24 @@ var __bhqEngaged = false;
       var one = [{ handle: line.handle, productId: line.productId, price: price, qty: 1 }];
       if (!membershipReady(one[0], data)) return null;
 
-      // Saving on a single unit: any rule that already applies at qty 1, plus
-      // the compare-at gap. Kept separate so a card can show either.
+      // Saving on a single unit: ONLY what a discount rule takes off.
+      //
+      // The compare-at gap is deliberately excluded. It was included once and
+      // the badge read "Save Rs600 on 1" on a tee whose card already showed
+      // Rs499 beside a struck-through price - restating the strike-through,
+      // claiming a saving no discount produces, and quoting a compare-at the
+      // card itself did not display. A badge exists to say what the card does
+      // not, and every figure in it has to be money the checkout removes.
       var ruleOff1 = bestOff(one, data);
-      var cmp = Number(compareAt) || 0;
-      var gap1 = cmp > price ? cmp - price : 0;
 
       var qty = nextTier(line, data);
       if (!qty) {
-        // No reachable tier. Still useful if the product has a qty-1 rule or a
-        // compare-at gap, so report those and let the caller decide.
-        if (ruleOff1 <= 0 && gap1 <= 0) return null;
+        // No reachable tier. Worth reporting only if a rule applies at qty 1;
+        // with no tier and no rule there is no offer to describe.
+        if (ruleOff1 <= 0) return null;
         return {
           tierQty: 0,
-          save1: ruleOff1 + gap1,
+          save1: ruleOff1,
           saveTier: 0,
           tierTotal: 0,
           tierEach: 0,
@@ -1577,20 +1581,22 @@ var __bhqEngaged = false;
       if (!(tierTotal > 0) || tierTotal > gross + 0.01) return null;
       if (ruleOffN <= 0) return null;
 
-      var saveTier = ruleOffN + gap1 * qty;
+      // Same rule as save1: the tier saving is the discount, not the
+      // discount plus a strike-through the shopper can already see.
+      var saveTier = ruleOffN;
 
       return {
         tierQty: qty,
-        /** Saving on one unit: qty-1 rule plus any compare-at gap. */
-        save1: ruleOff1 + gap1,
-        /** Total saving when buying the tier, including compare-at gaps. */
+        /** Saving on one unit: what a qty-1 discount rule takes off. */
+        save1: ruleOff1,
+        /** Total saving when buying the tier, from the rules alone. */
         saveTier: saveTier,
         /** What the tier costs in total, after the rule. */
         tierTotal: tierTotal,
         /** Effective per-unit price at the tier. */
         tierEach: tierTotal / qty,
         /** Extra saved by taking the tier rather than qty-1 pricing. */
-        extraSave: saveTier - (ruleOff1 + gap1) * qty,
+        extraSave: saveTier - ruleOff1 * qty,
       };
   }
 
