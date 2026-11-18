@@ -391,7 +391,6 @@
     try {
       if (d && d.badgeMembers && typeof d.badgeMembers === "object" && !_badgeMembers) {
         _badgeMembers = d.badgeMembers;
-            if (d.discountRules) _discountRules = d.discountRules;
       }
     } catch (e) {
       /* membership stays unknown, which only means the old fetch runs */
@@ -744,6 +743,12 @@ var __bhqEngaged = false;
       w.trustBadges.forEach(function (badge) {
         renderTrustBadge(badge, page, gs);
       });
+    // Rules arrive with the widget config, NOT with the order ranking - they
+    // were briefly read off the ranking payload, which has no such field, so
+    // _discountRules stayed empty, membershipReady() was never satisfied and
+    // every tiered badge correctly declined to quote. Set before the badge
+    // pass so the prefetch below can see which collections the rules name.
+    if (w.discountRules) _discountRules = w.discountRules;
     if (w.productBadges) renderProductBadges(w.productBadges, page);
     if (w.bundleOffers) renderBundleOffers(w.bundleOffers, page, currencySymbol);
     // Started even with no shipping bars, because bundle offers need the same
@@ -1600,7 +1605,13 @@ var __bhqEngaged = false;
   function fmtMoney(n) {
     var v = Number(n) || 0;
     var whole = Math.abs(v - Math.round(v)) < 0.005;
-    return _currencySymbol + (whole ? String(Math.round(v)) : v.toFixed(2));
+    // Belt and braces on the symbol: it comes from the shop's money_format,
+    // which is a Liquid template, and an unrendered placeholder reaching a
+    // shopper would read "Rs{{ amount_no_decimals }}1049". The server strips
+    // these now, but a badge must not depend on that being true of every
+    // shop's format string.
+    var sym = String(_currencySymbol || "").replace(/\{\{[^}]*\}\}/g, "").trim();
+    return (sym || "₹") + (whole ? String(Math.round(v)) : v.toFixed(2));
   }
 
   function resolveDynamicText(text, productData) {
@@ -1823,7 +1834,6 @@ var __bhqEngaged = false;
         __bhqOrderPromise.then(function (d) {
           if (d && d.badgeMembers && typeof d.badgeMembers === "object" && !_badgeMembers) {
             _badgeMembers = d.badgeMembers;
-            if (d.discountRules) _discountRules = d.discountRules;
           }
           go();
         }, go);
@@ -6397,7 +6407,6 @@ var __bhqEngaged = false;
         // to download the collection to find out who is in it.
         if (d && d.badgeMembers && typeof d.badgeMembers === "object") {
           _badgeMembers = d.badgeMembers;
-            if (d.discountRules) _discountRules = d.discountRules;
         }
         _neighbours = {};
         for (var ni = 0; ni < list.length; ni++) {

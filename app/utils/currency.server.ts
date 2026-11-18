@@ -18,7 +18,14 @@ export async function getStoreCurrency(
     };
     const currencyCode = data.shop?.currency ?? "USD";
     const moneyFormat = data.shop?.money_format ?? "${{amount}}";
-    const currencySymbol = moneyFormat.replace("{{amount}}", "").trim();
+    // Shopify has several amount placeholders, not just {{amount}}:
+    // amount_no_decimals, amount_with_comma_separator,
+    // amount_no_decimals_with_space_separator and more, and the braces may
+    // carry inner spaces ("{{ amount_no_decimals }}"). Matching only the
+    // bare {{amount}} left this store's symbol as the literal
+    // "₹{{ amount_no_decimals }}", which then prefixed every money figure a
+    // badge printed. Strip ANY handlebars expression instead.
+    const currencySymbol = moneyFormat.replace(/\{\{[^}]*\}\}/g, "").trim();
     return { currencyCode, currencySymbol };
   } catch {
     return { currencyCode: "USD", currencySymbol: "$" };
